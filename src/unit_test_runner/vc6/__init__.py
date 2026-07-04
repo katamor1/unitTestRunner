@@ -77,8 +77,9 @@ def select_project_context(
             continue
         if source_key not in project["sources"]:
             continue
-        if configuration in project["configurations"]:
-            return project, project["configurations"][configuration], memberships
+        selected_configuration = _select_legacy_configuration(project["configurations"], configuration)
+        if selected_configuration is not None:
+            return project, selected_configuration, memberships
     raise ValueError(f"No project/configuration found for {source_key} ({project_name or 'any project'} / {configuration})")
 
 
@@ -122,6 +123,18 @@ def _configuration_to_legacy(configuration: DspConfiguration, workspace_root: Pa
         "unresolved_macros": list(settings.unresolved_macros),
         "diagnostics": diagnostics,
     }
+
+
+def _select_legacy_configuration(configurations: dict[str, Any], requested: str) -> dict[str, Any] | None:
+    if requested in configurations:
+        return configurations[requested]
+    requested_lower = requested.lower()
+    for key, value in configurations.items():
+        full_name = value.get("full_name") if isinstance(value, dict) else None
+        candidates = [key, full_name]
+        if any(isinstance(candidate, str) and candidate.lower() == requested_lower for candidate in candidates):
+            return value
+    return None
 
 
 def _normalize_source_arg(workspace_root: Path, source: str | Path) -> str:

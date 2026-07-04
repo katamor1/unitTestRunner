@@ -168,7 +168,7 @@ def handle_map_source(args: argparse.Namespace) -> CLIResult:
         workspace = _workspace_from_args(args.workspace, dsw)
         matches = map_source_to_projects(workspace, dsw, args.source, args.project)
         if args.configuration:
-            matches = [match for match in matches if match["configuration"] == args.configuration]
+            matches = [match for match in matches if _legacy_configuration_matches(match, args.configuration)]
         payload = {"matches": matches}
         if args.out:
             _write_json(Path(args.out), payload, args.command)
@@ -732,6 +732,15 @@ def _render_source_membership_summary(value: dict[str, Any], output_path: Path |
     if output_path is not None:
         lines.append(f"Output: {output_path}")
     return "\n".join(lines) + "\n"
+
+
+def _legacy_configuration_matches(match: dict[str, Any], requested: str) -> bool:
+    requested_lower = requested.lower()
+    candidates = [
+        match.get("configuration"),
+        match.get("configuration_full_name"),
+    ]
+    return any(isinstance(candidate, str) and (candidate == requested or candidate.lower() == requested_lower) for candidate in candidates)
 
 
 def _with_dsp_details(value: dict[str, Any]) -> dict[str, Any]:

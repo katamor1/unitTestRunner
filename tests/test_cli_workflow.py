@@ -26,6 +26,47 @@ def run_cli(*args):
 
 
 class CliWorkflowTests(unittest.TestCase):
+    def test_cli_accepts_vc6_full_configuration_name(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mapped = run_cli(
+                "map-source",
+                "--workspace",
+                str(FIXTURE_ROOT),
+                "--dsw",
+                str(FIXTURE_ROOT / "Product.dsw"),
+                "--source",
+                "src/control.c",
+                "--project",
+                "Control",
+                "--configuration",
+                "Control - Win32 Debug",
+            )
+            matches = json.loads(mapped.stdout)["matches"]
+            self.assertEqual(1, len(matches))
+            self.assertEqual("Win32 Debug", matches[0]["configuration"])
+            self.assertEqual("Control - Win32 Debug", matches[0]["configuration_full_name"])
+
+            out_dir = Path(temp_dir) / "Control_Update"
+            run_cli(
+                "analyze-function",
+                "--workspace",
+                str(FIXTURE_ROOT),
+                "--dsw",
+                str(FIXTURE_ROOT / "Product.dsw"),
+                "--source",
+                "src/control.c",
+                "--function",
+                "Control_Update",
+                "--configuration",
+                "Control - Win32 Debug",
+                "--project",
+                "Control",
+                "--out",
+                str(out_dir),
+            )
+            dossier = json.loads((out_dir / "reports" / "function_dossier.json").read_text(encoding="utf-8"))
+            self.assertEqual("Control - Win32 Debug", dossier["target"]["configuration"])
+
     def test_cli_smoke_generates_function_dossier_without_modifying_source(self):
         source = FIXTURE_ROOT / "src" / "control.c"
         before = source.read_text(encoding="utf-8")
