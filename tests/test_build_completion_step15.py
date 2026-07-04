@@ -161,8 +161,8 @@ generated\\tests\\test_Control_Update.c(7) : error C2143: syntax error : missing
             )
             self.assertEqual(0, full.returncode, full.stderr)
             full_payload = json.loads(full.stdout)
-            self.assertEqual("completion_plan_generated", full_payload["status"])
-            self.assertIn("Step 16", full_payload["message"])
+            self.assertEqual("evidence_prepared", full_payload["status"])
+            self.assertIn("Step 17", full_payload["message"])
             self.assertIn("build_completion", full_payload["data"])
             self.assertTrue((out_dir / "reports" / "build_completion_plan.json").exists())
 

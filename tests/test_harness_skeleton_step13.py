@@ -118,8 +118,8 @@ class HarnessSkeletonStep13Tests(unittest.TestCase):
 
             self.assertEqual(0, analyze.returncode, analyze.stderr)
             analyze_payload = json.loads(analyze.stdout)
-            self.assertEqual("completion_plan_generated", analyze_payload["status"])
-            self.assertIn("Step 16", analyze_payload["message"])
+            self.assertEqual("evidence_prepared", analyze_payload["status"])
+            self.assertIn("Step 17", analyze_payload["message"])
             self.assertIn("harness_skeleton", analyze_payload["data"])
             self.assertTrue((out_dir / "reports" / "harness_skeleton_report.json").exists())
 

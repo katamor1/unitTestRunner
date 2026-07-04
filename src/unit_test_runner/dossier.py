@@ -23,6 +23,7 @@ from .c_analyzer.signature_extractor import extract_signature
 from .c_analyzer.signature_writer import write_function_signature
 from .c_analyzer.source_digest import build_source_digest, write_source_digest
 from .harness import generate_harness_skeleton
+from .execution import prepare_test_execution_evidence
 from .path_utils import normalize_relative
 from .test_design import generate_test_design
 from .test_design.test_case_draft_generator import generate_test_case_draft, generate_test_case_draft_from_payloads
@@ -243,6 +244,7 @@ def analyze_function_workflow(
         dry_run=True,
     )
     build_completion_plan, build_completion_iteration = analyze_build_errors_from_workspace(out_dir, source_root=workspace_root)
+    test_execution, evidence_manifest = prepare_test_execution_evidence(out_dir, run_tests=False, dry_run=True)
     dossier["source_digest"] = {
         "json": str(digest_paths["json"]),
         "markdown": str(digest_paths["markdown"]),
@@ -310,6 +312,19 @@ def analyze_function_workflow(
         "status": build_completion_plan.status,
         "iteration_status": build_completion_iteration.status,
     }
+    dossier["test_execution"] = {
+        "json": str(out_dir / "reports" / "test_execution_report.json"),
+        "markdown": str(out_dir / "reports" / "test_execution_report.md"),
+        "result_json": str(out_dir / "reports" / "test_result.json"),
+        "result_csv": str(out_dir / "reports" / "test_result.csv"),
+        "status": test_execution.status,
+        "executed": test_execution.executed,
+    }
+    dossier["evidence"] = {
+        "manifest_json": str(out_dir / "reports" / "evidence_manifest.json"),
+        "package_markdown": str(out_dir / "reports" / "evidence_package.md"),
+        "status": evidence_manifest.summary.test_execution_status,
+    }
     _write_json(out_dir / "reports" / "function_dossier.json", dossier)
     _write_markdown_reports(out_dir, dossier, copied_files)
     write_function_signature(out_dir, signature)
@@ -321,6 +336,7 @@ def analyze_function_workflow(
     generate_harness_skeleton(signature, global_access, call_report, test_case_draft, out_dir, overwrite=True)
     generate_build_workspace(dossier["build_context"], digest.to_dict(), harness_skeleton.to_dict(), out_dir, run_probe=False, dry_run=True)
     analyze_build_errors_from_workspace(out_dir, source_root=workspace_root)
+    prepare_test_execution_evidence(out_dir, run_tests=False, dry_run=True)
     _write_json(out_dir / "generated" / "prompt_pack.json", {"function_dossier": dossier})
     return dossier
 

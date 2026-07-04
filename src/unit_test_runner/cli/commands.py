@@ -17,6 +17,7 @@ from unit_test_runner.build_completion.completion_models import BuildCompletionI
 from unit_test_runner.build_completion.completion_report_writer import write_completion_reports
 from unit_test_runner.c_analyzer import list_functions
 from unit_test_runner.dsw_parser import discover_dsw_workspaces, parse_dsw as parse_dsw_step03
+from unit_test_runner.execution import prepare_test_execution_evidence
 from unit_test_runner.dossier import (
     analyze_function_workflow,
     generate_build_workspace_from_reports,
@@ -47,6 +48,8 @@ def dispatch(args: argparse.Namespace) -> CLIResult:
         "build-probe": handle_build_probe,
         "analyze-build-errors": handle_analyze_build_errors,
         "complete-build": handle_complete_build,
+        "run-tests": handle_run_tests,
+        "prepare-evidence": handle_prepare_evidence,
         "generate-test-draft": handle_generate_test_draft,
     }
     return handlers[args.command](args)
@@ -232,12 +235,14 @@ def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
         "build_workspace": dossier.get("build_workspace"),
         "build_probe": dossier.get("build_probe"),
         "build_completion": dossier.get("build_completion"),
+        "test_execution": dossier.get("test_execution"),
+        "evidence": dossier.get("evidence"),
     }
     return CLIResult(
-        status="completion_plan_generated",
+        status="evidence_prepared",
         exit_code=EXIT_OK,
         command=args.command,
-        message="Function analysis generated through Step 15. Step 16 Test Execution / Evidence Preparation is required for execution evidence.",
+        message="Function analysis generated through Step 16. Step 17 Function Dossier Finalizer / Review Workflow is required for final review packaging.",
         data=payload,
         legacy_payload=payload,
     )
@@ -484,6 +489,60 @@ def handle_generate_test_draft(args: argparse.Namespace) -> CLIResult:
         data=payload,
         legacy_payload=payload,
     )
+
+
+def handle_run_tests(args: argparse.Namespace) -> CLIResult:
+    workspace = _existing_dir(args.workspace, "workspace", args.command)
+    report, manifest = prepare_test_execution_evidence(
+        workspace,
+        executable=Path(args.executable) if args.executable else None,
+        run_tests=args.run,
+        dry_run=args.dry_run or not args.run,
+        timeout_seconds=args.timeout,
+        allow_placeholder_tests=args.allow_placeholder_tests or True,
+        treat_placeholder_as_inconclusive=args.treat_placeholder_as_inconclusive,
+    )
+    payload = _evidence_payload(workspace, report, manifest)
+    return CLIResult(
+        status="test_executed" if report.executed else "evidence_prepared",
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Test execution evidence prepared.",
+        data=payload,
+        legacy_payload=payload,
+    )
+
+
+def handle_prepare_evidence(args: argparse.Namespace) -> CLIResult:
+    workspace = _existing_dir(args.workspace, "workspace", args.command)
+    report, manifest = prepare_test_execution_evidence(workspace, run_tests=False, dry_run=True)
+    payload = _evidence_payload(workspace, report, manifest)
+    return CLIResult(
+        status="evidence_prepared",
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Evidence package prepared.",
+        data=payload,
+        legacy_payload=payload,
+    )
+
+
+def _evidence_payload(workspace: Path, report, manifest) -> dict[str, Any]:
+    return {
+        "test_execution": {
+            "json": str(workspace / "reports" / "test_execution_report.json"),
+            "markdown": str(workspace / "reports" / "test_execution_report.md"),
+            "result_json": str(workspace / "reports" / "test_result.json"),
+            "result_csv": str(workspace / "reports" / "test_result.csv"),
+            "status": report.status,
+            "executed": report.executed,
+        },
+        "evidence": {
+            "manifest_json": str(workspace / "reports" / "evidence_manifest.json"),
+            "package_markdown": str(workspace / "reports" / "evidence_package.md"),
+            "status": manifest.summary.test_execution_status,
+        },
+    }
 
 
 def _is_writable_directory(path: Path) -> bool:

@@ -62,6 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--emit-csv", action="store_true")
     analyze.add_argument("--analyze-build-errors", action="store_true")
     analyze.add_argument("--apply-safe-completions", action="store_true")
+    analyze.add_argument("--run-tests", action="store_true")
 
     harness = subcommands.add_parser("generate-harness-skeleton", help="Generate C90 stub and harness skeleton files from analysis reports.")
     harness.add_argument("--function-signature", required=True)
@@ -102,6 +103,19 @@ def build_parser() -> argparse.ArgumentParser:
     complete.add_argument("--max-iterations", type=int, default=3)
     complete.add_argument("--generate-unknown-symbol-stubs", action="store_true")
     complete.add_argument("--overwrite-existing-generated-stubs", action="store_true")
+
+    run_tests = subcommands.add_parser("run-tests", help="Run generated tests or prepare dry-run execution evidence.")
+    run_tests.add_argument("--workspace", required=True)
+    run_tests.add_argument("--executable")
+    run_tests.add_argument("--run", action="store_true")
+    run_tests.add_argument("--dry-run", action="store_true")
+    run_tests.add_argument("--timeout", type=int, default=60)
+    run_tests.add_argument("--allow-placeholder-tests", action="store_true")
+    run_tests.add_argument("--treat-placeholder-as-inconclusive", action="store_true", default=True)
+
+    evidence = subcommands.add_parser("prepare-evidence", help="Regenerate evidence manifest and package from a generated workspace.")
+    evidence.add_argument("--workspace", required=True)
+    evidence.add_argument("--out")
 
     draft = subcommands.add_parser("generate-test-draft", help="Generate a test draft from a dossier or analysis reports.")
     draft.add_argument("--dossier")

@@ -37,6 +37,8 @@ class CliEntryPointContractTests(unittest.TestCase):
             ("build-probe", "--help"),
             ("analyze-build-errors", "--help"),
             ("complete-build", "--help"),
+            ("run-tests", "--help"),
+            ("prepare-evidence", "--help"),
             ("generate-test-draft", "--help"),
         ]
 
