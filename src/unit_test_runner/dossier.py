@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from .c_analyzer import analyze_function
+from .c_analyzer.function_location_writer import write_function_location
+from .c_analyzer.function_locator import locate_function
 from .c_analyzer.source_digest import build_source_digest, write_source_digest
 from .path_utils import normalize_relative
 from .test_design import generate_test_design
@@ -201,10 +203,18 @@ def analyze_function_workflow(
     }
     digest = build_source_digest(source_path, dossier["build_context"])
     digest_paths = write_source_digest(out_dir, digest)
+    location = locate_function(digest, function_name)
+    location_paths = write_function_location(out_dir, digest, location)
     dossier["source_digest"] = {
         "json": str(digest_paths["json"]),
         "markdown": str(digest_paths["markdown"]),
         "masked_source": str(digest_paths["masked_source"]),
+    }
+    dossier["function_location"] = {
+        "json": str(location_paths["json"]),
+        "markdown": str(location_paths["markdown"]),
+        "function_slice": str(location_paths["function_slice"]),
+        "status": location.status,
     }
     _write_json(out_dir / "reports" / "function_dossier.json", dossier)
     _write_markdown_reports(out_dir, dossier, copied_files)
