@@ -78,3 +78,6 @@ def generate_test_design(function: dict[str, Any]) -> dict[str, Any]:
         "equivalence_class_candidates": equivalence_candidates,
         "stub_candidates": stub_candidates,
     }
+
+
+__all__ = ["generate_test_design"]

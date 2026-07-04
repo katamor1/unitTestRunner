@@ -13,7 +13,7 @@ from unit_test_runner import __version__
 from unit_test_runner.build_probe import build_probe
 from unit_test_runner.c_analyzer import list_functions
 from unit_test_runner.dsw_parser import discover_dsw_workspaces, parse_dsw as parse_dsw_step03
-from unit_test_runner.dossier import analyze_function_workflow, generate_test_draft_from_dossier
+from unit_test_runner.dossier import analyze_function_workflow, generate_test_draft_from_dossier, generate_test_draft_from_reports
 from unit_test_runner.reports.dsw_markdown import render_dsw_discovery_markdown
 from unit_test_runner.reports.source_membership_markdown import render_source_membership_markdown
 from unit_test_runner.vc6 import discover_workspace, map_source_to_projects
@@ -21,7 +21,7 @@ from unit_test_runner.vc6.dsp_parser import parse_dsp as parse_dsp_step04
 from unit_test_runner.vc6.source_membership import map_source_membership
 
 from .errors import CLIError
-from .exit_codes import EXIT_NOT_FOUND, EXIT_OK, EXIT_OUTPUT_ERROR
+from .exit_codes import EXIT_INPUT_ERROR, EXIT_NOT_FOUND, EXIT_OK, EXIT_OUTPUT_ERROR
 from .result import CLIResult
 
 
@@ -213,12 +213,13 @@ def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
         "call_report": dossier.get("call_report"),
         "coverage_design": dossier.get("coverage_design"),
         "boundary_equivalence_candidates": dossier.get("boundary_equivalence_candidates"),
+        "test_case_draft": dossier.get("test_case_draft"),
     }
     return CLIResult(
-        status="value_candidates_generated",
+        status="test_case_draft_generated",
         exit_code=EXIT_OK,
         command=args.command,
-        message="Function analysis generated through Step 11. Step 12 Test Case Draft Generator is required for finalized test case drafts.",
+        message="Function analysis generated through Step 12. Step 13 Stub / Harness Skeleton Generator is required for runnable C harness skeletons.",
         data=payload,
         legacy_payload=payload,
     )
@@ -240,13 +241,40 @@ def handle_build_probe(args: argparse.Namespace) -> CLIResult:
 
 
 def handle_generate_test_draft(args: argparse.Namespace) -> CLIResult:
-    dossier = _existing_file(args.dossier, "dossier", args.command)
-    path = generate_test_draft_from_dossier(dossier)
-    if args.out:
-        path = _copy_test_draft(path, Path(args.out), args.format, args.command)
-    payload = {"test_case_draft": str(path)}
+    out = Path(args.out) if args.out else None
+    if args.dossier:
+        dossier = _existing_file(args.dossier, "dossier", args.command)
+        result = generate_test_draft_from_dossier(dossier, args.format, out)
+    else:
+        missing = [
+            label
+            for label, value in [
+                ("--function-signature", args.function_signature),
+                ("--global-access", args.global_access),
+                ("--call-report", args.call_report),
+                ("--coverage-design", args.coverage_design),
+                ("--boundary-candidates", args.boundary_candidates),
+            ]
+            if not value
+        ]
+        if missing:
+            raise CLIError("generate-test-draft requires --dossier or all explicit report inputs: " + ", ".join(missing), EXIT_INPUT_ERROR, args.command)
+        result = generate_test_draft_from_reports(
+            _existing_file(args.function_signature, "function-signature", args.command),
+            _existing_file(args.global_access, "global-access", args.command),
+            _existing_file(args.call_report, "call-report", args.command),
+            _existing_file(args.coverage_design, "coverage-design", args.command),
+            _existing_file(args.boundary_candidates, "boundary-candidates", args.command),
+            args.format,
+            out,
+        )
+    if isinstance(result, dict):
+        draft_value: str | dict[str, str] = {key: str(value) for key, value in result.items()}
+    else:
+        draft_value = str(result)
+    payload = {"test_case_draft": draft_value}
     return CLIResult(
-        status="ok",
+        status="test_case_draft_generated",
         exit_code=EXIT_OK,
         command=args.command,
         message="Test draft generated.",

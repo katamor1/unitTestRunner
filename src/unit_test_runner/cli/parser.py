@@ -68,9 +68,14 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--out")
     probe.add_argument("--dry-run", action="store_true")
 
-    draft = subcommands.add_parser("generate-test-draft", help="Generate a test draft from a dossier.")
-    draft.add_argument("--dossier", required=True)
+    draft = subcommands.add_parser("generate-test-draft", help="Generate a test draft from a dossier or analysis reports.")
+    draft.add_argument("--dossier")
+    draft.add_argument("--function-signature")
+    draft.add_argument("--global-access")
+    draft.add_argument("--call-report")
+    draft.add_argument("--coverage-design")
+    draft.add_argument("--boundary-candidates")
     draft.add_argument("--out")
-    draft.add_argument("--format", choices=("csv", "md", "json"), default="csv")
+    draft.add_argument("--format", choices=("csv", "md", "json", "all"), default="csv")
 
     return parser

@@ -22,6 +22,8 @@ from .c_analyzer.signature_writer import write_function_signature
 from .c_analyzer.source_digest import build_source_digest, write_source_digest
 from .path_utils import normalize_relative
 from .test_design import generate_test_design
+from .test_design.test_case_draft_generator import generate_test_case_draft, generate_test_case_draft_from_payloads
+from .test_design.test_case_draft_writer import write_test_case_draft_format, write_test_case_draft_report
 from .vc6 import select_project_context
 
 
@@ -226,6 +228,8 @@ def analyze_function_workflow(
     coverage_design_paths = write_coverage_design(out_dir, coverage_design)
     boundary_candidates = generate_boundary_equivalence_candidates(signature, global_access, call_report, coverage_design)
     boundary_paths = write_boundary_equivalence_candidates(out_dir, boundary_candidates)
+    test_case_draft = generate_test_case_draft(signature, global_access, call_report, coverage_design, boundary_candidates)
+    test_case_draft_paths = write_test_case_draft_report(out_dir, test_case_draft)
     dossier["source_digest"] = {
         "json": str(digest_paths["json"]),
         "markdown": str(digest_paths["markdown"]),
@@ -263,6 +267,12 @@ def analyze_function_workflow(
         "markdown": str(boundary_paths["markdown"]),
         "status": boundary_candidates.status,
     }
+    dossier["test_case_draft"] = {
+        "json": str(test_case_draft_paths["json"]),
+        "markdown": str(test_case_draft_paths["markdown"]),
+        "csv": str(test_case_draft_paths["csv"]),
+        "status": test_case_draft.status,
+    }
     _write_json(out_dir / "reports" / "function_dossier.json", dossier)
     _write_markdown_reports(out_dir, dossier, copied_files)
     write_function_signature(out_dir, signature)
@@ -270,14 +280,75 @@ def analyze_function_workflow(
     write_call_report(out_dir, call_report)
     write_coverage_design(out_dir, coverage_design)
     write_boundary_equivalence_candidates(out_dir, boundary_candidates)
-    write_test_case_draft(out_dir / "reports" / "test_case_draft.csv", dossier)
+    write_test_case_draft_report(out_dir, test_case_draft)
     _write_json(out_dir / "generated" / "prompt_pack.json", {"function_dossier": dossier})
     return dossier
 
 
-def generate_test_draft_from_dossier(dossier_path: Path | str) -> Path:
+def generate_test_draft_from_dossier(dossier_path: Path | str, output_format: str = "csv", out: Path | str | None = None) -> Path | dict[str, Path]:
     dossier_path = Path(dossier_path)
     dossier = json.loads(dossier_path.read_text(encoding="utf-8"))
-    target = dossier_path.with_name("test_case_draft.csv")
-    write_test_case_draft(target, dossier)
-    return target
+    report = _generate_test_case_report_from_dossier_payload(dossier, dossier_path)
+    target = _draft_target(dossier_path.parent, output_format, out)
+    return write_test_case_draft_format(target, report, output_format)
+
+
+def generate_test_draft_from_reports(
+    function_signature_path: Path | str,
+    global_access_path: Path | str,
+    call_report_path: Path | str,
+    coverage_design_path: Path | str,
+    boundary_candidates_path: Path | str,
+    output_format: str = "csv",
+    out: Path | str | None = None,
+) -> Path | dict[str, Path]:
+    paths = [Path(item) for item in (function_signature_path, global_access_path, call_report_path, coverage_design_path, boundary_candidates_path)]
+    report = generate_test_case_draft_from_payloads(*[_read_json(path) for path in paths])
+    target_root = paths[3].parent
+    target = _draft_target(target_root, output_format, out)
+    return write_test_case_draft_format(target, report, output_format)
+
+
+def _generate_test_case_report_from_dossier_payload(dossier: dict[str, Any], dossier_path: Path):
+    try:
+        paths = [
+            Path(dossier["function_signature"]["json"]),
+            Path(dossier["global_access"]["json"]),
+            Path(dossier["call_report"]["json"]),
+            Path(dossier["coverage_design"]["json"]),
+            Path(dossier["boundary_equivalence_candidates"]["json"]),
+        ]
+    except KeyError:
+        target = dossier_path.with_name("test_case_draft.csv")
+        write_test_case_draft(target, dossier)
+        return _legacy_report_from_csv_dossier(dossier, dossier_path)
+    return generate_test_case_draft_from_payloads(*[_read_json(path) for path in paths])
+
+
+def _legacy_report_from_csv_dossier(dossier: dict[str, Any], dossier_path: Path):
+    from .test_design.test_case_models import CoverageDraftSummary, TestCaseDraftReport, TestCaseGenerationPolicy
+
+    function_name = dossier.get("target", {}).get("function", "unknown")
+    return TestCaseDraftReport(
+        source_path=Path(dossier.get("target", {}).get("source", "")),
+        source_sha256="",
+        function_name=function_name,
+        status="partial",
+        generation_policy=TestCaseGenerationPolicy(),
+        test_cases=[],
+        additional_case_candidates=[],
+        coverage_summary=CoverageDraftSummary(0, 0, [], {}),
+    )
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _draft_target(default_dir: Path, output_format: str, out: Path | str | None) -> Path:
+    if out is not None:
+        return Path(out)
+    if output_format == "all":
+        return default_dir
+    suffix = "md" if output_format == "md" else output_format
+    return default_dir / f"test_case_draft.{suffix}"
