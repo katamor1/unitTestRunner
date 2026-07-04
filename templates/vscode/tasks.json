@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "UnitTestRunner: Analyze Function",
+      "type": "shell",
+      "command": "unit-test-runner",
+      "args": [
+        "analyze-function",
+        "--workspace",
+        "${workspaceFolder}",
+        "--dsw",
+        "${config:unitTestRunner.dswPath}",
+        "--source",
+        "${relativeFile}",
+        "--function",
+        "${input:functionName}",
+        "--configuration",
+        "${config:unitTestRunner.defaultConfiguration}",
+        "--out",
+        "${config:unitTestRunner.outputRoot}/${input:functionName}"
+      ],
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "functionName",
+      "type": "promptString",
+      "description": "Function name to analyze"
+    }
+  ]
+}
