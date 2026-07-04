@@ -136,7 +136,9 @@ def _old_style_brace(tokens: list[LexToken], start_index: int) -> int:
 
 def _header_start(tokens: list[LexToken], depths: list[int], name_index: int) -> int:
     for index in range(name_index - 1, -1, -1):
-        if depths[index] == 0 and tokens[index].value in {";", "}"}:
+        if tokens[index].value == ";" and depths[index] == 0:
+            return index + 1
+        if tokens[index].value == "}" and depths[index] <= 1:
             return index + 1
     return 0
 

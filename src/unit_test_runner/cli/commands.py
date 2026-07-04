@@ -208,12 +208,17 @@ def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
         "target": dossier["target"],
         "source_digest": dossier.get("source_digest"),
         "function_location": dossier.get("function_location"),
+        "function_signature": dossier.get("function_signature"),
+        "global_access": dossier.get("global_access"),
+        "call_report": dossier.get("call_report"),
+        "coverage_design": dossier.get("coverage_design"),
+        "boundary_equivalence_candidates": dossier.get("boundary_equivalence_candidates"),
     }
     return CLIResult(
-        status="located",
+        status="value_candidates_generated",
         exit_code=EXIT_OK,
         command=args.command,
-        message="Function location generated. Step 07 Signature Extractor is required for detailed signature analysis.",
+        message="Function analysis generated through Step 11. Step 12 Test Case Draft Generator is required for finalized test case drafts.",
         data=payload,
         legacy_payload=payload,
     )

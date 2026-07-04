@@ -7,8 +7,18 @@ from pathlib import Path
 from typing import Any
 
 from .c_analyzer import analyze_function
+from .c_analyzer.boundary_candidate_analyzer import generate_boundary_equivalence_candidates
+from .c_analyzer.boundary_candidate_writer import write_boundary_equivalence_candidates
+from .c_analyzer.call_analyzer import analyze_calls
+from .c_analyzer.call_report_writer import write_call_report
+from .c_analyzer.coverage_design_analyzer import analyze_coverage_design
+from .c_analyzer.coverage_design_writer import write_coverage_design
 from .c_analyzer.function_location_writer import write_function_location
 from .c_analyzer.function_locator import locate_function
+from .c_analyzer.global_access_analyzer import analyze_global_access
+from .c_analyzer.global_access_writer import write_global_access
+from .c_analyzer.signature_extractor import extract_signature
+from .c_analyzer.signature_writer import write_function_signature
 from .c_analyzer.source_digest import build_source_digest, write_source_digest
 from .path_utils import normalize_relative
 from .test_design import generate_test_design
@@ -206,6 +216,16 @@ def analyze_function_workflow(
     digest_paths = write_source_digest(out_dir, digest)
     location = locate_function(digest, function_name)
     location_paths = write_function_location(out_dir, digest, location)
+    signature = extract_signature(digest, location)
+    signature_paths = write_function_signature(out_dir, signature)
+    global_access = analyze_global_access(digest, location, signature)
+    global_access_paths = write_global_access(out_dir, global_access)
+    call_report = analyze_calls(digest, location, signature, global_access)
+    call_report_paths = write_call_report(out_dir, call_report)
+    coverage_design = analyze_coverage_design(digest, location, signature, global_access, call_report)
+    coverage_design_paths = write_coverage_design(out_dir, coverage_design)
+    boundary_candidates = generate_boundary_equivalence_candidates(signature, global_access, call_report, coverage_design)
+    boundary_paths = write_boundary_equivalence_candidates(out_dir, boundary_candidates)
     dossier["source_digest"] = {
         "json": str(digest_paths["json"]),
         "markdown": str(digest_paths["markdown"]),
@@ -217,8 +237,39 @@ def analyze_function_workflow(
         "function_slice": str(location_paths["function_slice"]),
         "status": location.status,
     }
+    dossier["function_signature"] = {
+        "json": str(signature_paths["json"]),
+        "markdown": str(signature_paths["markdown"]),
+        "status": signature.status,
+        "style": signature.style,
+    }
+    dossier["global_access"] = {
+        "json": str(global_access_paths["json"]),
+        "markdown": str(global_access_paths["markdown"]),
+        "status": global_access.status,
+    }
+    dossier["call_report"] = {
+        "json": str(call_report_paths["json"]),
+        "markdown": str(call_report_paths["markdown"]),
+        "status": call_report.status,
+    }
+    dossier["coverage_design"] = {
+        "json": str(coverage_design_paths["json"]),
+        "markdown": str(coverage_design_paths["markdown"]),
+        "status": coverage_design.status,
+    }
+    dossier["boundary_equivalence_candidates"] = {
+        "json": str(boundary_paths["json"]),
+        "markdown": str(boundary_paths["markdown"]),
+        "status": boundary_candidates.status,
+    }
     _write_json(out_dir / "reports" / "function_dossier.json", dossier)
     _write_markdown_reports(out_dir, dossier, copied_files)
+    write_function_signature(out_dir, signature)
+    write_global_access(out_dir, global_access)
+    write_call_report(out_dir, call_report)
+    write_coverage_design(out_dir, coverage_design)
+    write_boundary_equivalence_candidates(out_dir, boundary_candidates)
     write_test_case_draft(out_dir / "reports" / "test_case_draft.csv", dossier)
     _write_json(out_dir / "generated" / "prompt_pack.json", {"function_dossier": dossier})
     return dossier
