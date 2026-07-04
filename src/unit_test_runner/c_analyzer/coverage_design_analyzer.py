@@ -23,6 +23,7 @@ from .coverage_models import (
     ReturnPath,
     SwitchNode,
     CaseNode,
+    TernaryNode,
 )
 from .global_access_models import GlobalAccessReport
 from .signature_models import FunctionSignature
@@ -43,8 +44,9 @@ def analyze_coverage_design(
     branches = _scan_branches(digest.source.text, body, base_offset, global_access, call_report, all_conditions)
     switches = _scan_switches(digest.source.text, body, base_offset, global_access, call_report, all_conditions)
     loops = _scan_loops(digest.source.text, body, base_offset, global_access, call_report, all_conditions)
+    ternaries = _scan_ternaries(digest.source.text, body, base_offset, global_access, call_report, all_conditions)
     returns = _scan_returns(digest.source.text, body, base_offset, global_access, call_report)
-    coverage_items = _coverage_items(function_signature.function_name, branches, switches, loops, returns, all_conditions)
+    coverage_items = _coverage_items(function_signature.function_name, branches, switches, loops, ternaries, returns, all_conditions)
     return CoverageDesignReport(
         source_path=digest.source.path,
         source_sha256=digest.source.sha256,
@@ -53,7 +55,7 @@ def analyze_coverage_design(
         branches=branches,
         switches=switches,
         loops=loops,
-        ternaries=[],
+        ternaries=ternaries,
         return_paths=returns,
         condition_expressions=all_conditions,
         coverage_items=coverage_items,
@@ -144,8 +146,37 @@ def _scan_switches(original: str, body: str, base_offset: int, global_access: Gl
 
 def _scan_loops(original: str, body: str, base_offset: int, global_access: GlobalAccessReport, call_report: CallReport, conditions: list[ConditionExpression]) -> list[LoopNode]:
     loops: list[LoopNode] = []
+    do_while_starts: set[int] = set()
+    for match in re.finditer(r"\bdo\b", body):
+        while_match = re.search(r"\bwhile\s*\(", body[match.end() :])
+        if not while_match:
+            continue
+        while_start = match.end() + while_match.start()
+        open_paren = body.find("(", while_start)
+        close_paren = find_matching_char(body, open_paren)
+        if close_paren == -1:
+            continue
+        raw = body[open_paren + 1 : close_paren]
+        condition = _condition(original, body, base_offset, open_paren + 1, raw, global_access, call_report, f"COND_{len(conditions) + 1:03d}") if raw.strip() else None
+        if condition:
+            conditions.append(condition)
+        do_while_starts.add(while_start)
+        loops.append(
+            LoopNode(
+                loop_id=f"LOOP_{len(loops) + 1:03d}",
+                kind="do_while",
+                condition=condition,
+                initializer_raw=None,
+                increment_raw=None,
+                loop_range=range_from_offsets(original, base_offset + match.start(), base_offset + close_paren + 1),
+                coverage_hints=["one_iteration", "multiple_iterations"],
+                confidence="high",
+            )
+        )
     for match in re.finditer(r"\b(for|while)\s*\(", body):
         kind = match.group(1)
+        if kind == "while" and match.start() in do_while_starts:
+            continue
         open_paren = body.find("(", match.start())
         close_paren = find_matching_char(body, open_paren)
         if close_paren == -1:
@@ -174,6 +205,36 @@ def _scan_loops(original: str, body: str, base_offset: int, global_access: Globa
             )
         )
     return loops
+
+
+def _scan_ternaries(original: str, body: str, base_offset: int, global_access: GlobalAccessReport, call_report: CallReport, conditions: list[ConditionExpression]) -> list[TernaryNode]:
+    ternaries: list[TernaryNode] = []
+    for question in [match.start() for match in re.finditer(r"\?", body)]:
+        statement_start = max(body.rfind(";", 0, question), body.rfind("{", 0, question), body.rfind("}", 0, question), body.rfind("\n", 0, question)) + 1
+        statement_end = body.find(";", question)
+        colon = body.find(":", question, statement_end if statement_end != -1 else len(body))
+        if statement_end == -1 or colon == -1:
+            continue
+        condition_raw = body[statement_start:question].strip()
+        if condition_raw.startswith("return "):
+            condition_raw = condition_raw[len("return ") :].strip()
+        if "=" in condition_raw:
+            condition_raw = condition_raw.rsplit("=", 1)[1].strip()
+        true_raw = normalize_space(body[question + 1 : colon])
+        false_raw = normalize_space(body[colon + 1 : statement_end])
+        condition = _condition(original, body, base_offset, statement_start, condition_raw, global_access, call_report, f"COND_{len(conditions) + 1:03d}")
+        conditions.append(condition)
+        ternaries.append(
+            TernaryNode(
+                ternary_id=f"TERN_{len(ternaries) + 1:03d}",
+                condition=condition,
+                true_expression_raw=true_raw,
+                false_expression_raw=false_raw,
+                expression_range=range_from_offsets(original, base_offset + statement_start, base_offset + statement_end),
+                confidence="medium",
+            )
+        )
+    return ternaries
 
 
 def _scan_returns(original: str, body: str, base_offset: int, global_access: GlobalAccessReport, call_report: CallReport) -> list[ReturnPath]:
@@ -245,7 +306,7 @@ def _looks_like_range(raw: str) -> bool:
     return len(comparisons) >= 2 and len(set(names)) == 1
 
 
-def _coverage_items(function_name: str, branches: list[BranchNode], switches: list[SwitchNode], loops: list[LoopNode], returns: list[ReturnPath], conditions: list[ConditionExpression]) -> list[CoverageItem]:
+def _coverage_items(function_name: str, branches: list[BranchNode], switches: list[SwitchNode], loops: list[LoopNode], ternaries: list[TernaryNode], returns: list[ReturnPath], conditions: list[ConditionExpression]) -> list[CoverageItem]:
     items: list[CoverageItem] = []
     for branch in branches:
         if branch.condition is None:
@@ -285,8 +346,23 @@ def _coverage_items(function_name: str, branches: list[BranchNode], switches: li
             coverage_type = "switch_default" if case.label_kind == "default" else "switch_case"
             items.append(CoverageItem(f"{switch.switch_id}_{case.case_id}", coverage_type, switch.switch_id, f"switch reaches {case.label_raw}", case.label_raw, related_variables=switch.expression.related_variables, confidence="high"))
     for loop in loops:
-        for coverage_type, value in [("loop_zero", "zero"), ("loop_one", "one"), ("loop_many", "many")]:
+        loop_values = [("loop_one", "one"), ("loop_many", "many")] if loop.kind == "do_while" else [("loop_zero", "zero"), ("loop_one", "one"), ("loop_many", "many")]
+        for coverage_type, value in loop_values:
             items.append(CoverageItem(f"{loop.loop_id}_{value.upper()}", coverage_type, loop.loop_id, f"{loop.kind} loop executes {value}", value, related_variables=loop.condition.related_variables if loop.condition else [], confidence="medium"))
+    for ternary in ternaries:
+        for coverage_type, value in [("ternary_true", "true"), ("ternary_false", "false")]:
+            items.append(
+                CoverageItem(
+                    f"{ternary.ternary_id}_{value.upper()}",
+                    coverage_type,
+                    ternary.ternary_id,
+                    f"ternary condition is {value}",
+                    value,
+                    related_variables=ternary.condition.related_variables,
+                    related_calls=ternary.condition.related_calls,
+                    confidence=ternary.confidence,
+                )
+            )
     for path in returns:
         items.append(CoverageItem(f"{path.return_id}_PATH", "return_path", path.return_id, f"return path is reached: {path.expression_raw or 'void'}", related_variables=path.related_variables, related_calls=path.related_calls, confidence=path.confidence))
     return items

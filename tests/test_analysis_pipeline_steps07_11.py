@@ -71,6 +71,14 @@ class AnalysisPipelineSteps0711Tests(unittest.TestCase):
         self.assertEqual("knr", old_style_signature["function"]["style"])
         self.assertEqual(["value", "out_value"], [item["name"] for item in old_style_signature["function"]["parameters"]])
 
+        no_args_signature = extract_signature(self.digest, locate_function(self.digest, "NoArgs")).to_dict()
+        self.assertEqual([], no_args_signature["function"]["parameters"])
+        complex_signature = extract_signature(self.digest, locate_function(self.digest, "ComplexSignature")).to_dict()
+        complex_parameters = {item["name"]: item for item in complex_signature["function"]["parameters"] if item["name"]}
+        self.assertIn("const", complex_parameters["name"]["type"]["qualifiers"])
+        self.assertTrue(complex_parameters["ctx"]["type"]["is_struct"])
+        self.assertTrue(any(item["is_variadic"] for item in complex_signature["function"]["parameters"]))
+
     def test_step08_global_access_classifies_state_and_parameter_side_effects(self):
         payload = self.global_access.to_dict()
 
@@ -112,6 +120,18 @@ class AnalysisPipelineSteps0711Tests(unittest.TestCase):
         self.assertIn("switch_default", coverage_types)
         self.assertIn("return_path", coverage_types)
 
+        shapes_location = locate_function(self.digest, "CoverageShapes")
+        shapes_signature = extract_signature(self.digest, shapes_location)
+        shapes_global = analyze_global_access(self.digest, shapes_location, shapes_signature)
+        shapes_calls = analyze_calls(self.digest, shapes_location, shapes_signature, shapes_global)
+        shapes_coverage = analyze_coverage_design(self.digest, shapes_location, shapes_signature, shapes_global, shapes_calls).to_dict()
+        self.assertEqual(["do_while"], [item["kind"] for item in shapes_coverage["loops"]])
+        self.assertTrue(shapes_coverage["ternaries"])
+        shapes_coverage_types = {item["coverage_type"] for item in shapes_coverage["coverage_items"]}
+        self.assertIn("ternary_true", shapes_coverage_types)
+        self.assertIn("ternary_false", shapes_coverage_types)
+        self.assertNotIn("loop_zero", shapes_coverage_types)
+
     def test_step11_boundary_equivalence_candidates_use_conditions_types_and_calls(self):
         payload = self.boundary.to_dict()
 
@@ -124,6 +144,17 @@ class AnalysisPipelineSteps0711Tests(unittest.TestCase):
         stub_values = {(item["call_name"], item["value_expression"]) for item in payload["stub_return_candidates"]}
         self.assertIn(("CheckLimit", "0"), stub_values)
         self.assertTrue(payload["coverage_links"])
+
+        shapes_location = locate_function(self.digest, "CoverageShapes")
+        shapes_signature = extract_signature(self.digest, shapes_location)
+        shapes_global = analyze_global_access(self.digest, shapes_location, shapes_signature)
+        shapes_calls = analyze_calls(self.digest, shapes_location, shapes_signature, shapes_global)
+        shapes_coverage = analyze_coverage_design(self.digest, shapes_location, shapes_signature, shapes_global, shapes_calls)
+        shapes_boundary = generate_boundary_equivalence_candidates(shapes_signature, shapes_global, shapes_calls, shapes_coverage).to_dict()
+        shape_values = {(item["target_name"], item["value_expression"], item["value_kind"]) for item in shapes_boundary["input_candidates"]}
+        self.assertIn(("count", "0", "zero"), shape_values)
+        self.assertIn(("count", "1", "one"), shape_values)
+        self.assertIn(("count", "2", "many"), shape_values)
 
     def test_analyze_function_generates_step07_to_step11_artifacts(self):
         with tempfile.TemporaryDirectory() as temp_dir:

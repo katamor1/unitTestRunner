@@ -5,6 +5,10 @@
 #define SENSOR_FAIL -1
 #define STATUS_READY 7
 
+struct ControlContext {
+    int value;
+};
+
 static int g_state;
 extern int g_error;
 
@@ -56,4 +60,25 @@ int *out_value;
 {
     *out_value = value;
     return value;
+}
+
+void NoArgs(void)
+{
+}
+
+int ComplexSignature(const char *name, struct ControlContext *ctx, ...)
+{
+    return name != 0 && ctx != 0;
+}
+
+int CoverageShapes(int count, int *out_value)
+{
+    int value;
+
+    value = 0;
+    do {
+        value++;
+    } while (value < count);
+
+    return out_value ? value : -1;
 }

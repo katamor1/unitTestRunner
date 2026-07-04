@@ -44,6 +44,9 @@ def render_coverage_design_markdown(payload: dict) -> str:
     lines.extend(["", "## Loops", "", "| ID | Kind | Condition | Coverage Hints |", "|---|---|---|---|"])
     for loop in payload["loops"]:
         lines.append(f"| {loop['loop_id']} | {loop['kind']} | `{loop['condition']['raw'] if loop['condition'] else ''}` | {', '.join(loop['coverage_hints'])} |")
+    lines.extend(["", "## Ternaries", "", "| ID | Condition | True Expression | False Expression |", "|---|---|---|---|"])
+    for ternary in payload["ternaries"]:
+        lines.append(f"| {ternary['ternary_id']} | `{ternary['condition']['raw']}` | `{ternary['true_expression_raw']}` | `{ternary['false_expression_raw']}` |")
     lines.extend(["", "## Return Paths", "", "| ID | Expression | Kind | Confidence |", "|---|---|---|---|"])
     for path in payload["return_paths"]:
         lines.append(f"| {path['return_id']} | `{path['expression_raw'] or ''}` | {path['return_kind']} | {path['confidence']} |")
