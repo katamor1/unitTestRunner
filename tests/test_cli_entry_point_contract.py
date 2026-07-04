@@ -35,6 +35,8 @@ class CliEntryPointContractTests(unittest.TestCase):
             ("analyze-function", "--help"),
             ("generate-harness-skeleton", "--help"),
             ("build-probe", "--help"),
+            ("analyze-build-errors", "--help"),
+            ("complete-build", "--help"),
             ("generate-test-draft", "--help"),
         ]
 

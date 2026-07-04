@@ -11,6 +11,10 @@ from typing import Any
 
 from unit_test_runner import __version__
 from unit_test_runner.build_probe import build_probe
+from unit_test_runner.build_completion import analyze_build_errors, analyze_build_errors_from_workspace
+from unit_test_runner.build_completion.completion_applier import apply_safe_completions
+from unit_test_runner.build_completion.completion_models import BuildCompletionIterationReport, BuildCompletionPolicy, CompletionIteration
+from unit_test_runner.build_completion.completion_report_writer import write_completion_reports
 from unit_test_runner.c_analyzer import list_functions
 from unit_test_runner.dsw_parser import discover_dsw_workspaces, parse_dsw as parse_dsw_step03
 from unit_test_runner.dossier import (
@@ -41,6 +45,8 @@ def dispatch(args: argparse.Namespace) -> CLIResult:
         "analyze-function": handle_analyze_function,
         "generate-harness-skeleton": handle_generate_harness_skeleton,
         "build-probe": handle_build_probe,
+        "analyze-build-errors": handle_analyze_build_errors,
+        "complete-build": handle_complete_build,
         "generate-test-draft": handle_generate_test_draft,
     }
     return handlers[args.command](args)
@@ -225,12 +231,13 @@ def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
         "harness_skeleton": dossier.get("harness_skeleton"),
         "build_workspace": dossier.get("build_workspace"),
         "build_probe": dossier.get("build_probe"),
+        "build_completion": dossier.get("build_completion"),
     }
     return CLIResult(
-        status="build_workspace_generated",
+        status="completion_plan_generated",
         exit_code=EXIT_OK,
         command=args.command,
-        message="Function analysis generated through Step 14. Step 15 Build Error Analyzer / Stub Completion Loop is required for automatic build-error remediation.",
+        message="Function analysis generated through Step 15. Step 16 Test Execution / Evidence Preparation is required for execution evidence.",
         data=payload,
         legacy_payload=payload,
     )
@@ -344,6 +351,98 @@ def _build_probe_result(command: str, workspace: Path, workspace_report, probe_r
     )
 
 
+def handle_analyze_build_errors(args: argparse.Namespace) -> CLIResult:
+    if args.workspace:
+        workspace = _existing_dir(args.workspace, "workspace", args.command)
+        plan, iteration = analyze_build_errors_from_workspace(workspace, source_root=Path(args.source_root) if args.source_root else None)
+    else:
+        missing = [
+            label
+            for label, value in [
+                ("--build-workspace-report", args.build_workspace_report),
+                ("--build-probe-report", args.build_probe_report),
+                ("--call-report", args.call_report),
+                ("--harness-report", args.harness_report),
+                ("--out", args.out),
+            ]
+            if not value
+        ]
+        if missing:
+            raise CLIError("analyze-build-errors requires --workspace or explicit inputs: " + ", ".join(missing), EXIT_INPUT_ERROR, args.command)
+        workspace = Path(args.out).resolve()
+        workspace.mkdir(parents=True, exist_ok=True)
+        plan, iteration = analyze_build_errors(
+            _read_json(_existing_file(args.build_workspace_report, "build-workspace-report", args.command)),
+            _read_json(_existing_file(args.build_probe_report, "build-probe-report", args.command)),
+            _read_json(_existing_file(args.call_report, "call-report", args.command)),
+            _read_json(_existing_file(args.harness_report, "harness-report", args.command)),
+            workspace,
+            Path(args.source_root) if args.source_root else None,
+        )
+        write_completion_reports(workspace, plan, iteration)
+    payload = _completion_payload(workspace, plan, iteration)
+    return CLIResult(
+        status="completion_plan_generated",
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Build completion plan generated.",
+        data=payload,
+        legacy_payload=payload,
+    )
+
+
+def handle_complete_build(args: argparse.Namespace) -> CLIResult:
+    workspace = _existing_dir(args.workspace, "workspace", args.command)
+    policy = BuildCompletionPolicy(
+        apply_safe_completions=args.apply_safe_completions,
+        run_probe_after_apply=args.run_probe_after_apply,
+        max_iterations=args.max_iterations,
+        generate_unknown_symbol_stubs=args.generate_unknown_symbol_stubs or True,
+        overwrite_existing_generated_stubs=args.overwrite_existing_generated_stubs,
+    )
+    plan, iteration = analyze_build_errors_from_workspace(workspace, source_root=Path(args.source_root) if args.source_root else None, policy=policy)
+    apply_result = None
+    if args.apply_safe_completions:
+        apply_result = apply_safe_completions(workspace, plan)
+        first = iteration.iterations[0]
+        first.applied_actions = apply_result.applied_actions
+        first.skipped_actions = apply_result.skipped_actions
+        first.generated_files = apply_result.generated_files
+        first.progress = "not_run"
+        iteration.warnings.extend(apply_result.warnings)
+        iteration.stop_reason = "safe completions applied; build probe rerun is not executed unless explicitly enabled"
+        iteration.next_recommended_action = "Run build-probe --workspace with --run when VC6 is available, or review generated stubs."
+        write_completion_reports(workspace, plan, iteration)
+    payload = _completion_payload(workspace, plan, iteration)
+    if apply_result is not None:
+        payload["applied_actions"] = apply_result.applied_actions
+        payload["generated_files"] = [str(item) for item in apply_result.generated_files]
+    return CLIResult(
+        status="completion_applied" if args.apply_safe_completions else "completion_plan_generated",
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Build completion processed.",
+        data=payload,
+        legacy_payload=payload,
+    )
+
+
+def _completion_payload(workspace: Path, plan, iteration) -> dict[str, Any]:
+    return {
+        "build_completion_plan": {
+            "json": str(workspace / "reports" / "build_completion_plan.json"),
+            "markdown": str(workspace / "reports" / "build_completion_plan.md"),
+            "status": plan.status,
+        },
+        "build_completion_iteration": {
+            "json": str(workspace / "reports" / "build_completion_iteration_report.json"),
+            "markdown": str(workspace / "reports" / "build_completion_iteration_report.md"),
+            "status": iteration.status,
+            "final_build_probe_status": iteration.final_build_probe_status,
+        },
+    }
+
+
 def handle_generate_test_draft(args: argparse.Namespace) -> CLIResult:
     out = Path(args.out) if args.out else None
     if args.dossier:
@@ -448,6 +547,10 @@ def _write_json(path: Path, value: dict[str, Any], command: str) -> None:
         path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     except OSError as exc:
         raise CLIError(f"Failed to write output file {path}: {exc}", EXIT_OUTPUT_ERROR, command) from exc
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _write_discovery_report(path: Path, value: dict[str, Any], command: str) -> None:

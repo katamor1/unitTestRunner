@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .build import generate_build_workspace
+from .build_completion import analyze_build_errors_from_workspace
 from .c_analyzer import analyze_function
 from .c_analyzer.boundary_candidate_analyzer import generate_boundary_equivalence_candidates
 from .c_analyzer.boundary_candidate_writer import write_boundary_equivalence_candidates
@@ -241,6 +242,7 @@ def analyze_function_workflow(
         run_probe=False,
         dry_run=True,
     )
+    build_completion_plan, build_completion_iteration = analyze_build_errors_from_workspace(out_dir, source_root=workspace_root)
     dossier["source_digest"] = {
         "json": str(digest_paths["json"]),
         "markdown": str(digest_paths["markdown"]),
@@ -300,6 +302,14 @@ def analyze_function_workflow(
         "status": build_probe.status,
         "executed": build_probe.executed,
     }
+    dossier["build_completion"] = {
+        "plan_json": str(out_dir / "reports" / "build_completion_plan.json"),
+        "plan_markdown": str(out_dir / "reports" / "build_completion_plan.md"),
+        "iteration_json": str(out_dir / "reports" / "build_completion_iteration_report.json"),
+        "iteration_markdown": str(out_dir / "reports" / "build_completion_iteration_report.md"),
+        "status": build_completion_plan.status,
+        "iteration_status": build_completion_iteration.status,
+    }
     _write_json(out_dir / "reports" / "function_dossier.json", dossier)
     _write_markdown_reports(out_dir, dossier, copied_files)
     write_function_signature(out_dir, signature)
@@ -310,6 +320,7 @@ def analyze_function_workflow(
     write_test_case_draft_report(out_dir, test_case_draft)
     generate_harness_skeleton(signature, global_access, call_report, test_case_draft, out_dir, overwrite=True)
     generate_build_workspace(dossier["build_context"], digest.to_dict(), harness_skeleton.to_dict(), out_dir, run_probe=False, dry_run=True)
+    analyze_build_errors_from_workspace(out_dir, source_root=workspace_root)
     _write_json(out_dir / "generated" / "prompt_pack.json", {"function_dossier": dossier})
     return dossier
 

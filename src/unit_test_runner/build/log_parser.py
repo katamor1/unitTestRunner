@@ -38,7 +38,7 @@ def parse_build_log(log_text: str, stub_candidates: set[str] | None = None) -> B
                     VC6CompatibilityIssue("unsupported_c99_header", file_path, line_number, raw, "Remove C99 header dependency from generated VC6 skeleton.")
                 )
             continue
-        unresolved_match = re.search(r"(LNK2001|LNK2019): unresolved external symbol\s+(_?[A-Za-z]\w*)", raw)
+        unresolved_match = re.search(r"(LNK2001|LNK2019): unresolved external symbol\s+(_?[A-Za-z]\w*(?:@\d+)?)", raw)
         if unresolved_match:
             code = unresolved_match.group(1)
             symbol = _clean_symbol(unresolved_match.group(2))
@@ -86,6 +86,8 @@ def _location(line: str) -> tuple[Path | None, int | None]:
 
 def _looks_like_vc6_syntax_issue(line: str) -> bool:
     lower = line.lower()
+    if "generated" in lower and ("c2143" in lower or "c2065" in lower):
+        return True
     if "for" in lower and ("c2065" in lower or "c2143" in lower):
         return True
     if "inline" in lower and ("c2065" in lower or "c2143" in lower):

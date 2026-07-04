@@ -60,6 +60,8 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--emit-json", action="store_true")
     analyze.add_argument("--emit-md", action="store_true")
     analyze.add_argument("--emit-csv", action="store_true")
+    analyze.add_argument("--analyze-build-errors", action="store_true")
+    analyze.add_argument("--apply-safe-completions", action="store_true")
 
     harness = subcommands.add_parser("generate-harness-skeleton", help="Generate C90 stub and harness skeleton files from analysis reports.")
     harness.add_argument("--function-signature", required=True)
@@ -82,6 +84,24 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--run", action="store_true")
     probe.add_argument("--timeout", type=int, default=120)
     probe.add_argument("--overwrite", action="store_true")
+
+    build_errors = subcommands.add_parser("analyze-build-errors", help="Analyze build probe diagnostics and generate a completion plan.")
+    build_errors.add_argument("--workspace")
+    build_errors.add_argument("--build-workspace-report")
+    build_errors.add_argument("--build-probe-report")
+    build_errors.add_argument("--call-report")
+    build_errors.add_argument("--harness-report")
+    build_errors.add_argument("--source-root")
+    build_errors.add_argument("--out")
+
+    complete = subcommands.add_parser("complete-build", help="Apply safe build completions inside a generated workspace.")
+    complete.add_argument("--workspace", required=True)
+    complete.add_argument("--source-root")
+    complete.add_argument("--apply-safe-completions", action="store_true")
+    complete.add_argument("--run-probe-after-apply", action="store_true")
+    complete.add_argument("--max-iterations", type=int, default=3)
+    complete.add_argument("--generate-unknown-symbol-stubs", action="store_true")
+    complete.add_argument("--overwrite-existing-generated-stubs", action="store_true")
 
     draft = subcommands.add_parser("generate-test-draft", help="Generate a test draft from a dossier or analysis reports.")
     draft.add_argument("--dossier")

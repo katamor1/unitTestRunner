@@ -124,8 +124,8 @@ generated\\tests\\test.c(7) : fatal error C1083: Cannot open include file: 'stdi
             )
             self.assertEqual(0, analyze.returncode, analyze.stderr)
             payload = json.loads(analyze.stdout)
-            self.assertEqual("build_workspace_generated", payload["status"])
-            self.assertIn("Step 15", payload["message"])
+            self.assertEqual("completion_plan_generated", payload["status"])
+            self.assertIn("Step 16", payload["message"])
             self.assertIn("build_workspace", payload["data"])
             self.assertIn("build_probe", payload["data"])
 
