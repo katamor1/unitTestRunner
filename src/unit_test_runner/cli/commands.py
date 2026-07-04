@@ -15,7 +15,10 @@ from unit_test_runner.c_analyzer import list_functions
 from unit_test_runner.dsw_parser import discover_dsw_workspaces, parse_dsw as parse_dsw_step03
 from unit_test_runner.dossier import analyze_function_workflow, generate_test_draft_from_dossier
 from unit_test_runner.reports.dsw_markdown import render_dsw_discovery_markdown
+from unit_test_runner.reports.source_membership_markdown import render_source_membership_markdown
 from unit_test_runner.vc6 import discover_workspace, map_source_to_projects
+from unit_test_runner.vc6.dsp_parser import parse_dsp as parse_dsp_step04
+from unit_test_runner.vc6.source_membership import map_source_membership
 
 from .errors import CLIError
 from .exit_codes import EXIT_NOT_FOUND, EXIT_OK, EXIT_OUTPUT_ERROR
@@ -85,6 +88,18 @@ def handle_discover_projects(args: argparse.Namespace) -> CLIResult:
     if args.dsw:
         workspace = _existing_dir(args.workspace, "workspace", args.command)
         dsw = _resolve_dsw(workspace, args.dsw, args.command)
+        if args.with_dsp_details:
+            result = _with_dsp_details(discover_dsw_workspaces(dsw).to_dict())
+            if args.out:
+                _write_discovery_report(Path(args.out), result, args.command)
+            return CLIResult(
+                status="ok",
+                exit_code=EXIT_OK,
+                command=args.command,
+                message="Projects discovered.",
+                data=result,
+                human_output=_render_discovery_summary(result, Path(args.out) if args.out else None),
+            )
         result = discover_workspace(workspace, dsw)
         if args.out:
             out = Path(args.out)
@@ -112,6 +127,8 @@ def handle_discover_projects(args: argparse.Namespace) -> CLIResult:
     except FileNotFoundError as exc:
         raise CLIError(str(exc), EXIT_NOT_FOUND, args.command) from exc
     result = discovery.to_dict()
+    if args.with_dsp_details:
+        result = _with_dsp_details(result)
     if args.out:
         _write_discovery_report(Path(args.out), result, args.command)
     return CLIResult(
@@ -143,30 +160,17 @@ def handle_map_source(args: argparse.Namespace) -> CLIResult:
             legacy_payload=payload,
         )
 
-    workspace = parse_dsw_step03(dsw)
-    candidate_projects = [
-        {
-            "name": project.name,
-            "dsp_path": project.dsp_path.as_posix(),
-            "dsp_path_absolute": str(project.dsp_path_absolute).replace("\\", "/"),
-            "exists": project.exists,
-        }
-        for project in workspace.projects
-        if args.project is None or project.name == args.project
-    ]
-    payload = {
-        "source": args.source,
-        "candidate_projects": candidate_projects,
-        "warnings": [warning.to_dict() for warning in workspace.warnings],
-    }
+    membership = map_source_membership(dsw, args.source, args.project, args.configuration)
+    payload = membership.to_dict()
     if args.out:
-        _write_json(Path(args.out), payload, args.command)
+        _write_source_membership_report(Path(args.out), payload, args.command)
     return CLIResult(
-        status="partial",
+        status=membership.status,
         exit_code=EXIT_OK,
         command=args.command,
-        message="DSW parsed. DSP source membership requires Step 04.",
+        message="Source mapping completed.",
         data=payload,
+        human_output=_render_source_membership_summary(payload, Path(args.out) if args.out else None),
     )
 
 
@@ -315,6 +319,17 @@ def _write_discovery_report(path: Path, value: dict[str, Any], command: str) -> 
     _write_json(path, value, command)
 
 
+def _write_source_membership_report(path: Path, value: dict[str, Any], command: str) -> None:
+    if path.suffix.lower() == ".md":
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(render_source_membership_markdown(value), encoding="utf-8")
+        except OSError as exc:
+            raise CLIError(f"Failed to write output file {path}: {exc}", EXIT_OUTPUT_ERROR, command) from exc
+        return
+    _write_json(path, value, command)
+
+
 def _render_discovery_summary(value: dict[str, Any], output_path: Path | None) -> str:
     lines: list[str] = []
     for workspace in value.get("workspaces", []):
@@ -329,6 +344,53 @@ def _render_discovery_summary(value: dict[str, Any], output_path: Path | None) -
     if output_path is not None:
         lines.append(f"Output: {output_path}")
     return "\n".join(lines) + "\n"
+
+
+def _render_source_membership_summary(value: dict[str, Any], output_path: Path | None) -> str:
+    matches = value.get("matches", [])
+    lines = [
+        f"Source mapped: {value.get('source', {}).get('input', '')}",
+        f"Matches: {len(matches)}",
+    ]
+    if len(matches) == 1:
+        lines.append(f"Project: {matches[0].get('project_name', '')}")
+        lines.append(f"Configurations: {len(matches[0].get('configurations', []))}")
+    elif len(matches) > 1:
+        lines.append("Multiple projects contain this source. Specify --project or --configuration.")
+    lines.append(f"Warnings: {len(value.get('warnings', []))}")
+    if output_path is not None:
+        lines.append(f"Output: {output_path}")
+    return "\n".join(lines) + "\n"
+
+
+def _with_dsp_details(value: dict[str, Any]) -> dict[str, Any]:
+    for workspace in value.get("workspaces", []):
+        for project in workspace.get("projects", []):
+            absolute = project.get("dsp_path_absolute")
+            if not absolute:
+                continue
+            try:
+                dsp = parse_dsp_step04(Path(absolute), Path(workspace["root_dir"]))
+            except OSError as exc:
+                project["dsp_summary"] = {"error": str(exc)}
+                continue
+            files = dsp.files
+            source_count = len([item for item in files if item.file_kind == "source"])
+            header_count = len([item for item in files if item.file_kind == "header"])
+            resource_count = len([item for item in files if item.file_kind == "resource"])
+            defines = sorted({define for cfg in dsp.configurations for define in cfg.build_settings.defines})
+            include_dirs = sorted({item.normalized for cfg in dsp.configurations for item in cfg.build_settings.include_dirs})
+            project["dsp_summary"] = {
+                "project_name": dsp.name,
+                "configurations": [configuration.full_name for configuration in dsp.configurations],
+                "source_file_count": source_count,
+                "header_file_count": header_count,
+                "resource_file_count": resource_count,
+                "defines": defines,
+                "include_dirs": include_dirs,
+                "warnings": [warning.to_dict() for warning in dsp.warnings],
+            }
+    return value
 
 
 def _copy_test_draft(source: Path, target: Path, output_format: str, command: str) -> Path:

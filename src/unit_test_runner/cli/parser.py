@@ -36,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     discover.add_argument("--workspace", required=True)
     discover.add_argument("--dsw")
     discover.add_argument("--out")
+    discover.add_argument("--with-dsp-details", action="store_true")
 
     map_source = subcommands.add_parser("map-source", help="Map a C source file to VC6 project candidates.")
     map_source.add_argument("--workspace")

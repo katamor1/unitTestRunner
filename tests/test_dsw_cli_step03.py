@@ -113,7 +113,7 @@ class DswCliStep03Tests(unittest.TestCase):
         self.assertIn("Warnings: 0", completed.stdout)
         self.assertNotIn('"workspaces"', completed.stdout)
 
-    def test_map_source_without_workspace_returns_step03_partial_candidates(self):
+    def test_map_source_without_workspace_keeps_candidate_projects_when_not_found(self):
         completed = run_module(
             "--json",
             "map-source",
@@ -126,9 +126,8 @@ class DswCliStep03Tests(unittest.TestCase):
         self.assertEqual(0, completed.returncode, completed.stderr)
         self.assertEqual("", completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertEqual("partial", payload["status"])
-        self.assertIn("Step 04", payload["message"])
-        self.assertEqual("src/control.c", payload["data"]["source"])
+        self.assertEqual("not_found", payload["status"])
+        self.assertEqual("src/control.c", payload["data"]["source"]["input"])
         self.assertEqual(["Control", "Common"], [item["name"] for item in payload["data"]["candidate_projects"]])
 
     def test_json_discover_projects_stdout_is_json_only(self):
