@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from .build import generate_build_workspace
 from .c_analyzer import analyze_function
 from .c_analyzer.boundary_candidate_analyzer import generate_boundary_equivalence_candidates
 from .c_analyzer.boundary_candidate_writer import write_boundary_equivalence_candidates
@@ -232,6 +233,14 @@ def analyze_function_workflow(
     test_case_draft = generate_test_case_draft(signature, global_access, call_report, coverage_design, boundary_candidates)
     test_case_draft_paths = write_test_case_draft_report(out_dir, test_case_draft)
     harness_skeleton = generate_harness_skeleton(signature, global_access, call_report, test_case_draft, out_dir)
+    build_workspace, build_probe = generate_build_workspace(
+        dossier["build_context"],
+        digest.to_dict(),
+        harness_skeleton.to_dict(),
+        out_dir,
+        run_probe=False,
+        dry_run=True,
+    )
     dossier["source_digest"] = {
         "json": str(digest_paths["json"]),
         "markdown": str(digest_paths["markdown"]),
@@ -280,6 +289,17 @@ def analyze_function_workflow(
         "markdown": str(out_dir / "reports" / "harness_skeleton_report.md"),
         "status": harness_skeleton.status,
     }
+    dossier["build_workspace"] = {
+        "json": str(out_dir / "reports" / "build_workspace_report.json"),
+        "markdown": str(out_dir / "reports" / "build_workspace_report.md"),
+        "status": build_workspace.status,
+    }
+    dossier["build_probe"] = {
+        "json": str(out_dir / "reports" / "build_probe_report.json"),
+        "markdown": str(out_dir / "reports" / "build_probe_report.md"),
+        "status": build_probe.status,
+        "executed": build_probe.executed,
+    }
     _write_json(out_dir / "reports" / "function_dossier.json", dossier)
     _write_markdown_reports(out_dir, dossier, copied_files)
     write_function_signature(out_dir, signature)
@@ -289,6 +309,7 @@ def analyze_function_workflow(
     write_boundary_equivalence_candidates(out_dir, boundary_candidates)
     write_test_case_draft_report(out_dir, test_case_draft)
     generate_harness_skeleton(signature, global_access, call_report, test_case_draft, out_dir, overwrite=True)
+    generate_build_workspace(dossier["build_context"], digest.to_dict(), harness_skeleton.to_dict(), out_dir, run_probe=False, dry_run=True)
     _write_json(out_dir / "generated" / "prompt_pack.json", {"function_dossier": dossier})
     return dossier
 
@@ -310,6 +331,53 @@ def generate_harness_skeleton_from_reports(
         overwrite=overwrite,
     )
     return report
+
+
+def generate_build_workspace_from_reports(
+    build_context_path: Path | str,
+    source_digest_path: Path | str,
+    harness_report_path: Path | str,
+    out: Path | str,
+    run_probe: bool = False,
+    dry_run: bool = True,
+    vcvars: Path | str | None = None,
+    timeout_seconds: int = 120,
+    overwrite: bool = False,
+):
+    return generate_build_workspace(
+        _read_json(Path(build_context_path)),
+        _read_json(Path(source_digest_path)),
+        _read_json(Path(harness_report_path)),
+        Path(out),
+        run_probe=run_probe,
+        dry_run=dry_run,
+        vcvars=vcvars,
+        timeout_seconds=timeout_seconds,
+        overwrite=overwrite,
+    )
+
+
+def generate_build_workspace_from_workspace(
+    workspace: Path | str,
+    run_probe: bool = False,
+    dry_run: bool = True,
+    vcvars: Path | str | None = None,
+    timeout_seconds: int = 120,
+    overwrite: bool = False,
+):
+    workspace = Path(workspace)
+    reports = workspace / "reports"
+    return generate_build_workspace_from_reports(
+        reports / "build_context.json",
+        reports / "source_digest.json",
+        reports / "harness_skeleton_report.json",
+        workspace,
+        run_probe=run_probe,
+        dry_run=dry_run,
+        vcvars=vcvars,
+        timeout_seconds=timeout_seconds,
+        overwrite=overwrite,
+    )
 
 
 def generate_test_draft_from_dossier(dossier_path: Path | str, output_format: str = "csv", out: Path | str | None = None) -> Path | dict[str, Path]:

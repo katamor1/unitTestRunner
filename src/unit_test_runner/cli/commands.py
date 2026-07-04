@@ -15,6 +15,8 @@ from unit_test_runner.c_analyzer import list_functions
 from unit_test_runner.dsw_parser import discover_dsw_workspaces, parse_dsw as parse_dsw_step03
 from unit_test_runner.dossier import (
     analyze_function_workflow,
+    generate_build_workspace_from_reports,
+    generate_build_workspace_from_workspace,
     generate_harness_skeleton_from_reports,
     generate_test_draft_from_dossier,
     generate_test_draft_from_reports,
@@ -221,12 +223,14 @@ def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
         "boundary_equivalence_candidates": dossier.get("boundary_equivalence_candidates"),
         "test_case_draft": dossier.get("test_case_draft"),
         "harness_skeleton": dossier.get("harness_skeleton"),
+        "build_workspace": dossier.get("build_workspace"),
+        "build_probe": dossier.get("build_probe"),
     }
     return CLIResult(
-        status="harness_skeleton_generated",
+        status="build_workspace_generated",
         exit_code=EXIT_OK,
         command=args.command,
-        message="Function analysis generated through Step 13. Step 14 Build Workspace / Build Probe Generator is required for VC6 build probing.",
+        message="Function analysis generated through Step 14. Step 15 Build Error Analyzer / Stub Completion Loop is required for automatic build-error remediation.",
         data=payload,
         legacy_payload=payload,
     )
@@ -260,15 +264,81 @@ def handle_generate_harness_skeleton(args: argparse.Namespace) -> CLIResult:
 
 
 def handle_build_probe(args: argparse.Namespace) -> CLIResult:
-    dossier = _existing_file(args.dossier, "dossier", args.command)
-    payload = build_probe(dossier, args.vc6_bin, args.dry_run)
-    if args.out:
-        _write_json(Path(args.out), payload, args.command)
+    if args.workspace:
+        workspace = _existing_dir(args.workspace, "workspace", args.command)
+        workspace_report, probe_report = generate_build_workspace_from_workspace(
+            workspace,
+            run_probe=args.run,
+            dry_run=args.dry_run or not args.run,
+            vcvars=args.vcvars,
+            timeout_seconds=args.timeout,
+            overwrite=args.overwrite,
+        )
+        return _build_probe_result(args.command, workspace, workspace_report, probe_report)
+
+    explicit_inputs = [args.build_context, args.source_digest, args.harness_report]
+    if any(explicit_inputs):
+        missing = [
+            label
+            for label, value in [
+                ("--build-context", args.build_context),
+                ("--source-digest", args.source_digest),
+                ("--harness-report", args.harness_report),
+                ("--out", args.out),
+            ]
+            if not value
+        ]
+        if missing:
+            raise CLIError("build-probe explicit mode requires: " + ", ".join(missing), EXIT_INPUT_ERROR, args.command)
+        workspace_report, probe_report = generate_build_workspace_from_reports(
+            _existing_file(args.build_context, "build-context", args.command),
+            _existing_file(args.source_digest, "source-digest", args.command),
+            _existing_file(args.harness_report, "harness-report", args.command),
+            Path(args.out),
+            run_probe=args.run,
+            dry_run=args.dry_run or not args.run,
+            vcvars=args.vcvars,
+            timeout_seconds=args.timeout,
+            overwrite=args.overwrite,
+        )
+        return _build_probe_result(args.command, Path(args.out), workspace_report, probe_report)
+
+    if args.dossier:
+        dossier = _existing_file(args.dossier, "dossier", args.command)
+        payload = build_probe(dossier, args.vc6_bin, args.dry_run)
+        if args.out:
+            _write_json(Path(args.out), payload, args.command)
+        return CLIResult(
+            status="ok",
+            exit_code=EXIT_OK,
+            command=args.command,
+            message="Build probe completed.",
+            data=payload,
+            legacy_payload=payload,
+        )
+
+    raise CLIError("build-probe requires --workspace, --dossier, or explicit report inputs.", EXIT_INPUT_ERROR, args.command)
+
+
+def _build_probe_result(command: str, workspace: Path, workspace_report, probe_report) -> CLIResult:
+    payload = {
+        "build_workspace": {
+            "json": str(workspace / "reports" / "build_workspace_report.json"),
+            "markdown": str(workspace / "reports" / "build_workspace_report.md"),
+            "status": workspace_report.status,
+        },
+        "build_probe": {
+            "json": str(workspace / "reports" / "build_probe_report.json"),
+            "markdown": str(workspace / "reports" / "build_probe_report.md"),
+            "status": probe_report.status,
+            "executed": probe_report.executed,
+        },
+    }
     return CLIResult(
-        status="ok",
+        status="build_workspace_generated" if not probe_report.executed else f"build_probe_{probe_report.status}",
         exit_code=EXIT_OK,
-        command=args.command,
-        message="Build probe completed.",
+        command=command,
+        message="Build workspace generated.",
         data=payload,
         legacy_payload=payload,
     )

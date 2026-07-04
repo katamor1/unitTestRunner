@@ -1,0 +1,377 @@
+from __future__ import annotations
+
+import shutil
+import subprocess
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from unit_test_runner.harness.c90_writer import sha256_file
+
+from .build_models import (
+    BuildCommand,
+    BuildCommandResult,
+    BuildDiagnostic,
+    BuildPathEntry,
+    BuildProbeReport,
+    BuildWorkspaceReport,
+    CompileUnit,
+    WorkspaceFile,
+)
+from .build_report_writer import write_build_reports, write_build_text
+from .log_parser import parse_build_log
+
+
+def generate_build_workspace(
+    build_context: dict[str, Any],
+    source_digest: dict[str, Any],
+    harness_report: dict[str, Any],
+    output_root: Path | str,
+    run_probe: bool = False,
+    dry_run: bool = True,
+    vcvars: Path | str | None = None,
+    timeout_seconds: int = 120,
+    overwrite: bool = False,
+) -> tuple[BuildWorkspaceReport, BuildProbeReport]:
+    del overwrite
+    output_root = Path(output_root).resolve()
+    _ensure_layout(output_root)
+    source_path = Path(source_digest.get("source", {}).get("path") or harness_report.get("source", {}).get("path") or "")
+    function_name = harness_report.get("function", {}).get("name") or "unknown_function"
+    diagnostics: list[BuildDiagnostic] = []
+    copied_files = _copy_target_and_headers(output_root, source_path, source_digest, build_context, diagnostics)
+    generated_files = _copy_or_verify_generated_files(output_root, harness_report, diagnostics)
+    include_dirs = _include_dirs(output_root, build_context)
+    defines = _defines(build_context)
+    compiler_options = _compiler_options(build_context)
+    compile_units = _compile_units(output_root, copied_files, generated_files, include_dirs, defines, compiler_options)
+    build_commands = _write_build_files(output_root, compile_units, include_dirs, defines, compiler_options, vcvars, dry_run)
+    status = "partial" if any(item.severity == "error" for item in diagnostics) else "generated"
+    workspace_report = BuildWorkspaceReport(
+        source_path=source_path,
+        function_name=function_name,
+        status=status,
+        output_root=output_root,
+        copied_files=copied_files,
+        referenced_files=[],
+        generated_build_files=[],
+        compile_units=compile_units,
+        link_units=[unit.object_file for unit in compile_units],
+        include_dirs=include_dirs,
+        defines=defines,
+        compiler_options=compiler_options,
+        build_commands=build_commands,
+        diagnostics=diagnostics,
+    )
+    probe_report = _build_probe_report(output_root, source_path, function_name, build_commands, harness_report, run_probe, dry_run, timeout_seconds)
+    write_build_reports(output_root, workspace_report, probe_report)
+    return workspace_report, probe_report
+
+
+def _ensure_layout(output_root: Path) -> None:
+    for relative in ["build", "obj", "bin", "logs", "extracted", "generated", "reports"]:
+        (output_root / relative).mkdir(parents=True, exist_ok=True)
+
+
+def _copy_target_and_headers(
+    output_root: Path,
+    source_path: Path,
+    source_digest: dict[str, Any],
+    build_context: dict[str, Any],
+    diagnostics: list[BuildDiagnostic],
+) -> list[WorkspaceFile]:
+    copied: list[WorkspaceFile] = []
+    workspace_root = Path(build_context.get("workspace_root") or source_path.parent)
+    target_relative = _relative_or_name(source_path, workspace_root)
+    target_workspace = Path("extracted") / target_relative
+    _copy_file(source_path, output_root / target_workspace, copied, target_workspace, "target_source", diagnostics)
+    for include in source_digest.get("preprocessor", {}).get("includes", []):
+        candidates = [Path(item) for item in include.get("resolved_candidates", []) if item]
+        existing = next((item for item in candidates if item.exists()), None)
+        if existing is None:
+            continue
+        include_relative = _relative_or_name(existing, workspace_root)
+        if include_relative.parts and include_relative.parts[0].lower() == "include":
+            destination_relative = Path("extracted") / include_relative
+        else:
+            destination_relative = Path("extracted") / "include" / existing.name
+        _copy_file(existing, output_root / destination_relative, copied, destination_relative, "target_header", diagnostics)
+    return copied
+
+
+def _copy_file(
+    source: Path,
+    destination: Path,
+    copied: list[WorkspaceFile],
+    relative_destination: Path,
+    kind: str,
+    diagnostics: list[BuildDiagnostic],
+) -> None:
+    if not source.exists():
+        diagnostics.append(BuildDiagnostic("missing_source_file", "error", f"Source file is missing: {source}", source, None, None))
+        copied.append(WorkspaceFile(relative_destination, kind, source_path=source, copied=False, generated=False, required=True, exists=False))
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+    copied.append(WorkspaceFile(relative_destination, kind, source_path=source, sha256=sha256_file(destination), copied=True, generated=False, required=True, exists=True))
+
+
+def _copy_or_verify_generated_files(output_root: Path, harness_report: dict[str, Any], diagnostics: list[BuildDiagnostic]) -> list[WorkspaceFile]:
+    files: list[WorkspaceFile] = []
+    harness_root = Path(harness_report.get("output_root") or output_root)
+    for item in harness_report.get("generated_files", []):
+        relative = Path(item.get("path", ""))
+        kind = item.get("file_kind", "generated")
+        if not relative.as_posix().startswith("generated/"):
+            continue
+        if kind not in {
+            "assert_header",
+            "assert_source",
+            "runner_header",
+            "runner_source",
+            "stub_header",
+            "stub_source",
+            "test_header",
+            "test_source",
+            "target_invocation_header",
+            "target_invocation_source",
+        }:
+            continue
+        source = harness_root / relative
+        destination = output_root / relative
+        if not source.exists():
+            diagnostics.append(BuildDiagnostic("missing_generated_file", "error", f"Generated file is missing: {relative}", relative, None, None))
+            files.append(WorkspaceFile(relative, kind, source_path=source, copied=False, generated=True, required=True, exists=False))
+            continue
+        if source.resolve() != destination.resolve():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+        files.append(WorkspaceFile(relative, kind, source_path=source, sha256=sha256_file(destination), copied=source.resolve() != destination.resolve(), generated=True, required=True, exists=True))
+    return files
+
+
+def _include_dirs(output_root: Path, build_context: dict[str, Any]) -> list[BuildPathEntry]:
+    entries = [
+        BuildPathEntry("generated/include", Path("generated/include"), output_root / "generated" / "include", (output_root / "generated" / "include").exists(), "generated_include"),
+        BuildPathEntry("generated/harness", Path("generated/harness"), output_root / "generated" / "harness", (output_root / "generated" / "harness").exists(), "generated_include"),
+        BuildPathEntry("generated/stubs", Path("generated/stubs"), output_root / "generated" / "stubs", (output_root / "generated" / "stubs").exists(), "generated_include"),
+        BuildPathEntry("generated/tests", Path("generated/tests"), output_root / "generated" / "tests", (output_root / "generated" / "tests").exists(), "generated_include"),
+        BuildPathEntry("extracted/include", Path("extracted/include"), output_root / "extracted" / "include", (output_root / "extracted" / "include").exists(), "extracted_include"),
+    ]
+    workspace_root = Path(build_context.get("workspace_root") or "")
+    for raw in build_context.get("include_dirs", []):
+        normalized = str(raw).replace("\\", "/")
+        original = (workspace_root / normalized).resolve() if workspace_root.as_posix() else Path(normalized)
+        workspace_path = Path("extracted") / normalized
+        entries.append(BuildPathEntry(normalized, workspace_path, original, original.exists(), "dsp_include"))
+    return entries
+
+
+def _defines(build_context: dict[str, Any]) -> list[str]:
+    values = list(dict.fromkeys([str(item).strip('"') for item in build_context.get("defines", []) if str(item).strip()]))
+    if "UTR_BUILD_PROBE" not in values:
+        values.append("UTR_BUILD_PROBE")
+    return values
+
+
+def _compiler_options(build_context: dict[str, Any]) -> list[str]:
+    keep_prefixes = ("/nologo", "/W", "/O", "/Z", "/M", "/G")
+    drop_prefixes = ("/Fo", "/Fd", "/Fp", "/Yu", "/Yc", "/I", "/D")
+    result = []
+    for option in build_context.get("compiler_options", []):
+        text = str(option)
+        if text.startswith(drop_prefixes):
+            continue
+        if text.startswith(keep_prefixes) and text not in result:
+            result.append(text)
+    if "/nologo" not in result:
+        result.insert(0, "/nologo")
+    if not any(item.startswith("/W") for item in result):
+        result.append("/W3")
+    return result
+
+
+def _compile_units(
+    output_root: Path,
+    copied_files: list[WorkspaceFile],
+    generated_files: list[WorkspaceFile],
+    include_dirs: list[BuildPathEntry],
+    defines: list[str],
+    compiler_options: list[str],
+) -> list[CompileUnit]:
+    source_files = [item.workspace_path for item in copied_files if item.file_kind == "target_source" and item.exists]
+    source_files.extend(
+        item.workspace_path
+        for item in generated_files
+        if item.exists and item.file_kind in {"assert_source", "runner_source", "stub_source", "test_source", "target_invocation_source"}
+    )
+    units: list[CompileUnit] = []
+    used_objects: set[str] = set()
+    for index, source in enumerate(source_files):
+        object_name = f"{source.stem}.obj"
+        if object_name in used_objects:
+            object_name = f"{source.stem}_{index}.obj"
+        used_objects.add(object_name)
+        object_file = Path("obj") / object_name
+        command = _compile_command(source, object_file, include_dirs, defines, compiler_options)
+        units.append(CompileUnit(source, object_file, include_dirs, defines, compiler_options, command, True))
+    return units
+
+
+def _write_build_files(
+    output_root: Path,
+    compile_units: list[CompileUnit],
+    include_dirs: list[BuildPathEntry],
+    defines: list[str],
+    compiler_options: list[str],
+    vcvars: Path | str | None,
+    dry_run: bool,
+) -> list[BuildCommand]:
+    makefile = _render_makefile(compile_units, include_dirs, defines, compiler_options)
+    write_build_text(output_root / "build" / "Makefile", makefile)
+    build_bat = _render_build_bat(vcvars)
+    clean_bat = "@echo off\nif exist ..\\obj\\*.obj del /q ..\\obj\\*.obj\nif exist ..\\bin\\utr_probe.exe del /q ..\\bin\\utr_probe.exe\n"
+    write_build_text(output_root / "build" / "build.bat", build_bat)
+    write_build_text(output_root / "build" / "clean.bat", clean_bat)
+    compile_commands = "\n".join(unit.command for unit in compile_units) + "\n"
+    write_build_text(output_root / "build" / "compile_commands.txt", compile_commands)
+    return [
+        BuildCommand(
+            command_id="CMD_BUILD_001",
+            command_kind="build_bat",
+            working_directory=Path("build"),
+            command_line="build.bat",
+            log_file=Path("logs/build.log"),
+            dry_run=dry_run,
+        )
+    ]
+
+
+def _build_probe_report(
+    output_root: Path,
+    source_path: Path,
+    function_name: str,
+    build_commands: list[BuildCommand],
+    harness_report: dict[str, Any],
+    run_probe: bool,
+    dry_run: bool,
+    timeout_seconds: int,
+) -> BuildProbeReport:
+    stub_candidates = {item.get("original_function_name", "") for item in harness_report.get("stub_skeletons", [])}
+    if dry_run or not run_probe:
+        log_path = output_root / "logs" / "build.log"
+        log_path.write_text("DRY RUN\nbuild.bat\n", encoding="utf-8")
+        return BuildProbeReport(
+            source_path=source_path,
+            function_name=function_name,
+            status="not_run",
+            executed=False,
+            exit_code=None,
+            commands=[],
+            diagnostics=[],
+            missing_includes=[],
+            unresolved_symbols=[],
+            pch_issues=[],
+            vc6_compatibility_issues=[],
+            log_files=[Path("logs/build.log")],
+        )
+    nmake = shutil.which("nmake")
+    cl = shutil.which("cl")
+    if not nmake and not cl:
+        diagnostic = BuildDiagnostic("missing_vc6_environment", "error", "VC6 build tools were not found on PATH.", None, None, None)
+        return BuildProbeReport(
+            source_path=source_path,
+            function_name=function_name,
+            status="environment_missing",
+            executed=False,
+            exit_code=None,
+            commands=[],
+            diagnostics=[diagnostic],
+            missing_includes=[],
+            unresolved_symbols=[],
+            pch_issues=[],
+            vc6_compatibility_issues=[],
+            log_files=[],
+        )
+    started = datetime.now(timezone.utc)
+    start_tick = time.monotonic()
+    completed = subprocess.run(["cmd.exe", "/c", "build.bat"], cwd=output_root / "build", text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout_seconds, check=False)
+    duration_ms = int((time.monotonic() - start_tick) * 1000)
+    finished = datetime.now(timezone.utc)
+    log_path = output_root / "logs" / "build.log"
+    log_path.write_text(completed.stdout, encoding="utf-8")
+    parsed = parse_build_log(completed.stdout, stub_candidates)
+    status = "succeeded" if completed.returncode == 0 else "failed"
+    return BuildProbeReport(
+        source_path=source_path,
+        function_name=function_name,
+        status=status,
+        executed=True,
+        exit_code=completed.returncode,
+        started_at=started.isoformat(),
+        finished_at=finished.isoformat(),
+        duration_ms=duration_ms,
+        commands=[
+            BuildCommandResult(
+                command_id=build_commands[0].command_id if build_commands else "CMD_BUILD_001",
+                command_kind="build_bat",
+                command_line="build.bat",
+                exit_code=completed.returncode,
+                stdout_log=None,
+                stderr_log=None,
+                combined_log=Path("logs/build.log"),
+                diagnostics=parsed.diagnostics,
+            )
+        ],
+        diagnostics=parsed.diagnostics,
+        missing_includes=parsed.missing_includes,
+        unresolved_symbols=parsed.unresolved_symbols,
+        pch_issues=parsed.pch_issues,
+        vc6_compatibility_issues=parsed.vc6_compatibility_issues,
+        log_files=[Path("logs/build.log")],
+    )
+
+
+def _compile_command(source: Path, object_file: Path, include_dirs: list[BuildPathEntry], defines: list[str], compiler_options: list[str]) -> str:
+    include_args = " ".join(f'/I"{entry.raw}"' for entry in include_dirs)
+    define_args = " ".join(f'/D"{define}"' for define in defines)
+    option_args = " ".join(compiler_options)
+    return f'cl {option_args} {define_args} {include_args} /Fo"{object_file.as_posix()}" /c "{source.as_posix()}"'
+
+
+def _render_makefile(compile_units: list[CompileUnit], include_dirs: list[BuildPathEntry], defines: list[str], compiler_options: list[str]) -> str:
+    objects = " ".join(unit.object_file.as_posix().replace("/", "\\") for unit in compile_units)
+    lines = [
+        "# generated VC6 build probe Makefile",
+        "CC=cl",
+        "LINK=link",
+        f"CFLAGS={' '.join(compiler_options)} {' '.join('/D\"' + item + '\"' for item in defines)} {' '.join('/I\"' + item.raw + '\"' for item in include_dirs)}",
+        f"OBJS={objects}",
+        "",
+        "all: ..\\bin\\utr_probe.exe",
+        "",
+        "..\\bin\\utr_probe.exe: $(OBJS)",
+        "\t$(LINK) /nologo /OUT:$@ $(OBJS)",
+        "",
+    ]
+    for unit in compile_units:
+        source = unit.source_file.as_posix().replace("/", "\\")
+        obj = unit.object_file.as_posix().replace("/", "\\")
+        lines.extend([f"{obj}: ..\\{source}", f"\t$(CC) $(CFLAGS) /Fo\"{obj}\" /c \"..\\{source}\"", ""])
+    return "\n".join(lines)
+
+
+def _render_build_bat(vcvars: Path | str | None) -> str:
+    lines = ["@echo off", "setlocal", "rem generated build probe script", "rem review required"]
+    if vcvars:
+        lines.append(f'if exist "{vcvars}" call "{vcvars}"')
+    lines.extend(["nmake /f Makefile > ..\\logs\\build.log 2>&1", "set BUILD_EXIT=%ERRORLEVEL%", "exit /b %BUILD_EXIT%"])
+    return "\n".join(lines)
+
+
+def _relative_or_name(path: Path, root: Path) -> Path:
+    try:
+        return path.resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        return Path(path.name)

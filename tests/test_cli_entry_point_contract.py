@@ -33,6 +33,7 @@ class CliEntryPointContractTests(unittest.TestCase):
             ("discover-projects", "--help"),
             ("map-source", "--help"),
             ("analyze-function", "--help"),
+            ("generate-harness-skeleton", "--help"),
             ("build-probe", "--help"),
             ("generate-test-draft", "--help"),
         ]

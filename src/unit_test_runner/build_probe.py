@@ -1,34 +1,21 @@
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 from pathlib import Path
 from typing import Any
 
-
-def _clean_symbol(symbol: str) -> str:
-    symbol = symbol.strip()
-    if symbol.startswith("_"):
-        symbol = symbol[1:]
-    return symbol
+from .build.log_parser import parse_build_log as parse_structured_build_log
 
 
 def parse_build_log(log_text: str) -> dict[str, Any]:
-    missing_includes = []
-    pch_warnings = []
+    parsed = parse_structured_build_log(log_text)
+    missing_includes = [item.include_name for item in parsed.missing_includes]
+    pch_warnings = [item.diagnostic_raw for item in parsed.pch_issues]
     unresolved_symbols = []
-    for line in log_text.splitlines():
-        include_match = re.search(r"Cannot open include file:\s*'([^']+)'", line)
-        if include_match and include_match.group(1) not in missing_includes:
-            missing_includes.append(include_match.group(1))
-        if "PCH" in line.upper() or "STDAFX" in line.upper() or "D4024" in line:
-            pch_warnings.append(line.strip())
-        unresolved_match = re.search(r"unresolved external symbol\s+(_?[A-Za-z]\w*)", line)
-        if unresolved_match:
-            symbol = _clean_symbol(unresolved_match.group(1))
-            if symbol not in unresolved_symbols:
-                unresolved_symbols.append(symbol)
+    for symbol in parsed.unresolved_symbols:
+        if symbol.symbol_name not in unresolved_symbols:
+            unresolved_symbols.append(symbol.symbol_name)
     return {
         "missing_includes": missing_includes,
         "pch_warnings": pch_warnings,
