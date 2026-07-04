@@ -180,8 +180,8 @@ class AnalysisPipelineSteps0711Tests(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             result = json.loads(completed.stdout)
-            self.assertEqual("test_case_draft_generated", result["status"])
-            self.assertIn("Step 13", result["message"])
+            self.assertEqual("harness_skeleton_generated", result["status"])
+            self.assertIn("Step 14", result["message"])
             reports = out_dir / "reports"
             for filename in [
                 "function_signature.json",
@@ -197,6 +197,8 @@ class AnalysisPipelineSteps0711Tests(unittest.TestCase):
                 "test_case_draft.json",
                 "test_case_draft.md",
                 "test_case_draft.csv",
+                "harness_skeleton_report.json",
+                "harness_skeleton_report.md",
             ]:
                 self.assertTrue((reports / filename).exists(), filename)
                 if filename.endswith(".json"):
@@ -209,6 +211,7 @@ class AnalysisPipelineSteps0711Tests(unittest.TestCase):
             self.assertIn("coverage_design", dossier)
             self.assertIn("boundary_equivalence_candidates", dossier)
             self.assertIn("test_case_draft", dossier)
+            self.assertIn("harness_skeleton", dossier)
 
 
 if __name__ == "__main__":

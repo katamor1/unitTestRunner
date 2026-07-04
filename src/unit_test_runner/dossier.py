@@ -20,6 +20,7 @@ from .c_analyzer.global_access_writer import write_global_access
 from .c_analyzer.signature_extractor import extract_signature
 from .c_analyzer.signature_writer import write_function_signature
 from .c_analyzer.source_digest import build_source_digest, write_source_digest
+from .harness import generate_harness_skeleton
 from .path_utils import normalize_relative
 from .test_design import generate_test_design
 from .test_design.test_case_draft_generator import generate_test_case_draft, generate_test_case_draft_from_payloads
@@ -230,6 +231,7 @@ def analyze_function_workflow(
     boundary_paths = write_boundary_equivalence_candidates(out_dir, boundary_candidates)
     test_case_draft = generate_test_case_draft(signature, global_access, call_report, coverage_design, boundary_candidates)
     test_case_draft_paths = write_test_case_draft_report(out_dir, test_case_draft)
+    harness_skeleton = generate_harness_skeleton(signature, global_access, call_report, test_case_draft, out_dir)
     dossier["source_digest"] = {
         "json": str(digest_paths["json"]),
         "markdown": str(digest_paths["markdown"]),
@@ -273,6 +275,11 @@ def analyze_function_workflow(
         "csv": str(test_case_draft_paths["csv"]),
         "status": test_case_draft.status,
     }
+    dossier["harness_skeleton"] = {
+        "json": str(out_dir / "reports" / "harness_skeleton_report.json"),
+        "markdown": str(out_dir / "reports" / "harness_skeleton_report.md"),
+        "status": harness_skeleton.status,
+    }
     _write_json(out_dir / "reports" / "function_dossier.json", dossier)
     _write_markdown_reports(out_dir, dossier, copied_files)
     write_function_signature(out_dir, signature)
@@ -281,8 +288,28 @@ def analyze_function_workflow(
     write_coverage_design(out_dir, coverage_design)
     write_boundary_equivalence_candidates(out_dir, boundary_candidates)
     write_test_case_draft_report(out_dir, test_case_draft)
+    generate_harness_skeleton(signature, global_access, call_report, test_case_draft, out_dir, overwrite=True)
     _write_json(out_dir / "generated" / "prompt_pack.json", {"function_dossier": dossier})
     return dossier
+
+
+def generate_harness_skeleton_from_reports(
+    function_signature_path: Path | str,
+    global_access_path: Path | str,
+    call_report_path: Path | str,
+    test_case_draft_path: Path | str,
+    out: Path | str,
+    overwrite: bool = False,
+):
+    report = generate_harness_skeleton(
+        _read_json(Path(function_signature_path)),
+        _read_json(Path(global_access_path)),
+        _read_json(Path(call_report_path)),
+        _read_json(Path(test_case_draft_path)),
+        Path(out),
+        overwrite=overwrite,
+    )
+    return report
 
 
 def generate_test_draft_from_dossier(dossier_path: Path | str, output_format: str = "csv", out: Path | str | None = None) -> Path | dict[str, Path]:

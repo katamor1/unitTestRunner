@@ -13,7 +13,12 @@ from unit_test_runner import __version__
 from unit_test_runner.build_probe import build_probe
 from unit_test_runner.c_analyzer import list_functions
 from unit_test_runner.dsw_parser import discover_dsw_workspaces, parse_dsw as parse_dsw_step03
-from unit_test_runner.dossier import analyze_function_workflow, generate_test_draft_from_dossier, generate_test_draft_from_reports
+from unit_test_runner.dossier import (
+    analyze_function_workflow,
+    generate_harness_skeleton_from_reports,
+    generate_test_draft_from_dossier,
+    generate_test_draft_from_reports,
+)
 from unit_test_runner.reports.dsw_markdown import render_dsw_discovery_markdown
 from unit_test_runner.reports.source_membership_markdown import render_source_membership_markdown
 from unit_test_runner.vc6 import discover_workspace, map_source_to_projects
@@ -32,6 +37,7 @@ def dispatch(args: argparse.Namespace) -> CLIResult:
         "map-source": handle_map_source,
         "list-functions": handle_list_functions,
         "analyze-function": handle_analyze_function,
+        "generate-harness-skeleton": handle_generate_harness_skeleton,
         "build-probe": handle_build_probe,
         "generate-test-draft": handle_generate_test_draft,
     }
@@ -214,12 +220,40 @@ def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
         "coverage_design": dossier.get("coverage_design"),
         "boundary_equivalence_candidates": dossier.get("boundary_equivalence_candidates"),
         "test_case_draft": dossier.get("test_case_draft"),
+        "harness_skeleton": dossier.get("harness_skeleton"),
     }
     return CLIResult(
-        status="test_case_draft_generated",
+        status="harness_skeleton_generated",
         exit_code=EXIT_OK,
         command=args.command,
-        message="Function analysis generated through Step 12. Step 13 Stub / Harness Skeleton Generator is required for runnable C harness skeletons.",
+        message="Function analysis generated through Step 13. Step 14 Build Workspace / Build Probe Generator is required for VC6 build probing.",
+        data=payload,
+        legacy_payload=payload,
+    )
+
+
+def handle_generate_harness_skeleton(args: argparse.Namespace) -> CLIResult:
+    report = generate_harness_skeleton_from_reports(
+        _existing_file(args.function_signature, "function-signature", args.command),
+        _existing_file(args.global_access, "global-access", args.command),
+        _existing_file(args.call_report, "call-report", args.command),
+        _existing_file(args.test_case_draft, "test-case-draft", args.command),
+        Path(args.out),
+        overwrite=args.overwrite,
+    )
+    payload = {
+        "harness_skeleton": {
+            "json": str(Path(args.out) / "reports" / "harness_skeleton_report.json"),
+            "markdown": str(Path(args.out) / "reports" / "harness_skeleton_report.md"),
+            "status": report.status,
+        },
+        "generated_file_count": len(report.generated_files),
+    }
+    return CLIResult(
+        status="harness_skeleton_generated",
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Harness skeleton generated.",
         data=payload,
         legacy_payload=payload,
     )

@@ -61,6 +61,14 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--emit-md", action="store_true")
     analyze.add_argument("--emit-csv", action="store_true")
 
+    harness = subcommands.add_parser("generate-harness-skeleton", help="Generate C90 stub and harness skeleton files from analysis reports.")
+    harness.add_argument("--function-signature", required=True)
+    harness.add_argument("--global-access", required=True)
+    harness.add_argument("--call-report", required=True)
+    harness.add_argument("--test-case-draft", required=True)
+    harness.add_argument("--out", required=True)
+    harness.add_argument("--overwrite", action="store_true")
+
     probe = subcommands.add_parser("build-probe", help="Run or prepare a build probe from a dossier.")
     probe.add_argument("--dossier", required=True)
     probe.add_argument("--vc6-bin")

@@ -142,8 +142,8 @@ class FunctionLocatorStep06Tests(unittest.TestCase):
             self.assertEqual(0, completed.returncode, completed.stderr)
             self.assertEqual("", completed.stderr)
             payload = json.loads(completed.stdout)
-            self.assertEqual("test_case_draft_generated", payload["status"])
-            self.assertIn("Step 13", payload["message"])
+            self.assertEqual("harness_skeleton_generated", payload["status"])
+            self.assertIn("Step 14", payload["message"])
             self.assertIn("function_location", payload["data"])
             self.assertTrue((out_dir / "reports" / "function_location.json").exists())
 

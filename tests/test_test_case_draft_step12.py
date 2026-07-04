@@ -123,8 +123,8 @@ class TestCaseDraftStep12Tests(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             result = json.loads(completed.stdout)
-            self.assertEqual("test_case_draft_generated", result["status"])
-            self.assertIn("Step 13", result["message"])
+            self.assertEqual("harness_skeleton_generated", result["status"])
+            self.assertIn("Step 14", result["message"])
             reports = out_dir / "reports"
             for filename in ["test_case_draft.json", "test_case_draft.md", "test_case_draft.csv"]:
                 self.assertTrue((reports / filename).exists(), filename)
