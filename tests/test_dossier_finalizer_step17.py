@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -123,6 +124,31 @@ class DossierFinalizerStep17Tests(unittest.TestCase):
             self.assertTrue(paths["next_actions"].exists())
             self.assertTrue(paths["traceability_matrix"].exists())
 
+    def test_finalize_marks_source_mismatch_and_old_artifacts_as_stale_candidates(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir) / "stale"
+            reports = workspace / "reports"
+            inputs = workspace / "input"
+            reports.mkdir(parents=True)
+            inputs.mkdir(parents=True)
+            (inputs / "request.json").write_text(json.dumps({"source": "src/control.c", "function": "Control_Update"}), encoding="utf-8")
+            (reports / "source_digest.json").write_text(json.dumps({"schema_version": "0.1", "source": {"path": "src/control.c"}, "function": {"name": "Control_Update"}}), encoding="utf-8")
+            (reports / "function_location.json").write_text(json.dumps({"schema_version": "0.1", "source": {"path": "src/control.c"}, "function": {"name": "Control_Update"}}), encoding="utf-8")
+            (reports / "function_signature.json").write_text(json.dumps({"schema_version": "0.1", "source": {"path": "src/other.c"}, "function": {"name": "Control_Update"}}), encoding="utf-8")
+            old_time = time.time() - 3600
+            os.utime(reports / "source_digest.json", (old_time, old_time))
+
+            dossier = finalize_function_dossier(workspace, function_name="Control_Update")
+            payload = dossier.to_dict()
+
+            stale = {item["artifact_kind"]: item for item in payload["artifact_index"] if item["stale_candidate"]}
+            self.assertIn("function_signature", stale)
+            self.assertIn("source_digest", stale)
+            warning_codes = {warning["code"] for warning in payload["warnings"]}
+            self.assertIn("source_path_mismatch", warning_codes)
+            self.assertIn("artifact_older_than_request", warning_codes)
+            self.assertIn("modified_at", stale["source_digest"])
+
     def test_cli_finalize_prepare_review_and_analyze_function_step17(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = self.prepare_workspace(temp_dir)
@@ -163,6 +189,23 @@ class DossierFinalizerStep17Tests(unittest.TestCase):
             self.assertEqual("dossier_finalized", full_payload["status"])
             self.assertIn("review", full_payload["data"])
             self.assertTrue((out_dir / "reports" / "review_checklist.md").exists())
+
+            final_dossier_path = out_dir / "reports" / "function_dossier.json"
+            final_dossier = json.loads(final_dossier_path.read_text(encoding="utf-8"))
+            required = set(json.loads((REPO_ROOT / "schemas" / "function_dossier.schema.json").read_text(encoding="utf-8"))["required"])
+            self.assertLessEqual(required, set(final_dossier))
+            self.assertEqual("src/control.c", final_dossier["target"]["source"])
+            self.assertEqual("Control_Update", final_dossier["target"]["function"])
+            self.assertIn("defines", final_dossier["build_context"])
+            self.assertIn("branch_coverage_items", final_dossier["test_design"])
+
+            probe = run_module("--json", "build-probe", "--dossier", str(final_dossier_path), "--dry-run")
+            self.assertEqual(0, probe.returncode, probe.stderr)
+            self.assertIn("extracted", json.loads(probe.stdout)["data"]["command"])
+
+            draft = run_module("--json", "generate-test-draft", "--dossier", str(final_dossier_path))
+            self.assertEqual(0, draft.returncode, draft.stderr)
+            self.assertEqual("test_case_draft_generated", json.loads(draft.stdout)["status"])
 
 
 if __name__ == "__main__":

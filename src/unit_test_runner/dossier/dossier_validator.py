@@ -27,8 +27,23 @@ def validate_artifacts(
     if function_name is not None:
         for kind, names in _function_names_by_artifact(payloads).items():
             if names and function_name not in names:
-                warnings.append(DossierWarning("function_name_mismatch", f"{kind} has function name(s) {sorted(names)}; expected {function_name}.", related_step=_step_for_kind(artifacts, kind)))
+                warning = DossierWarning("function_name_mismatch", f"{kind} has function name(s) {sorted(names)}; expected {function_name}.", related_step=_step_for_kind(artifacts, kind))
+                warnings.append(warning)
+                _mark_stale(artifacts, kind, warning)
     source_path = _source_path(payloads)
+    source_paths = _source_paths_by_artifact(payloads)
+    canonical_sources = {_canonical_path(path) for path in source_paths.values() if path}
+    if len(canonical_sources) > 1:
+        expected = _canonical_path(source_path) if source_path is not None else sorted(canonical_sources)[0]
+        for kind, path in source_paths.items():
+            if _canonical_path(path) != expected:
+                warning = DossierWarning(
+                    "source_path_mismatch",
+                    f"{kind} has source path {path}; expected {source_path}.",
+                    related_step=_step_for_kind(artifacts, kind),
+                )
+                warnings.append(warning)
+                _mark_stale(artifacts, kind, warning)
     if strict_schema_version:
         versions = {artifact.schema_version for artifact in artifacts if artifact.exists and artifact.schema_version}
         if len(versions) > 1:
@@ -74,6 +89,15 @@ def _source_path(payloads: dict[str, dict[str, Any]]) -> Path | None:
     return None
 
 
+def _source_paths_by_artifact(payloads: dict[str, dict[str, Any]]) -> dict[str, Path]:
+    paths: dict[str, Path] = {}
+    for kind, payload in payloads.items():
+        path = _source_path_from_payload(payload)
+        if path:
+            paths[kind] = Path(path)
+    return paths
+
+
 def _source_path_from_payload(payload: Any) -> str | None:
     if isinstance(payload, dict):
         source = payload.get("source")
@@ -108,3 +132,18 @@ def _step_for_kind(artifacts: list[DossierArtifact], kind: str) -> str | None:
         if artifact.artifact_kind == kind:
             return artifact.produced_by_step
     return None
+
+
+def _mark_stale(artifacts: list[DossierArtifact], kind: str, warning: DossierWarning) -> None:
+    for artifact in artifacts:
+        if artifact.artifact_kind == kind:
+            artifact.stale_candidate = True
+            warning.related_artifact_id = artifact.artifact_id
+            artifact.warnings.append(warning)
+            return
+
+
+def _canonical_path(path: Path | None) -> str:
+    if path is None:
+        return ""
+    return path.as_posix().lower()

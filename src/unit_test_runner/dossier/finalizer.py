@@ -25,6 +25,7 @@ def finalize_function_dossier(
 ) -> FunctionDossier:
     workspace = Path(workspace).resolve()
     policy = policy or DossierGenerationPolicy(require_schema_version_match=strict_schema_version)
+    analysis_dossier = _read_existing_dossier(workspace / "reports" / "function_dossier.json")
     artifacts, payloads, collection_warnings = collect_artifacts(workspace)
     function_name, source_path, validation_warnings, blocked_reasons = validate_artifacts(
         artifacts,
@@ -41,6 +42,12 @@ def finalize_function_dossier(
         readiness.mvp_level = mvp_level
     next_actions = build_next_actions(unresolved_items)
     status = _status_from_readiness(readiness)
+    contract_fields = _contract_fields(
+        analysis_dossier,
+        function_name=function_name,
+        source_path=source_path,
+        diagnostics=collection_warnings + validation_warnings,
+    )
     dossier = FunctionDossier(
         function_name=function_name,
         source_path=source_path,
@@ -55,6 +62,12 @@ def finalize_function_dossier(
         next_actions=next_actions,
         readiness=readiness,
         warnings=collection_warnings + validation_warnings,
+        target=contract_fields["target"],
+        project_membership=contract_fields["project_membership"],
+        build_context=contract_fields["build_context"],
+        function=contract_fields["function"],
+        test_design=contract_fields["test_design"],
+        diagnostics=contract_fields["diagnostics"],
     )
     write_dossier_reports(workspace, dossier, out)
     return dossier
@@ -75,3 +88,51 @@ def _status_from_readiness(readiness) -> str:
     if readiness.ready_for_review:
         return "ready_for_review"
     return "partial"
+
+
+def _read_existing_dossier(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _dict_field(payload: dict, key: str) -> dict:
+    value = payload.get(key)
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _list_field(payload: dict, key: str) -> list:
+    value = payload.get(key)
+    return list(value) if isinstance(value, list) else []
+
+
+def _contract_fields(
+    analysis_dossier: dict,
+    function_name: str,
+    source_path: Path | None,
+    diagnostics,
+) -> dict:
+    target = _dict_field(analysis_dossier, "target")
+    target.setdefault("source", source_path.as_posix() if source_path else "")
+    target.setdefault("function", function_name)
+    function = _dict_field(analysis_dossier, "function")
+    function.setdefault("name", function_name)
+    if source_path is not None:
+        function.setdefault("source_path", source_path.as_posix())
+    existing_diagnostics = _list_field(analysis_dossier, "diagnostics")
+    if existing_diagnostics:
+        diagnostic_payload = existing_diagnostics
+    else:
+        diagnostic_payload = [warning.to_dict() for warning in diagnostics]
+    return {
+        "target": target,
+        "project_membership": _list_field(analysis_dossier, "project_membership"),
+        "build_context": _dict_field(analysis_dossier, "build_context"),
+        "function": function,
+        "test_design": _dict_field(analysis_dossier, "test_design"),
+        "diagnostics": diagnostic_payload,
+    }

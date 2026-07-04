@@ -134,6 +134,75 @@ class CliEntryPointContractTests(unittest.TestCase):
         self.assertIn("Function not found", payload["errors"][0])
         self.assertNotEqual("internal_error", payload["status"])
 
+    def test_analyze_function_accepts_absolute_source_inside_workspace(self):
+        source = FIXTURE_ROOT / "src" / "control.c"
+        before = source.read_bytes()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            out_dir = Path(temp_dir) / "absolute-source"
+
+            completed = run_module(
+                "--json",
+                "analyze-function",
+                "--workspace",
+                str(FIXTURE_ROOT),
+                "--dsw",
+                str(FIXTURE_ROOT / "Product.dsw"),
+                "--source",
+                str(source),
+                "--function",
+                "Control_Update",
+                "--configuration",
+                "Win32 Debug",
+                "--project",
+                "Control",
+                "--out",
+                str(out_dir),
+            )
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            self.assertEqual("", completed.stderr)
+            payload = json.loads(completed.stdout)
+            self.assertEqual("evidence_prepared", payload["status"])
+            self.assertEqual("src/control.c", payload["data"]["target"]["source"])
+            request = json.loads((out_dir / "input" / "request.json").read_text(encoding="utf-8"))
+            self.assertEqual("src/control.c", request["source"])
+            self.assertTrue((out_dir / "extracted" / "src" / "control.c").exists())
+            self.assertFalse((out_dir / "extracted" / str(source).replace(":", "")).exists())
+
+        self.assertEqual(before, source.read_bytes())
+
+    def test_analyze_function_rejects_absolute_source_outside_workspace_as_input_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outside_source = Path(temp_dir) / "outside.c"
+            outside_source.write_text("int Control_Update(void) { return 0; }\n", encoding="utf-8")
+
+            completed = run_module(
+                "--json",
+                "analyze-function",
+                "--workspace",
+                str(FIXTURE_ROOT),
+                "--dsw",
+                str(FIXTURE_ROOT / "Product.dsw"),
+                "--source",
+                str(outside_source),
+                "--function",
+                "Control_Update",
+                "--configuration",
+                "Win32 Debug",
+                "--project",
+                "Control",
+                "--out",
+                str(Path(temp_dir) / "outside-output"),
+            )
+
+            self.assertEqual(1, completed.returncode)
+            self.assertEqual("", completed.stderr)
+            payload = json.loads(completed.stdout)
+            self.assertEqual("error", payload["status"])
+            self.assertEqual(1, payload["exit_code"])
+            self.assertIn("outside workspace", payload["errors"][0])
+            self.assertNotEqual("internal_error", payload["status"])
+
     def test_log_file_is_created_without_polluting_json_stdout(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             log_file = Path(temp_dir) / "runner.log"

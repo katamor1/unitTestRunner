@@ -32,6 +32,8 @@ unit-test-runner --help
 
 The repository includes a VC6-style fixture under `tests/fixtures/vc6_project`.
 
+Step16-compatible analysis flow:
+
 ```powershell
 $env:PYTHONPATH = "$PWD\src"
 $fixture = "$PWD\tests\fixtures\vc6_project"
@@ -45,6 +47,16 @@ py -m unit_test_runner build-probe --dossier "$out\reports\function_dossier.json
 py -m unit_test_runner generate-test-draft --dossier "$out\reports\function_dossier.json"
 ```
 
+Step17 finalized review flow:
+
+```powershell
+py -m unit_test_runner --json analyze-function --workspace $fixture --dsw "$fixture\Product.dsw" --source src\control.c --function Control_Update --configuration "Win32 Debug" --project Control --out $out --finalize-dossier
+py -m unit_test_runner --json finalize-dossier --workspace $out
+py -m unit_test_runner --json prepare-review --dossier "$out\reports\function_dossier.json"
+py -m unit_test_runner --json run-tests --workspace $out --dry-run
+py -m unit_test_runner --json prepare-evidence --workspace $out
+```
+
 Primary outputs:
 
 - `$out\reports\function_dossier.json`
@@ -52,6 +64,17 @@ Primary outputs:
 - `$out\reports\test_case_draft.csv`
 - `$out\generated\build\Makefile`
 - `$out\reports\build_probe.log`
+- `$out\reports\dossier_manifest.json`
+- `$out\reports\traceability_matrix.csv`
+- `$out\reports\review_checklist.md`
+- `$out\reports\unresolved_items.md`
+- `$out\reports\next_actions.md`
+
+`function_dossier.json` remains the public dossier artifact in both flows. After Step17 finalization,
+it keeps the original analysis contract fields (`target`, `project_membership`, `build_context`,
+`function`, `test_design`, and `diagnostics`) and adds review workflow fields such as
+`artifact_index`, `traceability`, `review_items`, `unresolved_items`, `next_actions`, and
+`readiness`.
 
 ## VS Code Thin Adapter
 
@@ -79,7 +102,18 @@ Required VS Code settings:
 Commands:
 
 - `UnitTestRunner: Analyze Selected Function`
+- `UnitTestRunner: Finalize Dossier`
+- `UnitTestRunner: Open Review Checklist`
+- `UnitTestRunner: Generate Test Draft`
+- `UnitTestRunner: Build Probe Dry Run`
+- `UnitTestRunner: Run Build Probe`
+- `UnitTestRunner: Run Tests`
+- `UnitTestRunner: Prepare Evidence`
+- `UnitTestRunner: Copy Last CLI Command`
 - `UnitTestRunner: Open Last Function Dossier`
+
+The adapter defaults to JSON CLI output and passes `--finalize-dossier` during analysis when
+`unitTestRunner.finalizeDossierAfterAnalyze` is `true`.
 
 ## Scope
 
