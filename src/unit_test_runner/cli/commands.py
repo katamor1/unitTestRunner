@@ -100,6 +100,10 @@ def handle_discover_projects(args: argparse.Namespace) -> CLIResult:
             message="Projects discovered.",
             data=result,
             legacy_payload=result,
+            human_output=_render_discovery_summary(
+                discover_dsw_workspaces(dsw).to_dict(),
+                Path(args.out) if args.out else None,
+            ),
         )
 
     workspace_arg = _existing_path(args.workspace, "workspace", args.command)
@@ -116,6 +120,7 @@ def handle_discover_projects(args: argparse.Namespace) -> CLIResult:
         command=args.command,
         message="Projects discovered.",
         data=result,
+        human_output=_render_discovery_summary(result, Path(args.out) if args.out else None),
     )
 
 
@@ -308,6 +313,22 @@ def _write_discovery_report(path: Path, value: dict[str, Any], command: str) -> 
             raise CLIError(f"Failed to write output file {path}: {exc}", EXIT_OUTPUT_ERROR, command) from exc
         return
     _write_json(path, value, command)
+
+
+def _render_discovery_summary(value: dict[str, Any], output_path: Path | None) -> str:
+    lines: list[str] = []
+    for workspace in value.get("workspaces", []):
+        lines.extend(
+            [
+                f"DSW parsed: {workspace.get('dsw_path', '')}",
+                f"Projects: {len(workspace.get('projects', []))}",
+                f"Dependencies: {len(workspace.get('dependencies', []))}",
+                f"Warnings: {len(workspace.get('warnings', []))}",
+            ]
+        )
+    if output_path is not None:
+        lines.append(f"Output: {output_path}")
+    return "\n".join(lines) + "\n"
 
 
 def _copy_test_draft(source: Path, target: Path, output_format: str, command: str) -> Path:

@@ -103,6 +103,16 @@ class DswCliStep03Tests(unittest.TestCase):
             self.assertIn("| Control | Control/Control.dsp | yes |", markdown)
             self.assertIn("| Control | Common |", markdown)
 
+    def test_discover_projects_human_mode_prints_short_summary(self):
+        completed = run_module("discover-projects", "--workspace", str(FIXTURE_ROOT / "dependencies" / "Product.dsw"))
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertIn("DSW parsed:", completed.stdout)
+        self.assertIn("Projects: 2", completed.stdout)
+        self.assertIn("Dependencies: 1", completed.stdout)
+        self.assertIn("Warnings: 0", completed.stdout)
+        self.assertNotIn('"workspaces"', completed.stdout)
+
     def test_map_source_without_workspace_returns_step03_partial_candidates(self):
         completed = run_module(
             "--json",
