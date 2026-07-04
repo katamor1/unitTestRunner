@@ -63,6 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--analyze-build-errors", action="store_true")
     analyze.add_argument("--apply-safe-completions", action="store_true")
     analyze.add_argument("--run-tests", action="store_true")
+    analyze.add_argument("--finalize-dossier", action="store_true")
 
     harness = subcommands.add_parser("generate-harness-skeleton", help="Generate C90 stub and harness skeleton files from analysis reports.")
     harness.add_argument("--function-signature", required=True)
@@ -116,6 +117,18 @@ def build_parser() -> argparse.ArgumentParser:
     evidence = subcommands.add_parser("prepare-evidence", help="Regenerate evidence manifest and package from a generated workspace.")
     evidence.add_argument("--workspace", required=True)
     evidence.add_argument("--out")
+
+    finalize = subcommands.add_parser("finalize-dossier", help="Finalize function dossier and review workflow artifacts from a generated workspace.")
+    finalize.add_argument("--workspace", required=True)
+    finalize.add_argument("--function")
+    finalize.add_argument("--out")
+    finalize.add_argument("--mvp-level", choices=("mvp1", "mvp2", "mvp3", "mvp4", "auto"), default="auto")
+    finalize.add_argument("--allow-missing-optional-artifacts", action="store_true", default=True)
+    finalize.add_argument("--strict-schema-version", action="store_true")
+
+    review = subcommands.add_parser("prepare-review", help="Regenerate review workflow artifacts from a finalized dossier.")
+    review.add_argument("--dossier", required=True)
+    review.add_argument("--out")
 
     draft = subcommands.add_parser("generate-test-draft", help="Generate a test draft from a dossier or analysis reports.")
     draft.add_argument("--dossier")

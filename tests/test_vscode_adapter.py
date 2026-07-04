@@ -36,19 +36,24 @@ class VscodeAdapterTests(unittest.TestCase):
             "unitTestRunner.dswPath",
             "unitTestRunner.outputRoot",
             "unitTestRunner.defaultConfiguration",
+            "unitTestRunner.sourceRoot",
             "unitTestRunner.workspaceRoot",
+            "unitTestRunner.finalizeDossierAfterAnalyze",
         ):
             self.assertIn(key, properties)
 
     def test_extension_source_invokes_cli_and_opens_generated_markdown(self):
-        source = (EXTENSION_ROOT / "src" / "extension.ts").read_text(encoding="utf-8")
+        extension = (EXTENSION_ROOT / "src" / "extension.ts").read_text(encoding="utf-8")
+        runner = (EXTENSION_ROOT / "src" / "cli" / "cliRunner.ts").read_text(encoding="utf-8")
+        builder = (EXTENSION_ROOT / "src" / "cli" / "commandBuilder.ts").read_text(encoding="utf-8")
 
-        self.assertIn("child_process", source)
-        self.assertIn("analyze-function", source)
-        self.assertIn("unitTestRunner.analyzeSelectedFunction", source)
-        self.assertIn("unitTestRunner.openLastFunctionDossier", source)
-        self.assertIn("function_dossier.md", source)
-        self.assertIn("vscode.commands.executeCommand('markdown.showPreview'", source)
+        self.assertIn("childProcess.spawn", runner)
+        self.assertIn("shell: false", runner)
+        self.assertIn("analyze-function", builder)
+        self.assertIn("--finalize-dossier", builder)
+        self.assertIn("unitTestRunner.analyzeSelectedFunction", extension)
+        self.assertIn("unitTestRunner.openLastFunctionDossier", extension)
+        self.assertIn("markdown.showPreview", extension)
 
 
 if __name__ == "__main__":

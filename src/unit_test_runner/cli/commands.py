@@ -20,11 +20,13 @@ from unit_test_runner.dsw_parser import discover_dsw_workspaces, parse_dsw as pa
 from unit_test_runner.execution import prepare_test_execution_evidence
 from unit_test_runner.dossier import (
     analyze_function_workflow,
+    finalize_function_dossier,
     generate_build_workspace_from_reports,
     generate_build_workspace_from_workspace,
     generate_harness_skeleton_from_reports,
     generate_test_draft_from_dossier,
     generate_test_draft_from_reports,
+    prepare_review_from_dossier,
 )
 from unit_test_runner.reports.dsw_markdown import render_dsw_discovery_markdown
 from unit_test_runner.reports.source_membership_markdown import render_source_membership_markdown
@@ -50,6 +52,8 @@ def dispatch(args: argparse.Namespace) -> CLIResult:
         "complete-build": handle_complete_build,
         "run-tests": handle_run_tests,
         "prepare-evidence": handle_prepare_evidence,
+        "finalize-dossier": handle_finalize_dossier,
+        "prepare-review": handle_prepare_review,
         "generate-test-draft": handle_generate_test_draft,
     }
     return handlers[args.command](args)
@@ -238,11 +242,22 @@ def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
         "test_execution": dossier.get("test_execution"),
         "evidence": dossier.get("evidence"),
     }
+    if args.finalize_dossier:
+        final_dossier = finalize_function_dossier(Path(args.out), function_name=args.function)
+        payload["review"] = _dossier_payload(Path(args.out), final_dossier)
+        return CLIResult(
+            status="dossier_finalized",
+            exit_code=EXIT_OK,
+            command=args.command,
+            message="Function analysis generated and finalized through Step 17.",
+            data=payload,
+            legacy_payload=payload,
+        )
     return CLIResult(
         status="evidence_prepared",
         exit_code=EXIT_OK,
         command=args.command,
-        message="Function analysis generated through Step 16. Step 17 Function Dossier Finalizer / Review Workflow is required for final review packaging.",
+        message="Function analysis generated through Step 16. Use --finalize-dossier or finalize-dossier for Step 17 review packaging.",
         data=payload,
         legacy_payload=payload,
     )
@@ -525,6 +540,58 @@ def handle_prepare_evidence(args: argparse.Namespace) -> CLIResult:
         data=payload,
         legacy_payload=payload,
     )
+
+
+def handle_finalize_dossier(args: argparse.Namespace) -> CLIResult:
+    workspace = _existing_dir(args.workspace, "workspace", args.command)
+    dossier = finalize_function_dossier(
+        workspace,
+        function_name=args.function,
+        out=Path(args.out) if args.out else None,
+        mvp_level=args.mvp_level,
+        strict_schema_version=args.strict_schema_version,
+    )
+    payload = _dossier_payload(workspace, dossier, Path(args.out) if args.out else None)
+    return CLIResult(
+        status="dossier_finalized",
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Function dossier finalized.",
+        data=payload,
+        legacy_payload=payload,
+    )
+
+
+def handle_prepare_review(args: argparse.Namespace) -> CLIResult:
+    dossier = _existing_file(args.dossier, "dossier", args.command)
+    paths = prepare_review_from_dossier(dossier, Path(args.out) if args.out else None)
+    payload = {"reports": {key: str(value) for key, value in paths.items()}}
+    return CLIResult(
+        status="review_prepared",
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Review workflow artifacts prepared.",
+        data=payload,
+        legacy_payload=payload,
+    )
+
+
+def _dossier_payload(workspace: Path, dossier, out: Path | None = None) -> dict[str, Any]:
+    reports = out if out else workspace / "reports"
+    return {
+        "function": dossier.function_name,
+        "status": dossier.status,
+        "readiness": dossier.readiness.to_dict(),
+        "reports": {
+            "function_dossier_json": str(reports / "function_dossier.json"),
+            "function_dossier_md": str(reports / "function_dossier.md"),
+            "dossier_manifest": str(reports / "dossier_manifest.json"),
+            "traceability_matrix": str(reports / "traceability_matrix.csv"),
+            "review_checklist": str(reports / "review_checklist.md"),
+            "unresolved_items": str(reports / "unresolved_items.md"),
+            "next_actions": str(reports / "next_actions.md"),
+        },
+    }
 
 
 def _evidence_payload(workspace: Path, report, manifest) -> dict[str, Any]:

@@ -11,15 +11,75 @@
     "Other"
   ],
   "activationEvents": [
+    "onCommand:unitTestRunner.analyzeCurrentFunction",
     "onCommand:unitTestRunner.analyzeSelectedFunction",
+    "onCommand:unitTestRunner.finalizeDossier",
+    "onCommand:unitTestRunner.openFunctionDossier",
+    "onCommand:unitTestRunner.openReviewChecklist",
+    "onCommand:unitTestRunner.openNextActions",
+    "onCommand:unitTestRunner.generateTestDraft",
+    "onCommand:unitTestRunner.buildProbeDryRun",
+    "onCommand:unitTestRunner.runBuildProbe",
+    "onCommand:unitTestRunner.runTests",
+    "onCommand:unitTestRunner.prepareEvidence",
+    "onCommand:unitTestRunner.openOutputWorkspace",
+    "onCommand:unitTestRunner.copyLastCommand",
     "onCommand:unitTestRunner.openLastFunctionDossier"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
+        "command": "unitTestRunner.analyzeCurrentFunction",
+        "title": "UnitTestRunner: Analyze Current Function"
+      },
+      {
         "command": "unitTestRunner.analyzeSelectedFunction",
         "title": "UnitTestRunner: Analyze Selected Function"
+      },
+      {
+        "command": "unitTestRunner.finalizeDossier",
+        "title": "UnitTestRunner: Finalize Dossier"
+      },
+      {
+        "command": "unitTestRunner.openFunctionDossier",
+        "title": "UnitTestRunner: Open Function Dossier"
+      },
+      {
+        "command": "unitTestRunner.openReviewChecklist",
+        "title": "UnitTestRunner: Open Review Checklist"
+      },
+      {
+        "command": "unitTestRunner.openNextActions",
+        "title": "UnitTestRunner: Open Next Actions"
+      },
+      {
+        "command": "unitTestRunner.generateTestDraft",
+        "title": "UnitTestRunner: Generate Test Draft"
+      },
+      {
+        "command": "unitTestRunner.buildProbeDryRun",
+        "title": "UnitTestRunner: Build Probe Dry Run"
+      },
+      {
+        "command": "unitTestRunner.runBuildProbe",
+        "title": "UnitTestRunner: Run Build Probe"
+      },
+      {
+        "command": "unitTestRunner.runTests",
+        "title": "UnitTestRunner: Run Tests"
+      },
+      {
+        "command": "unitTestRunner.prepareEvidence",
+        "title": "UnitTestRunner: Prepare Evidence"
+      },
+      {
+        "command": "unitTestRunner.openOutputWorkspace",
+        "title": "UnitTestRunner: Open Output Workspace"
+      },
+      {
+        "command": "unitTestRunner.copyLastCommand",
+        "title": "UnitTestRunner: Copy Last CLI Command"
       },
       {
         "command": "unitTestRunner.openLastFunctionDossier",
@@ -34,10 +94,15 @@
           "default": "unit-test-runner",
           "description": "Path to unit-test-runner CLI or executable."
         },
+        "unitTestRunner.sourceRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Production source root. Defaults to the first VS Code workspace folder."
+        },
         "unitTestRunner.workspaceRoot": {
           "type": "string",
           "default": "",
-          "description": "Production workspace root. Defaults to the first VS Code workspace folder."
+          "description": "Deprecated alias for unitTestRunner.sourceRoot."
         },
         "unitTestRunner.dswPath": {
           "type": "string",
@@ -54,17 +119,57 @@
           "default": "Win32 Debug",
           "description": "Default VC6 configuration for analyze-function."
         },
-        "unitTestRunner.projectName": {
+        "unitTestRunner.defaultProject": {
           "type": "string",
           "default": "",
           "description": "Optional VC6 project name when a source belongs to multiple projects."
+        },
+        "unitTestRunner.projectName": {
+          "type": "string",
+          "default": "",
+          "description": "Deprecated alias for unitTestRunner.defaultProject."
+        },
+        "unitTestRunner.autoOpenDossier": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open function_dossier.md after successful analysis."
+        },
+        "unitTestRunner.finalizeDossierAfterAnalyze": {
+          "type": "boolean",
+          "default": true,
+          "description": "Pass --finalize-dossier to analyze-function."
+        },
+        "unitTestRunner.useJsonOutput": {
+          "type": "boolean",
+          "default": true,
+          "description": "Pass --json to CLI commands."
+        },
+        "unitTestRunner.showOutputChannel": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Unit Test Runner output channel when running commands."
+        },
+        "unitTestRunner.runBuildProbeRequiresConfirmation": {
+          "type": "boolean",
+          "default": true,
+          "description": "Require confirmation before running build probe execution."
+        },
+        "unitTestRunner.runTestsRequiresConfirmation": {
+          "type": "boolean",
+          "default": true,
+          "description": "Require confirmation before running generated tests."
+        },
+        "unitTestRunner.commandTimeoutSeconds": {
+          "type": "number",
+          "default": 300,
+          "description": "CLI command timeout in seconds."
         }
       }
     }
   },
   "scripts": {
     "compile": "tsc -p ./",
-    "test": "npm run compile",
+    "test": "npm run compile && node --test dist/test/*.test.js",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {
