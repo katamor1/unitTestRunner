@@ -1,0 +1,75 @@
+{
+  "name": "unit-test-runner-vscode",
+  "displayName": "Unit Test Runner",
+  "description": "Thin VS Code adapter for the unit-test-runner CLI.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:unitTestRunner.analyzeSelectedFunction",
+    "onCommand:unitTestRunner.openLastFunctionDossier"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "unitTestRunner.analyzeSelectedFunction",
+        "title": "UnitTestRunner: Analyze Selected Function"
+      },
+      {
+        "command": "unitTestRunner.openLastFunctionDossier",
+        "title": "UnitTestRunner: Open Last Function Dossier"
+      }
+    ],
+    "configuration": {
+      "title": "Unit Test Runner",
+      "properties": {
+        "unitTestRunner.cliPath": {
+          "type": "string",
+          "default": "unit-test-runner",
+          "description": "Path to unit-test-runner CLI or executable."
+        },
+        "unitTestRunner.workspaceRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Production workspace root. Defaults to the first VS Code workspace folder."
+        },
+        "unitTestRunner.dswPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the VC6 .dsw file."
+        },
+        "unitTestRunner.outputRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Output root for generated function dossiers."
+        },
+        "unitTestRunner.defaultConfiguration": {
+          "type": "string",
+          "default": "Win32 Debug",
+          "description": "Default VC6 configuration for analyze-function."
+        },
+        "unitTestRunner.projectName": {
+          "type": "string",
+          "default": "",
+          "description": "Optional VC6 project name when a source belongs to multiple projects."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "test": "npm run compile",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.5"
+  }
+}

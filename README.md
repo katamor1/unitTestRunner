@@ -53,6 +53,34 @@ Primary outputs:
 - `$out\generated\build\Makefile`
 - `$out\reports\build_probe.log`
 
+## VS Code Thin Adapter
+
+The TypeScript adapter under `vscode/extension` only invokes the CLI. It does not contain parser or
+report-generation logic.
+
+```powershell
+cd vscode\extension
+npm install
+npm test
+```
+
+Required VS Code settings:
+
+```json
+{
+  "unitTestRunner.cliPath": "unit-test-runner",
+  "unitTestRunner.workspaceRoot": "D:/work/product",
+  "unitTestRunner.dswPath": "D:/work/product/Product.dsw",
+  "unitTestRunner.outputRoot": "D:/work/unit_test_workspace",
+  "unitTestRunner.defaultConfiguration": "Win32 Debug"
+}
+```
+
+Commands:
+
+- `UnitTestRunner: Analyze Selected Function`
+- `UnitTestRunner: Open Last Function Dossier`
+
 ## Scope
 
 v0.1 deliberately excludes full harness generation, measured runtime coverage, realtime behavior,

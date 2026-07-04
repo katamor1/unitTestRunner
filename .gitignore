@@ -37,3 +37,6 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+
+# Node / VS Code extension
+node_modules/
