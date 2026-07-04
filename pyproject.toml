@@ -10,7 +10,7 @@ requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
-unit-test-runner = "unit_test_runner.cli:main"
+unit-test-runner = "unit_test_runner.cli.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
