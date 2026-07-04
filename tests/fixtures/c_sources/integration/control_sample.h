@@ -1,0 +1,1 @@
+#define CONTROL_SAMPLE_H 1

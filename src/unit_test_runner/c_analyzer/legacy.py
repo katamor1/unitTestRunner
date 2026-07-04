@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .encoding import read_text_auto
+from ..encoding import read_text_auto
 
 
 KEYWORDS = {

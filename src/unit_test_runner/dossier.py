@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .c_analyzer import analyze_function
+from .c_analyzer.source_digest import build_source_digest, write_source_digest
 from .path_utils import normalize_relative
 from .test_design import generate_test_design
 from .vc6 import select_project_context
@@ -160,7 +161,7 @@ def analyze_function_workflow(
 ) -> dict[str, Any]:
     workspace_root = Path(workspace_root).resolve()
     out_dir = Path(out_dir).resolve()
-    for child in ("input", "extracted", "generated", "reports"):
+    for child in ("input", "extracted", "generated", "reports", "intermediate"):
         (out_dir / child).mkdir(parents=True, exist_ok=True)
     project, config, memberships = select_project_context(workspace_root, dsw_path, source, configuration, project_name)
     source_path = (workspace_root / source).resolve()
@@ -197,6 +198,13 @@ def analyze_function_workflow(
         "function": function,
         "test_design": test_design,
         "diagnostics": config.get("diagnostics", []) + function.get("diagnostics", []),
+    }
+    digest = build_source_digest(source_path, dossier["build_context"])
+    digest_paths = write_source_digest(out_dir, digest)
+    dossier["source_digest"] = {
+        "json": str(digest_paths["json"]),
+        "markdown": str(digest_paths["markdown"]),
+        "masked_source": str(digest_paths["masked_source"]),
     }
     _write_json(out_dir / "reports" / "function_dossier.json", dossier)
     _write_markdown_reports(out_dir, dossier, copied_files)
