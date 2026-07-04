@@ -4,12 +4,12 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .dsw_parser import parse_dsw as parse_dsw_workspace
 from .encoding import read_text_auto
-from .models import BuildConfiguration, DswProjectReference, Project
+from .models import BuildConfiguration, Project
 from .path_utils import normalize_include_dir, normalize_relative, resolve_vc6_path
 
 
-PROJECT_RE = re.compile(r'^Project:\s+"(?P<name>[^"]+)"=(?P<path>.*?)\s+-', re.MULTILINE)
 CFG_RE = re.compile(r'!\s*(?:IF|ELSEIF)\s+"\$\(CFG\)"\s*==\s*"(?P<cfg>[^"]+)"')
 NAME_RE = re.compile(r'Name="(?P<name>[^"]+)"')
 
@@ -27,35 +27,24 @@ def _short_configuration(full_name: str, project_name: str) -> str:
     return full_name
 
 
-def _extract_project_blocks(text: str) -> list[tuple[re.Match[str], str]]:
-    matches = list(PROJECT_RE.finditer(text))
-    blocks = []
-    for index, match in enumerate(matches):
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        blocks.append((match, text[match.end() : end]))
-    return blocks
-
-
 def parse_dsw(dsw_path: Path) -> dict[str, Any]:
-    text = _read_text(Path(dsw_path))
     dsw_path = Path(dsw_path).resolve()
-    projects: list[DswProjectReference] = []
-    for match, block in _extract_project_blocks(text):
-        raw_path = match.group("path").strip()
-        dsp_path = resolve_vc6_path(dsw_path.parent, raw_path)
-        dependencies = re.findall(r"Project_Dep_Name\s+([^\s\r\n]+)", block)
-        projects.append(
-            DswProjectReference(
-                project_name=match.group("name"),
-                dsp_path=dsp_path,
-                dsp=normalize_relative(dsp_path, dsw_path.parent),
-                dependencies=dependencies,
-            )
-        )
+    workspace = parse_dsw_workspace(dsw_path)
+    dependency_map: dict[str, list[str]] = {}
+    for dependency in workspace.dependencies:
+        dependency_map.setdefault(dependency.from_project, []).append(dependency.to_project)
     return {
         "workspace_name": dsw_path.stem,
         "dsw": normalize_relative(dsw_path, dsw_path.parent),
-        "projects": [project.to_dict() for project in projects],
+        "projects": [
+            {
+                "project_name": project.name,
+                "dsp_path": project.dsp_path_absolute,
+                "dsp": project.dsp_path.as_posix(),
+                "dependencies": dependency_map.get(project.name, []),
+            }
+            for project in workspace.projects
+        ],
     }
 
 

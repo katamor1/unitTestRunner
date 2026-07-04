@@ -3,22 +3,27 @@ from __future__ import annotations
 from pathlib import Path
 
 
-READ_ENCODINGS = ("utf-8-sig", "cp932", "shift_jis")
+READ_ENCODINGS = ("utf-8-sig", "utf-8", "cp932", "shift_jis")
 GENERATED_C_ENCODING = "cp932"
 GENERATED_C_NEWLINE = "\r\n"
 
 
-def read_text_auto(path: Path | str) -> str:
+def read_text_with_encoding(path: Path | str) -> tuple[str, str, bool]:
     data = Path(path).read_bytes()
     last_error: UnicodeDecodeError | None = None
-    for encoding in READ_ENCODINGS:
+    for index, encoding in enumerate(READ_ENCODINGS):
         try:
-            return data.decode(encoding)
+            return data.decode(encoding), encoding, index > 0
         except UnicodeDecodeError as exc:
             last_error = exc
     if last_error:
         raise last_error
-    return ""
+    return "", READ_ENCODINGS[0], False
+
+
+def read_text_auto(path: Path | str) -> str:
+    text, _, _ = read_text_with_encoding(path)
+    return text
 
 
 def normalize_crlf(text: str) -> str:

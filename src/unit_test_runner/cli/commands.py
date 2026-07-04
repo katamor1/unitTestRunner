@@ -12,7 +12,9 @@ from typing import Any
 from unit_test_runner import __version__
 from unit_test_runner.build_probe import build_probe
 from unit_test_runner.c_analyzer import list_functions
+from unit_test_runner.dsw_parser import discover_dsw_workspaces, parse_dsw as parse_dsw_step03
 from unit_test_runner.dossier import analyze_function_workflow, generate_test_draft_from_dossier
+from unit_test_runner.reports.dsw_markdown import render_dsw_discovery_markdown
 from unit_test_runner.vc6 import discover_workspace, map_source_to_projects
 
 from .errors import CLIError
@@ -80,37 +82,86 @@ def handle_doctor(args: argparse.Namespace) -> CLIResult:
 
 
 def handle_discover_projects(args: argparse.Namespace) -> CLIResult:
-    workspace = _existing_dir(args.workspace, "workspace", args.command)
-    dsw = _resolve_dsw(workspace, args.dsw, args.command)
-    result = discover_workspace(workspace, dsw)
+    if args.dsw:
+        workspace = _existing_dir(args.workspace, "workspace", args.command)
+        dsw = _resolve_dsw(workspace, args.dsw, args.command)
+        result = discover_workspace(workspace, dsw)
+        if args.out:
+            out = Path(args.out)
+            if out.suffix.lower() == ".md":
+                discovery = discover_dsw_workspaces(dsw)
+                _write_discovery_report(out, discovery.to_dict(), args.command)
+            else:
+                _write_json(out, result, args.command)
+        return CLIResult(
+            status="ok",
+            exit_code=EXIT_OK,
+            command=args.command,
+            message="Projects discovered.",
+            data=result,
+            legacy_payload=result,
+        )
+
+    workspace_arg = _existing_path(args.workspace, "workspace", args.command)
+    try:
+        discovery = discover_dsw_workspaces(workspace_arg)
+    except FileNotFoundError as exc:
+        raise CLIError(str(exc), EXIT_NOT_FOUND, args.command) from exc
+    result = discovery.to_dict()
     if args.out:
-        _write_json(Path(args.out), result, args.command)
+        _write_discovery_report(Path(args.out), result, args.command)
     return CLIResult(
         status="ok",
         exit_code=EXIT_OK,
         command=args.command,
         message="Projects discovered.",
         data=result,
-        legacy_payload=result,
     )
 
 
 def handle_map_source(args: argparse.Namespace) -> CLIResult:
     dsw = _existing_file(args.dsw, "dsw", args.command)
-    workspace = _workspace_from_args(args.workspace, dsw)
-    matches = map_source_to_projects(workspace, dsw, args.source, args.project)
-    if args.configuration:
-        matches = [match for match in matches if match["configuration"] == args.configuration]
-    payload = {"matches": matches}
+    if args.workspace:
+        workspace = _workspace_from_args(args.workspace, dsw)
+        matches = map_source_to_projects(workspace, dsw, args.source, args.project)
+        if args.configuration:
+            matches = [match for match in matches if match["configuration"] == args.configuration]
+        payload = {"matches": matches}
+        if args.out:
+            _write_json(Path(args.out), payload, args.command)
+        return CLIResult(
+            status="ok",
+            exit_code=EXIT_OK,
+            command=args.command,
+            message="Source mapping completed.",
+            data=payload,
+            legacy_payload=payload,
+        )
+
+    workspace = parse_dsw_step03(dsw)
+    candidate_projects = [
+        {
+            "name": project.name,
+            "dsp_path": project.dsp_path.as_posix(),
+            "dsp_path_absolute": str(project.dsp_path_absolute).replace("\\", "/"),
+            "exists": project.exists,
+        }
+        for project in workspace.projects
+        if args.project is None or project.name == args.project
+    ]
+    payload = {
+        "source": args.source,
+        "candidate_projects": candidate_projects,
+        "warnings": [warning.to_dict() for warning in workspace.warnings],
+    }
     if args.out:
         _write_json(Path(args.out), payload, args.command)
     return CLIResult(
-        status="ok",
+        status="partial",
         exit_code=EXIT_OK,
         command=args.command,
-        message="Source mapping completed.",
+        message="DSW parsed. DSP source membership requires Step 04.",
         data=payload,
-        legacy_payload=payload,
     )
 
 
@@ -208,6 +259,13 @@ def _existing_dir(value: str | Path, label: str, command: str) -> Path:
     return path.resolve()
 
 
+def _existing_path(value: str | Path, label: str, command: str) -> Path:
+    path = Path(value).expanduser()
+    if not path.exists():
+        raise CLIError(f"{label} path not found: {path}", EXIT_NOT_FOUND, command)
+    return path.resolve()
+
+
 def _existing_source(workspace: Path, source: str, command: str) -> Path:
     path = Path(source)
     if not path.is_absolute():
@@ -239,6 +297,17 @@ def _write_json(path: Path, value: dict[str, Any], command: str) -> None:
         path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     except OSError as exc:
         raise CLIError(f"Failed to write output file {path}: {exc}", EXIT_OUTPUT_ERROR, command) from exc
+
+
+def _write_discovery_report(path: Path, value: dict[str, Any], command: str) -> None:
+    if path.suffix.lower() == ".md":
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(render_dsw_discovery_markdown(value), encoding="utf-8")
+        except OSError as exc:
+            raise CLIError(f"Failed to write output file {path}: {exc}", EXIT_OUTPUT_ERROR, command) from exc
+        return
+    _write_json(path, value, command)
 
 
 def _copy_test_draft(source: Path, target: Path, output_format: str, command: str) -> Path:
