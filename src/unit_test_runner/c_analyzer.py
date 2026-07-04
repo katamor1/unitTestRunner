@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .encoding import read_text_auto
+
 
 KEYWORDS = {
     "if",
@@ -18,7 +20,7 @@ KEYWORDS = {
 
 
 def _read_text(path: Path) -> str:
-    return Path(path).read_text(encoding="utf-8", errors="replace")
+    return read_text_auto(path)
 
 
 def mask_comments_and_strings(text: str) -> str:

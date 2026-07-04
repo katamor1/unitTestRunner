@@ -57,3 +57,13 @@ Primary outputs:
 
 v0.1 deliberately excludes full harness generation, measured runtime coverage, realtime behavior,
 interrupt simulation, and hardware I/O reproduction. Those are Phase 2+ concerns.
+
+## Encoding Policy
+
+VC6 project files and target C sources are treated as legacy Windows inputs. The reader accepts
+`utf-8-sig`, `cp932`, and `shift_jis`; Shift-JIS/CP932 source comments are a normal case, not an
+exception path. Extracted source/header files are copied byte-for-byte.
+
+Generated C-family artifacts for future mocks, stubs, and runners must be written as CP932 with
+CRLF line endings so they stay friendly to the target VC6 workflow. JSON and Markdown reports remain
+UTF-8 unless a later workflow requires a different reviewer-facing format.

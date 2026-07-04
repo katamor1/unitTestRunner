@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .encoding import read_text_auto
+from .models import BuildConfiguration, DswProjectReference, Project
 from .path_utils import normalize_include_dir, normalize_relative, resolve_vc6_path
 
 
@@ -13,7 +15,7 @@ NAME_RE = re.compile(r'Name="(?P<name>[^"]+)"')
 
 
 def _read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="replace")
+    return read_text_auto(path)
 
 
 def _short_configuration(full_name: str, project_name: str) -> str:
@@ -37,23 +39,23 @@ def _extract_project_blocks(text: str) -> list[tuple[re.Match[str], str]]:
 def parse_dsw(dsw_path: Path) -> dict[str, Any]:
     text = _read_text(Path(dsw_path))
     dsw_path = Path(dsw_path).resolve()
-    projects = []
+    projects: list[DswProjectReference] = []
     for match, block in _extract_project_blocks(text):
         raw_path = match.group("path").strip()
         dsp_path = resolve_vc6_path(dsw_path.parent, raw_path)
         dependencies = re.findall(r"Project_Dep_Name\s+([^\s\r\n]+)", block)
         projects.append(
-            {
-                "project_name": match.group("name"),
-                "dsp_path": dsp_path,
-                "dsp": normalize_relative(dsp_path, dsw_path.parent),
-                "dependencies": dependencies,
-            }
+            DswProjectReference(
+                project_name=match.group("name"),
+                dsp_path=dsp_path,
+                dsp=normalize_relative(dsp_path, dsw_path.parent),
+                dependencies=dependencies,
+            )
         )
     return {
         "workspace_name": dsw_path.stem,
         "dsw": normalize_relative(dsw_path, dsw_path.parent),
-        "projects": projects,
+        "projects": [project.to_dict() for project in projects],
     }
 
 
@@ -100,25 +102,20 @@ def _parse_cpp_options(line: str, dsp_dir: Path, workspace_root: Path) -> dict[s
     }
 
 
-def _merge_options(target: dict[str, Any], options: dict[str, Any]) -> None:
+def _merge_options(target: BuildConfiguration, options: dict[str, Any]) -> None:
     for key in ("defines", "include_dirs", "forced_includes", "compiler_options", "unresolved_macros"):
+        items = getattr(target, key)
         for value in options[key]:
-            _append_unique(target[key], value)
+            _append_unique(items, value)
     if options["precompiled_header"]["enabled"]:
-        target["precompiled_header"] = options["precompiled_header"]
+        target.precompiled_header = options["precompiled_header"]
 
 
-def _empty_configuration(full_name: str) -> dict[str, Any]:
-    return {
-        "full_name": full_name,
-        "defines": [],
-        "include_dirs": [],
-        "forced_includes": [],
-        "precompiled_header": {"enabled": False, "header": None, "mode": None},
-        "compiler_options": [],
-        "unresolved_macros": [],
-        "diagnostics": [],
-    }
+def _empty_configuration(full_name: str) -> BuildConfiguration:
+    return BuildConfiguration(
+        full_name=full_name,
+        precompiled_header={"enabled": False, "header": None, "mode": None},
+    )
 
 
 def _classify_sources(text: str, dsp_path: Path, workspace_root: Path) -> tuple[list[str], list[str]]:
@@ -142,7 +139,7 @@ def parse_dsp(dsp_path: Path, workspace_root: Path) -> dict[str, Any]:
     name_match = NAME_RE.search(text)
     project_name = name_match.group("name") if name_match else dsp_path.stem
     sources, headers = _classify_sources(text, dsp_path, workspace_root)
-    configurations: dict[str, dict[str, Any]] = {}
+    configurations: dict[str, BuildConfiguration] = {}
     current_config: str | None = None
 
     for line in text.splitlines():
@@ -161,21 +158,21 @@ def parse_dsp(dsp_path: Path, workspace_root: Path) -> dict[str, Any]:
             _merge_options(configurations[current_config], options)
 
     for config in configurations.values():
-        for include_dir in config["include_dirs"]:
+        for include_dir in config.include_dirs:
             if "$(" in include_dir:
-                config["diagnostics"].append({"severity": "warning", "message": f"Unresolved macro in include dir: {include_dir}"})
+                config.diagnostics.append({"severity": "warning", "message": f"Unresolved macro in include dir: {include_dir}"})
             else:
                 include_path = workspace_root / include_dir
                 if not include_path.exists():
-                    config["diagnostics"].append({"severity": "warning", "message": f"Include dir does not exist: {include_dir}"})
+                    config.diagnostics.append({"severity": "warning", "message": f"Include dir does not exist: {include_dir}"})
 
-    return {
-        "project_name": project_name,
-        "dsp": normalize_relative(dsp_path, workspace_root),
-        "sources": sources,
-        "headers": headers,
-        "configurations": configurations,
-    }
+    return Project(
+        project_name=project_name,
+        dsp=normalize_relative(dsp_path, workspace_root),
+        sources=sources,
+        headers=headers,
+        configurations=configurations,
+    ).to_dict()
 
 
 def discover_workspace(workspace_root: Path | str, dsw_path: Path | str) -> dict[str, Any]:
