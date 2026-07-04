@@ -82,6 +82,10 @@ class DspParserStep04Tests(unittest.TestCase):
         self.assertEqual("ok", filtered.status)
         self.assertEqual(["ProductB"], [match.project_name for match in filtered.matches])
 
+        missing_config = map_source_membership(WORKSPACE_FIXTURE / "Product.dsw", "shared/shared.c", configuration="DoesNotExist")
+        self.assertEqual("not_found", missing_config.status)
+        self.assertEqual([], missing_config.matches)
+
     def test_map_source_cli_without_workspace_is_full_step04_mapping(self):
         completed = run_module(
             "--json",

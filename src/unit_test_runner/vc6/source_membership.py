@@ -90,6 +90,8 @@ def map_source_membership(
         if not matching_entries:
             continue
         configs = _filter_configurations(dsp_project.configurations, configuration)
+        if not configs:
+            continue
         for entry in matching_entries:
             result.matches.append(
                 SourceMembershipMatch(

@@ -190,6 +190,7 @@ def analyze_function_workflow(
         },
         "project_membership": memberships,
         "build_context": {
+            "workspace_root": str(workspace_root),
             "defines": config["defines"],
             "include_dirs": config["include_dirs"],
             "compiler_options": config["compiler_options"],

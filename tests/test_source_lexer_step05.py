@@ -103,6 +103,16 @@ class SourceLexerStep05Tests(unittest.TestCase):
             self.assertTrue((out_dir / "reports" / "source_digest.json").exists())
             self.assertTrue((out_dir / "reports" / "source_digest.md").exists())
             self.assertTrue((out_dir / "intermediate" / "masked_source.c").exists())
+            digest = json.loads((out_dir / "reports" / "source_digest.json").read_text(encoding="utf-8"))
+            control_include = next(item for item in digest["preprocessor"]["includes"] if item["target"] == "control.h")
+            self.assertTrue(control_include["exists"])
+            self.assertFalse(
+                [
+                    warning
+                    for warning in digest["warnings"]
+                    if warning["code"] == "include_not_found" and "control.h" in warning["message"]
+                ]
+            )
 
 
 if __name__ == "__main__":

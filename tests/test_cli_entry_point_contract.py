@@ -101,6 +101,34 @@ class CliEntryPointContractTests(unittest.TestCase):
         self.assertEqual(2, payload["exit_code"])
         self.assertIn("missing.dsw", payload["errors"][0])
 
+    def test_analyze_function_expected_lookup_failures_are_not_internal_errors(self):
+        completed = run_module(
+            "--json",
+            "analyze-function",
+            "--workspace",
+            str(FIXTURE_ROOT),
+            "--dsw",
+            str(FIXTURE_ROOT / "Product.dsw"),
+            "--source",
+            "src/control.c",
+            "--function",
+            "MissingFunction",
+            "--configuration",
+            "Win32 Debug",
+            "--project",
+            "Control",
+            "--out",
+            str(Path(tempfile.gettempdir()) / "unitTestRunner-missing-function"),
+        )
+
+        self.assertEqual(2, completed.returncode)
+        self.assertEqual("", completed.stderr)
+        payload = json.loads(completed.stdout)
+        self.assertEqual("error", payload["status"])
+        self.assertEqual(2, payload["exit_code"])
+        self.assertIn("Function not found", payload["errors"][0])
+        self.assertNotEqual("internal_error", payload["status"])
+
     def test_log_file_is_created_without_polluting_json_stdout(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             log_file = Path(temp_dir) / "runner.log"

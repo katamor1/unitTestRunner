@@ -154,9 +154,15 @@ def _flip_state(state: str) -> str:
 
 def _include_dirs(build_context: dict[str, Any]) -> list[Path]:
     result = []
+    workspace_root = build_context.get("workspace_root")
+    workspace = Path(workspace_root) if workspace_root else None
     for item in build_context.get("include_dirs", []):
         if isinstance(item, dict) and item.get("absolute"):
             result.append(Path(item["absolute"]))
+        elif isinstance(item, dict) and item.get("normalized"):
+            path = Path(item["normalized"])
+            result.append(path if path.is_absolute() or workspace is None else workspace / path)
         elif isinstance(item, str):
-            result.append(Path(item))
+            path = Path(item)
+            result.append(path if path.is_absolute() or workspace is None else workspace / path)
     return result

@@ -191,24 +191,29 @@ def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
     dsw = _existing_file(args.dsw, "dsw", args.command)
     workspace = _workspace_from_args(args.workspace, dsw)
     _existing_source(workspace, args.source, args.command)
-    dossier = analyze_function_workflow(
-        workspace,
-        dsw,
-        args.source,
-        args.function,
-        args.configuration,
-        args.out,
-        args.project,
-    )
+    try:
+        dossier = analyze_function_workflow(
+            workspace,
+            dsw,
+            args.source,
+            args.function,
+            args.configuration,
+            args.out,
+            args.project,
+        )
+    except ValueError as exc:
+        raise CLIError(str(exc), EXIT_NOT_FOUND, args.command) from exc
     payload = {
         "dossier": str(Path(args.out) / "reports" / "function_dossier.json"),
         "target": dossier["target"],
+        "source_digest": dossier.get("source_digest"),
+        "function_location": dossier.get("function_location"),
     }
     return CLIResult(
-        status="ok",
+        status="located",
         exit_code=EXIT_OK,
         command=args.command,
-        message="Function dossier generated.",
+        message="Function location generated. Step 07 Signature Extractor is required for detailed signature analysis.",
         data=payload,
         legacy_payload=payload,
     )
