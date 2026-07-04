@@ -18,7 +18,13 @@ from .completion_models import (
     PchCompletionCandidate,
     StubCompletionCandidate,
 )
+from .compatibility_feedback import plan_compatibility_feedback
+from .completion_loop import build_iteration_report
 from .completion_report_writer import write_completion_reports
+from .diagnostic_classifier import summarize_diagnostics
+from .include_completion import find_include_candidates, plan_include_completions
+from .pch_completion import plan_pch_completions
+from .stub_completion import plan_stub_completions
 from .symbol_normalizer import normalize_link_symbol
 
 
@@ -59,10 +65,18 @@ def analyze_build_errors(
     actions: list[CompletionAction] = []
     warnings: list[BuildCompletionWarning] = []
     manual_items: list[ManualActionItem] = []
-    include_candidates = _include_candidates(build_probe_report, source_root, actions, warnings, manual_items, policy)
-    stub_candidates = _stub_candidates(build_probe_report, call_report, actions, warnings, policy)
-    pch_candidates = _pch_candidates(build_probe_report, actions, manual_items)
-    compatibility = _compatibility_feedback(build_probe_report, manual_items)
+    include_candidates, include_actions, include_warnings, include_manual = plan_include_completions(build_probe_report, source_root, policy)
+    stub_candidates, stub_actions, stub_warnings = plan_stub_completions(build_probe_report, call_report, policy)
+    pch_candidates, pch_actions, pch_manual = plan_pch_completions(build_probe_report)
+    compatibility, compatibility_manual = plan_compatibility_feedback(build_probe_report)
+    actions.extend(include_actions)
+    actions.extend(stub_actions)
+    actions.extend(pch_actions)
+    warnings.extend(include_warnings)
+    warnings.extend(stub_warnings)
+    manual_items.extend(include_manual)
+    manual_items.extend(pch_manual)
+    manual_items.extend(compatibility_manual)
     status = _plan_status(actions, manual_items, build_probe_report)
     plan = BuildCompletionPlan(
         source_path=source_path,
@@ -77,45 +91,12 @@ def analyze_build_errors(
         manual_action_items=manual_items,
         warnings=warnings,
     )
-    summary = diagnostics_summary(build_probe_report)
-    iteration = BuildCompletionIterationReport(
-        source_path=source_path,
-        function_name=function_name,
-        status=status,
-        iterations=[
-            CompletionIteration(
-                iteration_index=1,
-                input_probe_report=Path("reports/build_probe_report.json"),
-                completion_plan=Path("reports/build_completion_plan.json"),
-                applied_actions=[],
-                skipped_actions=[action.action_id for action in actions],
-                generated_files=[],
-                probe_executed=False,
-                probe_report=Path("reports/build_probe_report.json"),
-                diagnostics_before=summary,
-                diagnostics_after=None,
-                progress="not_run",
-            )
-        ],
-        final_build_probe_status=build_probe_report.get("function", {}).get("status", "not_run"),
-        final_diagnostics_summary=summary,
-        stop_reason="completion plan generated; safe completions are not applied unless explicitly requested",
-        next_recommended_action="Review build_completion_plan and run complete-build with --apply-safe-completions if appropriate.",
-        warnings=[],
-    )
+    iteration = build_iteration_report(plan, build_probe_report)
     return plan, iteration
 
 
 def diagnostics_summary(build_probe_report: dict[str, Any]) -> DiagnosticsSummary:
-    diagnostics = build_probe_report.get("diagnostics", [])
-    return DiagnosticsSummary(
-        missing_include_count=len(build_probe_report.get("missing_includes", [])),
-        unresolved_symbol_count=len(build_probe_report.get("unresolved_symbols", [])),
-        pch_issue_count=len(build_probe_report.get("pch_issues", [])),
-        vc6_compatibility_issue_count=len(build_probe_report.get("vc6_compatibility_issues", [])),
-        compiler_error_count=len([item for item in diagnostics if item.get("severity") == "error"]),
-        compiler_warning_count=len([item for item in diagnostics if item.get("severity") == "warning"]),
-    )
+    return summarize_diagnostics(build_probe_report)
 
 
 def _include_candidates(
@@ -323,15 +304,7 @@ def _plan_status(actions: list[CompletionAction], manual_items: list[ManualActio
 
 
 def _find_include_candidates(root: Path, include_name: str, max_results: int) -> list[Path]:
-    if not root.exists():
-        return []
-    found: list[Path] = []
-    for path in root.rglob(Path(include_name).name):
-        if path.is_file() and path.name.lower() == Path(include_name).name.lower():
-            found.append(path.resolve())
-            if len(found) >= max_results:
-                break
-    return found
+    return find_include_candidates(root, include_name, max_results)
 
 
 def _source_root_from_context(path: Path) -> Path | None:

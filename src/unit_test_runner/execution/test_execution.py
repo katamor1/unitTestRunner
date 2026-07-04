@@ -25,7 +25,12 @@ from .execution_models import (
     TestExecutionWarning,
     TestResultSummary,
 )
+from .evidence_manifest import build_evidence_manifest, write_evidence_package
+from .executable_resolver import resolve_executable
+from .execution_runner import build_execution_command, environment_summary, run_test_executable
+from .precondition_validator import validate_execution_preconditions
 from .runner_output_parser import parse_runner_output
+from .test_result_writer import render_execution_markdown, render_review_items, write_test_execution_reports
 
 
 def prepare_test_execution_evidence(
@@ -56,14 +61,8 @@ def prepare_test_execution_evidence(
     )
     function_name = test_case_draft.get("function", {}).get("name") or build_workspace.get("function", {}).get("name") or "unknown_function"
     source_path = Path(build_workspace.get("source", {}).get("path") or "")
-    executable_info = _resolve_executable(workspace, executable, build_probe)
-    command = ExecutionCommand(
-        command_line=f'"{executable_info.path.as_posix()}"',
-        working_directory=workspace,
-        environment_summary=_environment_summary(),
-        timeout_seconds=timeout_seconds,
-        dry_run=dry_run or not run_tests,
-    )
+    executable_info = resolve_executable(workspace, executable, build_probe)
+    command = build_execution_command(workspace, executable_info, timeout_seconds=timeout_seconds, dry_run=dry_run or not run_tests)
     review_items = _placeholder_review_items(harness_report, test_case_draft)
     warnings: list[TestExecutionWarning] = []
     command_result: ExecutionCommandResult | None = None
@@ -72,25 +71,14 @@ def prepare_test_execution_evidence(
     status = "not_run"
     executed = False
     if run_tests and not dry_run:
-        if policy.require_successful_build_probe and build_probe.get("function", {}).get("status") != "succeeded":
+        precondition_status, precondition_warnings, precondition_review_items = validate_execution_preconditions(build_probe, executable_info, policy)
+        if precondition_status == "blocked":
             status = "blocked"
-            warnings.append(TestExecutionWarning("build_probe_not_successful", "Build probe is not successful; test execution is blocked."))
-            review_items.append(
-                ExecutionReviewItem(
-                    "REVIEW_BUILD_001",
-                    "build_not_successful",
-                    None,
-                    "Build probe did not succeed before test execution.",
-                    "Resolve build probe diagnostics before running generated tests.",
-                    "error",
-                )
-            )
-        elif not executable_info.exists:
-            status = "blocked"
-            warnings.extend(executable_info.warnings)
+            warnings.extend(precondition_warnings)
+            review_items.extend(precondition_review_items)
         else:
             executed = True
-            command_result, parsed_summary, case_results, status = _run_executable(workspace, executable_info.path, timeout_seconds)
+            command_result, parsed_summary, case_results, status = run_test_executable(workspace, executable_info, timeout_seconds)
     else:
         (logs / "test_execution.log").write_text("DRY RUN\n" + command.command_line + "\n", encoding="utf-8")
         command_result = ExecutionCommandResult(None, None, None, None, None, None, Path("logs/test_execution.log"), False)
@@ -117,9 +105,9 @@ def prepare_test_execution_evidence(
         warnings=warnings,
         policy=policy,
     )
-    _write_test_reports(workspace, report)
-    manifest = _build_manifest(workspace, report, build_probe, build_workspace, completion_report)
-    _write_manifest_and_package(workspace, manifest, report)
+    write_test_execution_reports(workspace, report)
+    manifest = build_evidence_manifest(workspace, report, build_probe, build_workspace, completion_report)
+    write_evidence_package(workspace, manifest, report)
     return report, manifest
 
 
