@@ -18,6 +18,7 @@
 - [詳細設計書](docs/detailed_design.md)
 - [テスト仕様書](docs/test_specification.md)
 - [配布用バイナリ作成手順書](docs/distribution_binary_build_guide.md)
+- [VS Code利用手順書](docs/vscode_usage_guide.md)
 - [v0.1スモークサンプル](docs/v0.1_smoke_sample.md)
 
 ## 開発と検証
@@ -113,6 +114,12 @@ py -m unit_test_runner build-probe --dossier "$out\reports\function_dossier.json
 
 `vscode/extension` 配下のTypeScript拡張はCLIを呼び出すadapterです。C解析、レポート生成、dossier確定のロジックは持ちません。
 
+VS Code上からの操作手順は [VS Code利用手順書](docs/vscode_usage_guide.md) にまとめています。
+
+利用時は、Activity Bar の `Unit Test Runner` から `Workflow` パネルを開きます。最初の解析は対象Cファイル上の右クリックメニュー、またはパネルの `現在関数を解析` / `選択関数を解析` から開始できます。以降はパネルが `function_dossier.md`、レビュー項目、テスト設計、build probe、テスト実行、エビデンス確認の順に現在の推奨工程を強調します。
+
+パネルから開いたレポートは保存検知で次工程へ進みます。編集不要の場合は、パネルの `保存済みとして確定` で次のアクションへ進めます。
+
 代表設定は以下です。
 
 ```json
@@ -129,7 +136,7 @@ VSIXに `bin/win32-x64/unit-test-runner.exe` が同梱されている場合、`u
 
 `unitTestRunner.workspaceRoot` と `unitTestRunner.projectName` は互換用の旧設定名です。新規設定では `unitTestRunner.sourceRoot` と `unitTestRunner.defaultProject` を使います。
 
-主なコマンドは以下です。
+サイドパネルからも呼び出す既存コマンドは以下です。
 
 - `UnitTestRunner: Analyze Current Function`
 - `UnitTestRunner: Analyze Selected Function`

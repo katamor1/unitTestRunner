@@ -12,6 +12,17 @@ import { validateSettings } from '../config/validation';
 import { resolveFunctionNameFromText } from '../functionTarget/regexFunctionResolver';
 import { resolveReportPaths } from '../reports/reportPathResolver';
 import { commandRequiresConfirmation } from '../safety/confirmation';
+import {
+  completeAwaitingSaveIfMatches,
+  createInitialWorkflowState,
+  deriveCurrentWorkflowStepId,
+  EMPTY_REPORT_AVAILABILITY,
+  markStepAwaitingSave,
+  markWorkflowCommandFailed,
+  markWorkflowCommandSucceeded,
+  WorkflowReportAvailability,
+  workflowLegacyProjection,
+} from '../workflow/workflowState';
 
 describe('UnitTestRunner VS Code thin adapter core', () => {
   it('reads settings and warns when outputRoot is inside sourceRoot', () => {
@@ -201,11 +212,90 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     }
   });
 
-  it('opens markdown reports with preview but plain files without markdown preview', () => {
-    const extension = fs.readFileSync(path.join(process.cwd(), 'src', 'extension.ts'), 'utf-8');
+  it('declares editor context menu and workflow view contributions', () => {
+    const packageJson = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf-8'));
+    const activationEvents = new Set(packageJson.activationEvents);
+    const contextMenus = packageJson.contributes.menus['editor/context'] as Array<{ command: string; when: string }>;
+    const activityContainers = packageJson.contributes.viewsContainers.activitybar as Array<{ id: string; icon: string }>;
+    const workflowViews = packageJson.contributes.views.unitTestRunner as Array<{ id: string; name: string }>;
 
-    assert.ok(extension.includes('openReport(reportPath)'));
-    assert.ok(extension.includes("path.extname(reportPath).toLowerCase() === '.md'"));
-    assert.ok(extension.includes("vscode.commands.executeCommand('vscode.open', uri)"));
+    assert.ok(activationEvents.has('onView:unitTestRunner.workflow'));
+    assert.ok(contextMenus.some((item) => item.command === 'unitTestRunner.analyzeCurrentFunction' && item.when.includes('editorLangId == c')));
+    assert.ok(contextMenus.some((item) => item.command === 'unitTestRunner.analyzeSelectedFunction' && item.when.includes('editorHasSelection')));
+    assert.ok(activityContainers.some((item) => item.id === 'unitTestRunner' && item.icon === 'media/unit-test-runner.svg'));
+    assert.ok(workflowViews.some((item) => item.id === 'unitTestRunner.workflow' && item.name === 'Workflow'));
+  });
+
+  it('derives the current workflow step from generated artifacts', () => {
+    const base = createInitialWorkflowState(true);
+
+    assert.equal(deriveCurrentWorkflowStepId(base, availability()), 'analyze');
+    assert.equal(deriveCurrentWorkflowStepId(base, availability({ functionDossier: true })), 'reviewDossier');
+    assert.equal(deriveCurrentWorkflowStepId(base, availability({ functionDossier: true, testCaseDesign: true })), 'reviewTestDesign');
+    assert.equal(deriveCurrentWorkflowStepId(base, availability({ functionDossier: true, testCaseDesign: true, buildProbeReport: true })), 'reviewBuildProbe');
+    assert.equal(deriveCurrentWorkflowStepId(base, availability({ functionDossier: true, testCaseDesign: true, buildProbeReport: true, testExecutionReport: true, evidencePackage: true })), 'reviewEvidence');
+  });
+
+  it('completes an awaiting-save workflow step only for the matching file', () => {
+    const waiting = markStepAwaitingSave(
+      createInitialWorkflowState(true),
+      'reviewDossier',
+      'C:\\out\\Control_Update\\reports\\function_dossier.md',
+      'functionDossierMd',
+    );
+    const mismatch = completeAwaitingSaveIfMatches(waiting, 'C:\\out\\Control_Update\\reports\\review_checklist.md');
+    const match = completeAwaitingSaveIfMatches(waiting, 'C:\\out\\Control_Update\\reports\\function_dossier.md');
+
+    assert.equal(mismatch.matched, false);
+    assert.equal(mismatch.state.completedStepIds.includes('reviewDossier'), false);
+    assert.equal(match.matched, true);
+    assert.equal(match.state.completedStepIds.includes('reviewDossier'), true);
+    assert.equal(match.state.awaitingSave, undefined);
+  });
+
+  it('does not advance workflow recommendation after a CLI failure', () => {
+    const outputWorkspace = 'C:\\out\\Control_Update';
+    const analyzed = markWorkflowCommandSucceeded(createInitialWorkflowState(true), {
+      kind: 'analyze',
+      outputWorkspace,
+      functionName: 'Control_Update',
+      reports: {
+        workspace: outputWorkspace,
+        functionDossierMd: path.join(outputWorkspace, 'reports', 'function_dossier.md'),
+      },
+    });
+    const failed = markWorkflowCommandFailed(analyzed, 'unit-test-runner exited with code 1.');
+
+    assert.equal(failed.lastError, 'unit-test-runner exited with code 1.');
+    assert.equal(deriveCurrentWorkflowStepId(failed, availability({ functionDossier: true })), 'reviewDossier');
+  });
+
+  it('projects workflow state to legacy global state keys', () => {
+    const outputWorkspace = 'C:\\out\\Control_Update';
+    const state = markWorkflowCommandSucceeded(createInitialWorkflowState(true), {
+      kind: 'analyze',
+      outputWorkspace,
+      functionName: 'Control_Update',
+      reports: {
+        workspace: outputWorkspace,
+        functionDossierMd: path.join(outputWorkspace, 'reports', 'function_dossier.md'),
+      },
+    });
+    const legacy = workflowLegacyProjection(state);
+
+    assert.equal(legacy.lastWorkspace, outputWorkspace);
+    assert.equal(legacy.lastDossier, path.join(outputWorkspace, 'reports', 'function_dossier.md'));
+  });
+
+  it('opens markdown reports with preview but plain files without markdown preview', () => {
+    const opener = fs.readFileSync(path.join(process.cwd(), 'src', 'reports', 'reportOpener.ts'), 'utf-8');
+
+    assert.ok(opener.includes('openReport(reportPath: string)'));
+    assert.ok(opener.includes("path.extname(reportPath).toLowerCase() === '.md'"));
+    assert.ok(opener.includes("vscode.commands.executeCommand('vscode.open', uri)"));
   });
 });
+
+function availability(overrides: Partial<WorkflowReportAvailability> = {}): WorkflowReportAvailability {
+  return { ...EMPTY_REPORT_AVAILABILITY, ...overrides };
+}

@@ -32,7 +32,8 @@
     "onCommand:unitTestRunner.prepareEvidence",
     "onCommand:unitTestRunner.openOutputWorkspace",
     "onCommand:unitTestRunner.copyLastCommand",
-    "onCommand:unitTestRunner.openLastFunctionDossier"
+    "onCommand:unitTestRunner.openLastFunctionDossier",
+    "onView:unitTestRunner.workflow"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -106,6 +107,37 @@
         "title": "UnitTestRunner: Open Last Function Dossier"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "unitTestRunner.analyzeCurrentFunction",
+          "when": "editorLangId == c || editorLangId == cpp",
+          "group": "navigation@10"
+        },
+        {
+          "command": "unitTestRunner.analyzeSelectedFunction",
+          "when": "editorHasSelection && (editorLangId == c || editorLangId == cpp)",
+          "group": "navigation@11"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "unitTestRunner",
+          "title": "Unit Test Runner",
+          "icon": "media/unit-test-runner.svg"
+        }
+      ]
+    },
+    "views": {
+      "unitTestRunner": [
+        {
+          "id": "unitTestRunner.workflow",
+          "name": "Workflow"
+        }
+      ]
+    },
     "configuration": {
       "title": "Unit Test Runner",
       "properties": {

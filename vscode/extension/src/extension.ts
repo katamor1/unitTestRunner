@@ -13,13 +13,25 @@ import {
   FunctionTarget,
   relativeSourcePath,
 } from './cli/commandBuilder';
-import { runCliInvocation } from './cli/cliRunner';
+import { CliResult, runCliInvocation } from './cli/cliRunner';
 import { parseCliResult } from './cli/cliResultParser';
 import { resolveCliPath } from './config/bundledCli';
 import { AdapterSettings, readAdapterSettingsFromObject } from './config/settings';
 import { validateSettings } from './config/validation';
 import { resolveFunctionNameFromText } from './functionTarget/regexFunctionResolver';
 import { ReportPaths, resolveReportPaths } from './reports/reportPathResolver';
+import { openMarkdown, openReport } from './reports/reportOpener';
+import { WorkflowPanelProvider } from './workflow/workflowPanel';
+import {
+  completeAwaitingSaveIfMatches,
+  createInitialWorkflowState,
+  markWorkflowCommandFailed,
+  markWorkflowCommandSucceeded,
+  WorkflowCommandKind,
+  WorkflowState,
+  workflowLegacyProjection,
+  WORKFLOW_STATE_KEY,
+} from './workflow/workflowState';
 
 const LAST_DOSSIER_KEY = 'unitTestRunner.lastFunctionDossierMarkdown';
 const LAST_WORKSPACE_KEY = 'unitTestRunner.lastOutputWorkspace';
@@ -28,22 +40,33 @@ const LAST_COMMAND_KEY = 'unitTestRunner.lastCliCommand';
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Unit Test Runner');
   context.subscriptions.push(output);
+  const workflowPanel = new WorkflowPanelProvider(context, () => workflowSettingsReady(context));
+  context.subscriptions.push(vscode.window.registerWebviewViewProvider(WorkflowPanelProvider.viewType, workflowPanel));
+  context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(async (document) => {
+    const state = readWorkflowState(context);
+    const result = completeAwaitingSaveIfMatches(state, document.uri.fsPath);
+    if (result.matched) {
+      await context.workspaceState.update(WORKFLOW_STATE_KEY, result.state);
+      workflowPanel.refresh();
+      void vscode.window.showInformationMessage('UnitTestRunner: 保存を検知し、次の工程へ進めました。');
+    }
+  }));
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('unitTestRunner.analyzeCurrentFunction', async () => analyzeActiveFunction(context, output)),
-    vscode.commands.registerCommand('unitTestRunner.analyzeSelectedFunction', async () => analyzeActiveFunction(context, output)),
-    vscode.commands.registerCommand('unitTestRunner.reanalyzeCurrentFunction', async () => reanalyzeActiveFunction(context, output)),
-    vscode.commands.registerCommand('unitTestRunner.finalizeDossier', async () => runWorkspaceCommand(context, output, 'finalize')),
+    vscode.commands.registerCommand('unitTestRunner.analyzeCurrentFunction', async () => analyzeActiveFunction(context, output, workflowPanel)),
+    vscode.commands.registerCommand('unitTestRunner.analyzeSelectedFunction', async () => analyzeActiveFunction(context, output, workflowPanel)),
+    vscode.commands.registerCommand('unitTestRunner.reanalyzeCurrentFunction', async () => reanalyzeActiveFunction(context, output, workflowPanel)),
+    vscode.commands.registerCommand('unitTestRunner.finalizeDossier', async () => runWorkspaceCommand(context, output, 'finalize', workflowPanel)),
     vscode.commands.registerCommand('unitTestRunner.openFunctionDossier', async () => openLastReport(context, 'functionDossierMd')),
     vscode.commands.registerCommand('unitTestRunner.openReviewChecklist', async () => openLastReport(context, 'reviewChecklistMd')),
     vscode.commands.registerCommand('unitTestRunner.openNextActions', async () => openLastReport(context, 'nextActionsMd')),
     vscode.commands.registerCommand('unitTestRunner.openChangeImpactReport', async () => openLastReport(context, 'changeImpactReportMd')),
     vscode.commands.registerCommand('unitTestRunner.openRegressionSelection', async () => openLastReport(context, 'regressionSelectionCsv')),
-    vscode.commands.registerCommand('unitTestRunner.generateTestDesign', async () => runWorkspaceCommand(context, output, 'testDesign')),
-    vscode.commands.registerCommand('unitTestRunner.buildProbeDryRun', async () => runWorkspaceCommand(context, output, 'buildProbeDryRun')),
-    vscode.commands.registerCommand('unitTestRunner.runBuildProbe', async () => runWorkspaceCommand(context, output, 'buildProbeRun')),
-    vscode.commands.registerCommand('unitTestRunner.runTests', async () => runWorkspaceCommand(context, output, 'runTests')),
-    vscode.commands.registerCommand('unitTestRunner.prepareEvidence', async () => runWorkspaceCommand(context, output, 'evidence')),
+    vscode.commands.registerCommand('unitTestRunner.generateTestDesign', async () => runWorkspaceCommand(context, output, 'testDesign', workflowPanel)),
+    vscode.commands.registerCommand('unitTestRunner.buildProbeDryRun', async () => runWorkspaceCommand(context, output, 'buildProbeDryRun', workflowPanel)),
+    vscode.commands.registerCommand('unitTestRunner.runBuildProbe', async () => runWorkspaceCommand(context, output, 'buildProbeRun', workflowPanel)),
+    vscode.commands.registerCommand('unitTestRunner.runTests', async () => runWorkspaceCommand(context, output, 'runTests', workflowPanel)),
+    vscode.commands.registerCommand('unitTestRunner.prepareEvidence', async () => runWorkspaceCommand(context, output, 'evidence', workflowPanel)),
     vscode.commands.registerCommand('unitTestRunner.openOutputWorkspace', async () => openOutputWorkspace(context)),
     vscode.commands.registerCommand('unitTestRunner.copyLastCommand', async () => copyLastCommand(context)),
     vscode.commands.registerCommand('unitTestRunner.openLastFunctionDossier', async () => openLastReport(context, 'functionDossierMd')),
@@ -54,7 +77,7 @@ export function deactivate(): void {
   // No long-lived process is kept by this thin adapter.
 }
 
-async function analyzeActiveFunction(context: vscode.ExtensionContext, output: vscode.OutputChannel): Promise<void> {
+async function analyzeActiveFunction(context: vscode.ExtensionContext, output: vscode.OutputChannel, workflowPanel: WorkflowPanelProvider): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
     throw new Error('Open a C source file before running UnitTestRunner.');
@@ -73,15 +96,19 @@ async function analyzeActiveFunction(context: vscode.ExtensionContext, output: v
     outputWorkspace,
   };
   const invocation = buildAnalyzeFunctionInvocation(settings, target);
-  const reports = await executeInvocation(context, output, invocation, outputWorkspace);
-  await context.globalState.update(LAST_WORKSPACE_KEY, outputWorkspace);
-  await context.globalState.update(LAST_DOSSIER_KEY, reports.functionDossierMd);
+  const reports = await executeInvocation(context, output, invocation, outputWorkspace, workflowPanel);
+  await recordWorkflowSuccess(context, workflowPanel, {
+    kind: 'analyze',
+    outputWorkspace,
+    functionName,
+    reports,
+  });
   if (settings.autoOpenDossier && reports.functionDossierMd) {
     await openMarkdown(reports.functionDossierMd);
   }
 }
 
-async function reanalyzeActiveFunction(context: vscode.ExtensionContext, output: vscode.OutputChannel): Promise<void> {
+async function reanalyzeActiveFunction(context: vscode.ExtensionContext, output: vscode.OutputChannel, workflowPanel: WorkflowPanelProvider): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
     throw new Error('Open a C source file before running UnitTestRunner.');
@@ -100,8 +127,13 @@ async function reanalyzeActiveFunction(context: vscode.ExtensionContext, output:
     outputWorkspace,
   };
   const invocation = buildReanalyzeFunctionInvocation(settings, target);
-  const reports = await executeInvocation(context, output, invocation, outputWorkspace);
-  await context.globalState.update(LAST_WORKSPACE_KEY, outputWorkspace);
+  const reports = await executeInvocation(context, output, invocation, outputWorkspace, workflowPanel);
+  await recordWorkflowSuccess(context, workflowPanel, {
+    kind: 'reanalyze',
+    outputWorkspace,
+    functionName,
+    reports,
+  });
   if (reports.changeImpactReportMd) {
     await openMarkdown(reports.changeImpactReportMd);
   }
@@ -162,11 +194,10 @@ async function resolveFunctionName(editor: vscode.TextEditor): Promise<string> {
   return prompt;
 }
 
-async function runWorkspaceCommand(context: vscode.ExtensionContext, output: vscode.OutputChannel, kind: 'finalize' | 'testDesign' | 'buildProbeDryRun' | 'buildProbeRun' | 'runTests' | 'evidence'): Promise<void> {
+async function runWorkspaceCommand(context: vscode.ExtensionContext, output: vscode.OutputChannel, kind: 'finalize' | 'testDesign' | 'buildProbeDryRun' | 'buildProbeRun' | 'runTests' | 'evidence', workflowPanel: WorkflowPanelProvider): Promise<void> {
   const settings = readConfig(context);
   showValidation(settings);
   const workspace = await lastWorkspace(context);
-  const reports = resolveReportPaths(workspace);
   let invocation: CliInvocation;
   if (kind === 'finalize') {
     invocation = buildFinalizeDossierInvocation(settings, workspace);
@@ -181,13 +212,15 @@ async function runWorkspaceCommand(context: vscode.ExtensionContext, output: vsc
   } else {
     invocation = buildPrepareEvidenceInvocation(settings, workspace);
   }
-  await executeInvocation(context, output, invocation, workspace);
-  if (kind === 'finalize' && reports.functionDossierMd) {
-    await context.globalState.update(LAST_DOSSIER_KEY, reports.functionDossierMd);
-  }
+  const parsedReports = await executeInvocation(context, output, invocation, workspace, workflowPanel);
+  await recordWorkflowSuccess(context, workflowPanel, {
+    kind: workflowCommandKind(kind),
+    outputWorkspace: workspace,
+    reports: parsedReports,
+  });
 }
 
-async function executeInvocation(context: vscode.ExtensionContext, output: vscode.OutputChannel, invocation: CliInvocation, outputWorkspace: string): Promise<ReportPaths> {
+async function executeInvocation(context: vscode.ExtensionContext, output: vscode.OutputChannel, invocation: CliInvocation, outputWorkspace: string, workflowPanel: WorkflowPanelProvider): Promise<ReportPaths> {
   if (invocation.requiresConfirmation) {
     const selected = await vscode.window.showWarningMessage('This command may execute generated tools or tests. Continue?', { modal: true }, 'Continue');
     if (selected !== 'Continue') {
@@ -197,18 +230,57 @@ async function executeInvocation(context: vscode.ExtensionContext, output: vscod
   await context.globalState.update(LAST_COMMAND_KEY, invocation.displayCommand);
   output.show(true);
   output.appendLine(`> ${invocation.displayCommand}`);
-  const result = await runCliInvocation(invocation);
+  let result: CliResult;
+  try {
+    result = await runCliInvocation(invocation);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await recordWorkflowError(context, workflowPanel, message);
+    throw error;
+  }
   output.append(result.stdout);
   output.append(result.stderr);
   if (result.timedOut) {
+    await recordWorkflowError(context, workflowPanel, 'unit-test-runner timed out.');
     throw new Error('unit-test-runner timed out.');
   }
   if (result.exitCode !== 0) {
+    await recordWorkflowError(context, workflowPanel, `unit-test-runner exited with code ${result.exitCode ?? 'unknown'}.`);
     throw new Error(`unit-test-runner exited with code ${result.exitCode ?? 'unknown'}.`);
   }
   const parsed = parseCliResult(result.stdout, result.stderr, outputWorkspace);
   await context.globalState.update(LAST_WORKSPACE_KEY, parsed.reports.workspace);
   return parsed.reports;
+}
+
+function workflowCommandKind(kind: 'finalize' | 'testDesign' | 'buildProbeDryRun' | 'buildProbeRun' | 'runTests' | 'evidence'): WorkflowCommandKind {
+  return kind;
+}
+
+function workflowSettingsReady(context: vscode.ExtensionContext): boolean {
+  return validateSettings(readConfig(context)).ok;
+}
+
+function readWorkflowState(context: vscode.ExtensionContext): WorkflowState {
+  return context.workspaceState.get<WorkflowState>(WORKFLOW_STATE_KEY) ?? createInitialWorkflowState(workflowSettingsReady(context));
+}
+
+async function recordWorkflowSuccess(context: vscode.ExtensionContext, workflowPanel: WorkflowPanelProvider, event: { kind: WorkflowCommandKind; outputWorkspace?: string; functionName?: string; reports?: ReportPaths }): Promise<void> {
+  const state = markWorkflowCommandSucceeded(readWorkflowState(context), event);
+  await context.workspaceState.update(WORKFLOW_STATE_KEY, state);
+  const legacy = workflowLegacyProjection(state);
+  if (legacy.lastWorkspace) {
+    await context.globalState.update(LAST_WORKSPACE_KEY, legacy.lastWorkspace);
+  }
+  if (legacy.lastDossier) {
+    await context.globalState.update(LAST_DOSSIER_KEY, legacy.lastDossier);
+  }
+  workflowPanel.refresh();
+}
+
+async function recordWorkflowError(context: vscode.ExtensionContext, workflowPanel: WorkflowPanelProvider, message: string): Promise<void> {
+  await context.workspaceState.update(WORKFLOW_STATE_KEY, markWorkflowCommandFailed(readWorkflowState(context), message));
+  workflowPanel.refresh();
 }
 
 async function lastWorkspace(context: vscode.ExtensionContext): Promise<string> {
@@ -245,23 +317,4 @@ async function copyLastCommand(context: vscode.ExtensionContext): Promise<void> 
     throw new Error('No UnitTestRunner command is recorded.');
   }
   await vscode.env.clipboard.writeText(command);
-}
-
-async function openMarkdown(markdownPath: string): Promise<void> {
-  const uri = vscode.Uri.file(markdownPath);
-  await vscode.commands.executeCommand('vscode.open', uri);
-  await vscode.commands.executeCommand('markdown.showPreview', uri);
-}
-
-async function openReport(reportPath: string): Promise<void> {
-  if (path.extname(reportPath).toLowerCase() === '.md') {
-    await openMarkdown(reportPath);
-    return;
-  }
-  await openPlainFile(reportPath);
-}
-
-async function openPlainFile(reportPath: string): Promise<void> {
-  const uri = vscode.Uri.file(reportPath);
-  await vscode.commands.executeCommand('vscode.open', uri);
 }
