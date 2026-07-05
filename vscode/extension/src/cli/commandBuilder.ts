@@ -46,6 +46,34 @@ export function buildAnalyzeFunctionInvocation(settings: AdapterSettings, target
   return invocation(settings, args, false);
 }
 
+export function buildReanalyzeFunctionInvocation(settings: AdapterSettings, target: FunctionTarget): CliInvocation {
+  const reports = path.join(target.outputWorkspace, 'reports');
+  const args = jsonPrefix(settings).concat([
+    'reanalyze-function',
+    '--workspace',
+    settings.sourceRoot,
+    '--dsw',
+    settings.dswPath,
+    '--source',
+    target.sourceRelativePath ?? relativeSourcePath(target.sourcePath, settings.sourceRoot),
+    '--function',
+    target.functionName,
+    '--configuration',
+    target.configuration || settings.defaultConfiguration,
+    '--out',
+    target.outputWorkspace,
+    '--previous-dossier',
+    path.join(reports, 'function_dossier.json'),
+    '--previous-test-case-design',
+    path.join(reports, 'test_case_design.json'),
+  ]);
+  const project = target.project || settings.defaultProject;
+  if (project) {
+    args.push('--project', project);
+  }
+  return invocation(settings, args, false);
+}
+
 export function buildFinalizeDossierInvocation(settings: AdapterSettings, workspace: string): CliInvocation {
   return invocation(settings, jsonPrefix(settings).concat(['finalize-dossier', '--workspace', workspace]), false);
 }

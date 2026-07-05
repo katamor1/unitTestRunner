@@ -10,6 +10,9 @@ export interface ReportPaths {
   buildProbeReportMd?: string;
   testExecutionReportMd?: string;
   evidencePackageMd?: string;
+  changeImpactReportMd?: string;
+  testCaseReconciliationReportMd?: string;
+  regressionSelectionCsv?: string;
 }
 
 export function resolveReportPaths(workspace: string): ReportPaths {
@@ -24,5 +27,8 @@ export function resolveReportPaths(workspace: string): ReportPaths {
     buildProbeReportMd: path.join(reports, 'build_probe_report.md'),
     testExecutionReportMd: path.join(reports, 'test_execution_report.md'),
     evidencePackageMd: path.join(reports, 'evidence_package.md'),
+    changeImpactReportMd: path.join(reports, 'change_impact_report.md'),
+    testCaseReconciliationReportMd: path.join(reports, 'test_case_reconciliation_report.md'),
+    regressionSelectionCsv: path.join(reports, 'regression_selection.csv'),
   };
 }

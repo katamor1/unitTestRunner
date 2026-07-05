@@ -18,6 +18,12 @@ from unit_test_runner.c_analyzer import list_functions
 from unit_test_runner.dsw_parser import discover_dsw_workspaces, parse_dsw as parse_dsw_workspace
 from unit_test_runner.execution import prepare_test_execution_evidence
 from unit_test_runner.path_utils import normalize_relative
+from unit_test_runner.reanalysis import (
+    reconcile_test_case_reports,
+    reanalyze_function_workflow,
+    select_regression_from_reports,
+)
+from unit_test_runner.reanalysis.reanalysis_models import ReanalysisPolicy
 from unit_test_runner.dossier import (
     analyze_function_workflow,
     finalize_function_dossier,
@@ -46,6 +52,7 @@ def dispatch(args: argparse.Namespace) -> CLIResult:
         "map-source": handle_map_source,
         "list-functions": handle_list_functions,
         "analyze-function": handle_analyze_function,
+        "reanalyze-function": handle_reanalyze_function,
         "generate-harness-skeleton": handle_generate_harness_skeleton,
         "build-probe": handle_build_probe,
         "analyze-build-errors": handle_analyze_build_errors,
@@ -55,6 +62,8 @@ def dispatch(args: argparse.Namespace) -> CLIResult:
         "finalize-dossier": handle_finalize_dossier,
         "prepare-review": handle_prepare_review,
         "generate-test-design": handle_generate_test_design,
+        "reconcile-test-cases": handle_reconcile_test_cases,
+        "select-regression-tests": handle_select_regression_tests,
     }
     return handlers[args.command](args)
 
@@ -209,6 +218,14 @@ def handle_list_functions(args: argparse.Namespace) -> CLIResult:
 
 
 def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
+    if getattr(args, "reuse_existing_tests", False):
+        if args.finalize_dossier or args.run_tests:
+            raise CLIError(
+                "--reuse-existing-tests cannot be combined with --finalize-dossier or --run-tests.",
+                EXIT_INPUT_ERROR,
+                args.command,
+            )
+        return _run_reanalysis(args)
     dsw = _existing_file(args.dsw, "dsw", args.command)
     workspace = _workspace_from_args(args.workspace, dsw)
     source = normalize_relative(_existing_source(workspace, args.source, args.command), workspace)
@@ -260,6 +277,52 @@ def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
         exit_code=EXIT_OK,
         command=args.command,
         message="Function analysis generated. Use --finalize-dossier or finalize-dossier for dossier review packaging.",
+        data=payload,
+        legacy_payload=payload,
+    )
+
+
+def handle_reanalyze_function(args: argparse.Namespace) -> CLIResult:
+    return _run_reanalysis(args)
+
+
+def _run_reanalysis(args: argparse.Namespace) -> CLIResult:
+    dsw = _existing_file(args.dsw, "dsw", args.command)
+    workspace = _workspace_from_args(args.workspace, dsw)
+    source = normalize_relative(_existing_source(workspace, args.source, args.command), workspace)
+    policy = ReanalysisPolicy(
+        generate_updated_test_case_design=args.generate_updated_test_case_design,
+        overwrite_test_case_design=args.overwrite_test_case_design,
+        include_low_confidence_matches=args.include_low_confidence_matches,
+    )
+    try:
+        result = reanalyze_function_workflow(
+            workspace,
+            dsw,
+            source,
+            args.function,
+            args.configuration,
+            args.out,
+            project_name=args.project,
+            previous_dossier_path=args.previous_dossier,
+            previous_test_case_design_path=args.previous_test_case_design,
+            policy=policy,
+        )
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise CLIError(str(exc), EXIT_INPUT_ERROR, args.command) from exc
+    reports = {key: str(value) for key, value in result["reports"].items()}
+    payload = {
+        "function": args.function,
+        "status": result["status"],
+        "reports": reports,
+        "previous_dossier": str(result["previous_dossier"]),
+        "previous_test_case_design": str(result["previous_test_case_design"]),
+    }
+    return CLIResult(
+        status="reanalysis_completed",
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Function reanalysis completed.",
         data=payload,
         legacy_payload=payload,
     )
@@ -503,6 +566,58 @@ def handle_generate_test_design(args: argparse.Namespace) -> CLIResult:
         exit_code=EXIT_OK,
         command=args.command,
         message="Test design generated.",
+        data=payload,
+        legacy_payload=payload,
+    )
+
+
+def handle_reconcile_test_cases(args: argparse.Namespace) -> CLIResult:
+    policy = ReanalysisPolicy(
+        generate_updated_test_case_design=args.generate_updated_test_case_design,
+        include_low_confidence_matches=args.include_low_confidence_matches,
+    )
+    try:
+        result = reconcile_test_case_reports(
+            _existing_file(args.previous_test_case_design, "previous-test-case-design", args.command),
+            _existing_file(args.previous_coverage_design, "previous-coverage-design", args.command),
+            _existing_file(args.current_test_case_design, "current-test-case-design", args.command),
+            _existing_file(args.current_coverage_design, "current-coverage-design", args.command),
+            _existing_file(args.current_boundary_candidates, "current-boundary-candidates", args.command),
+            Path(args.out),
+            policy=policy,
+        )
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise CLIError(str(exc), EXIT_INPUT_ERROR, args.command) from exc
+    reports = {"test_case_reconciliation_report_json": str(result["out"])}
+    if result.get("updated_test_case_design_path"):
+        reports["updated_test_case_design_json"] = str(result["updated_test_case_design_path"])
+    payload = {"reports": reports}
+    return CLIResult(
+        status="test_case_reconciliation_completed",
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Test case reconciliation completed.",
+        data=payload,
+        legacy_payload=payload,
+    )
+
+
+def handle_select_regression_tests(args: argparse.Namespace) -> CLIResult:
+    try:
+        result = select_regression_from_reports(
+            _existing_file(args.change_impact, "change-impact", args.command),
+            _existing_file(args.reconciliation, "reconciliation", args.command),
+            Path(args.out),
+        )
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise CLIError(str(exc), EXIT_INPUT_ERROR, args.command) from exc
+    key = "regression_selection_csv" if Path(args.out).suffix.lower() == ".csv" else "regression_selection_json"
+    payload = {"reports": {key: str(result["out"])}}
+    return CLIResult(
+        status="regression_selection_completed",
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Regression selection completed.",
         data=payload,
         legacy_payload=payload,
     )

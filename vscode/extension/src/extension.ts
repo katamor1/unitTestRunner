@@ -7,6 +7,7 @@ import {
   buildFinalizeDossierInvocation,
   buildGenerateTestDesignInvocation,
   buildPrepareEvidenceInvocation,
+  buildReanalyzeFunctionInvocation,
   buildRunTestsInvocation,
   CliInvocation,
   FunctionTarget,
@@ -30,10 +31,13 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('unitTestRunner.analyzeCurrentFunction', async () => analyzeActiveFunction(context, output)),
     vscode.commands.registerCommand('unitTestRunner.analyzeSelectedFunction', async () => analyzeActiveFunction(context, output)),
+    vscode.commands.registerCommand('unitTestRunner.reanalyzeCurrentFunction', async () => reanalyzeActiveFunction(context, output)),
     vscode.commands.registerCommand('unitTestRunner.finalizeDossier', async () => runWorkspaceCommand(context, output, 'finalize')),
     vscode.commands.registerCommand('unitTestRunner.openFunctionDossier', async () => openLastReport(context, 'functionDossierMd')),
     vscode.commands.registerCommand('unitTestRunner.openReviewChecklist', async () => openLastReport(context, 'reviewChecklistMd')),
     vscode.commands.registerCommand('unitTestRunner.openNextActions', async () => openLastReport(context, 'nextActionsMd')),
+    vscode.commands.registerCommand('unitTestRunner.openChangeImpactReport', async () => openLastReport(context, 'changeImpactReportMd')),
+    vscode.commands.registerCommand('unitTestRunner.openRegressionSelection', async () => openLastReport(context, 'regressionSelectionCsv')),
     vscode.commands.registerCommand('unitTestRunner.generateTestDesign', async () => runWorkspaceCommand(context, output, 'testDesign')),
     vscode.commands.registerCommand('unitTestRunner.buildProbeDryRun', async () => runWorkspaceCommand(context, output, 'buildProbeDryRun')),
     vscode.commands.registerCommand('unitTestRunner.runBuildProbe', async () => runWorkspaceCommand(context, output, 'buildProbeRun')),
@@ -73,6 +77,32 @@ async function analyzeActiveFunction(context: vscode.ExtensionContext, output: v
   await context.globalState.update(LAST_DOSSIER_KEY, reports.functionDossierMd);
   if (settings.autoOpenDossier && reports.functionDossierMd) {
     await openMarkdown(reports.functionDossierMd);
+  }
+}
+
+async function reanalyzeActiveFunction(context: vscode.ExtensionContext, output: vscode.OutputChannel): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    throw new Error('Open a C source file before running UnitTestRunner.');
+  }
+  const settings = readConfig();
+  showValidation(settings);
+  const functionName = await resolveFunctionName(editor);
+  const sourceRelativePath = relativeSourcePath(editor.document.uri.fsPath, settings.sourceRoot);
+  const outputWorkspace = path.join(settings.outputRoot, functionName);
+  const target: FunctionTarget = {
+    sourcePath: editor.document.uri.fsPath,
+    sourceRelativePath,
+    functionName,
+    project: settings.defaultProject,
+    configuration: settings.defaultConfiguration,
+    outputWorkspace,
+  };
+  const invocation = buildReanalyzeFunctionInvocation(settings, target);
+  const reports = await executeInvocation(context, output, invocation, outputWorkspace);
+  await context.globalState.update(LAST_WORKSPACE_KEY, outputWorkspace);
+  if (reports.changeImpactReportMd) {
+    await openMarkdown(reports.changeImpactReportMd);
   }
 }
 
@@ -199,7 +229,7 @@ async function openLastReport(context: vscode.ExtensionContext, key: keyof Repor
   if (!reportPath) {
     throw new Error('No output workspace is recorded.');
   }
-  await openMarkdown(reportPath);
+  await openReport(reportPath);
 }
 
 async function openOutputWorkspace(context: vscode.ExtensionContext): Promise<void> {
@@ -219,4 +249,17 @@ async function openMarkdown(markdownPath: string): Promise<void> {
   const uri = vscode.Uri.file(markdownPath);
   await vscode.commands.executeCommand('vscode.open', uri);
   await vscode.commands.executeCommand('markdown.showPreview', uri);
+}
+
+async function openReport(reportPath: string): Promise<void> {
+  if (path.extname(reportPath).toLowerCase() === '.md') {
+    await openMarkdown(reportPath);
+    return;
+  }
+  await openPlainFile(reportPath);
+}
+
+async function openPlainFile(reportPath: string): Promise<void> {
+  const uri = vscode.Uri.file(reportPath);
+  await vscode.commands.executeCommand('vscode.open', uri);
 }

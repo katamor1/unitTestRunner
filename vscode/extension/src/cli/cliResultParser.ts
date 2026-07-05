@@ -35,7 +35,7 @@ export function parseCliResult(stdout: string, stderr: string, workspace: string
 function reportsFromParsed(parsed: Record<string, unknown>, fallback: ReportPaths, warnings: string[]): ReportPaths {
   const data = objectValue(parsed.data);
   const review = objectValue(data.review);
-  const reportSource = objectValue(review.reports) ?? objectValue(data.reports);
+  const reportSource = optionalObjectValue(review.reports) ?? optionalObjectValue(data.reports);
   if (!reportSource) {
     warnings.push('CLI JSON did not include report paths; using conventional report paths.');
     return fallback;
@@ -59,11 +59,18 @@ function reportsFromParsed(parsed: Record<string, unknown>, fallback: ReportPath
     buildProbeReportMd: stringValue(reportSource.build_probe_report_md) ?? fallback.buildProbeReportMd,
     testExecutionReportMd: stringValue(reportSource.test_execution_report_md) ?? fallback.testExecutionReportMd,
     evidencePackageMd: stringValue(reportSource.evidence_package_md) ?? fallback.evidencePackageMd,
+    changeImpactReportMd: stringValue(reportSource.change_impact_report_md) ?? fallback.changeImpactReportMd,
+    testCaseReconciliationReportMd: stringValue(reportSource.test_case_reconciliation_report_md) ?? fallback.testCaseReconciliationReportMd,
+    regressionSelectionCsv: stringValue(reportSource.regression_selection_csv) ?? fallback.regressionSelectionCsv,
   };
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function optionalObjectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
 function stringValue(value: unknown): string | undefined {

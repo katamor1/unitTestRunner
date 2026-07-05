@@ -18,10 +18,13 @@
   "activationEvents": [
     "onCommand:unitTestRunner.analyzeCurrentFunction",
     "onCommand:unitTestRunner.analyzeSelectedFunction",
+    "onCommand:unitTestRunner.reanalyzeCurrentFunction",
     "onCommand:unitTestRunner.finalizeDossier",
     "onCommand:unitTestRunner.openFunctionDossier",
     "onCommand:unitTestRunner.openReviewChecklist",
     "onCommand:unitTestRunner.openNextActions",
+    "onCommand:unitTestRunner.openChangeImpactReport",
+    "onCommand:unitTestRunner.openRegressionSelection",
     "onCommand:unitTestRunner.generateTestDesign",
     "onCommand:unitTestRunner.buildProbeDryRun",
     "onCommand:unitTestRunner.runBuildProbe",
@@ -43,6 +46,10 @@
         "title": "UnitTestRunner: Analyze Selected Function"
       },
       {
+        "command": "unitTestRunner.reanalyzeCurrentFunction",
+        "title": "UnitTestRunner: Reanalyze Current Function"
+      },
+      {
         "command": "unitTestRunner.finalizeDossier",
         "title": "UnitTestRunner: Finalize Dossier"
       },
@@ -57,6 +64,14 @@
       {
         "command": "unitTestRunner.openNextActions",
         "title": "UnitTestRunner: Open Next Actions"
+      },
+      {
+        "command": "unitTestRunner.openChangeImpactReport",
+        "title": "UnitTestRunner: Open Change Impact Report"
+      },
+      {
+        "command": "unitTestRunner.openRegressionSelection",
+        "title": "UnitTestRunner: Open Regression Selection"
       },
       {
         "command": "unitTestRunner.generateTestDesign",

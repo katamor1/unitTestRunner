@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import { describe, it } from 'node:test';
 import * as path from 'path';
 
-import { buildAnalyzeFunctionInvocation, buildFinalizeDossierInvocation, buildGenerateTestDesignInvocation, buildRunTestsInvocation } from '../cli/commandBuilder';
+import { buildAnalyzeFunctionInvocation, buildFinalizeDossierInvocation, buildGenerateTestDesignInvocation, buildReanalyzeFunctionInvocation, buildRunTestsInvocation } from '../cli/commandBuilder';
 import { runCliInvocation } from '../cli/cliRunner';
 import { parseCliResult, parseCliResultReportPaths } from '../cli/cliResultParser';
 import { readAdapterSettingsFromObject } from '../config/settings';
@@ -65,6 +65,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     };
 
     const analyze = buildAnalyzeFunctionInvocation(settings, target);
+    const reanalyze = buildReanalyzeFunctionInvocation(settings, target);
     const finalize = buildFinalizeDossierInvocation(settings, target.outputWorkspace);
     const runTests = buildRunTestsInvocation(settings, target.outputWorkspace, true);
     const testDesign = buildGenerateTestDesignInvocation(settings, path.join(target.outputWorkspace, 'reports', 'function_dossier.json'));
@@ -72,6 +73,9 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.equal(analyze.command, settings.cliPath);
     assert.ok(analyze.args.includes('--json'));
     assert.ok(analyze.args.includes('--finalize-dossier'));
+    assert.ok(reanalyze.args.includes('reanalyze-function'));
+    assert.ok(reanalyze.args.includes('--previous-dossier'));
+    assert.equal(reanalyze.args.includes('--finalize-dossier'), false);
     assert.deepEqual(analyze.args.slice(analyze.args.indexOf('--configuration'), analyze.args.indexOf('--configuration') + 2), ['--configuration', 'Win32 Debug']);
     assert.ok(analyze.displayCommand.includes('"C:\\unit test workspace\\Control_Update"'));
     assert.deepEqual(finalize.args.slice(0, 3), ['--json', 'finalize-dossier', '--workspace']);
@@ -98,11 +102,28 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     );
     const fallback = parseCliResultReportPaths('plain output', '', 'C:\\work\\out\\Control_Update');
     const direct = resolveReportPaths('C:\\work\\out\\Control_Update');
+    const directStep19 = parseCliResultReportPaths(
+      JSON.stringify({
+        status: 'reanalysis_completed',
+        data: {
+          reports: {
+            change_impact_report_md: 'C:\\work\\out\\Control_Update\\reports\\custom_change.md',
+            regression_selection_csv: 'C:\\work\\out\\Control_Update\\reports\\custom_regression.csv',
+          },
+        },
+      }),
+      '',
+      'C:\\work\\out\\Control_Update',
+    );
 
     assert.equal(path.basename(parsed.functionDossierMd ?? ''), 'function_dossier.md');
     assert.equal(path.basename(parsed.reviewChecklistMd ?? ''), 'review_checklist.md');
     assert.equal(path.basename(fallback.nextActionsMd ?? ''), 'next_actions.md');
     assert.equal(path.basename(direct.unresolvedItemsMd ?? ''), 'unresolved_items.md');
+    assert.equal(path.basename(direct.changeImpactReportMd ?? ''), 'change_impact_report.md');
+    assert.equal(path.basename(direct.regressionSelectionCsv ?? ''), 'regression_selection.csv');
+    assert.equal(path.basename(directStep19.changeImpactReportMd ?? ''), 'custom_change.md');
+    assert.equal(path.basename(directStep19.regressionSelectionCsv ?? ''), 'custom_regression.csv');
   });
 
   it('warns when CLI JSON omits report paths and uses conventional paths', () => {
@@ -143,11 +164,22 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
       'unitTestRunner.analyzeSelectedFunction',
       'unitTestRunner.finalizeDossier',
       'unitTestRunner.generateTestDesign',
+      'unitTestRunner.reanalyzeCurrentFunction',
+      'unitTestRunner.openChangeImpactReport',
+      'unitTestRunner.openRegressionSelection',
       'unitTestRunner.copyLastCommand',
       'unitTestRunner.openLastFunctionDossier',
     ]) {
       assert.ok(commands.has(command), command);
       assert.ok(activationEvents.has(`onCommand:${command}`), command);
     }
+  });
+
+  it('opens markdown reports with preview but plain files without markdown preview', () => {
+    const extension = fs.readFileSync(path.join(process.cwd(), 'src', 'extension.ts'), 'utf-8');
+
+    assert.ok(extension.includes('openReport(reportPath)'));
+    assert.ok(extension.includes("path.extname(reportPath).toLowerCase() === '.md'"));
+    assert.ok(extension.includes("vscode.commands.executeCommand('vscode.open', uri)"));
   });
 });
