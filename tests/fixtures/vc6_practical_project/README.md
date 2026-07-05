@@ -1,19 +1,17 @@
-# VC6 Practical Project Fixture
+# VC6実用プロジェクトfixture
 
-This fixture is a compact VC6/C90-style project for analyzer regression tests and manual smoke checks.
-It intentionally keeps source files small while covering the code shapes that matter for function-level
-unit test dossier generation.
+このfixtureは、解析回帰テストと手動スモーク確認に使う小さなVC6/C90風プロジェクトです。ソースファイルは小さく保ちながら、関数単位dossier生成で重要になるコード形状を含めています。
 
-## Target
+## 対象
 
-Primary target function:
+主対象関数は以下です。
 
 ```text
 src/device_control.c
 DeviceControl_Update
 ```
 
-Call tree shape:
+呼び出し木の概形は以下です。
 
 ```text
 DeviceControl_RunScheduler
@@ -29,21 +27,20 @@ DeviceControl_RunScheduler
        -> callback
 ```
 
-## Analysis Cases
+## 解析ケース
 
-- file-scope static variables: `s_state`, `s_history`, `s_history_pos`, `s_fault_hook`
-- extern globals: `g_system_tick`, `g_active_device`, `g_device_table`, `g_calibration`
-- struct members and arrays: `input->raw_samples[i]`, `out->channels[...]`, `s_state.filtered`,
-  `g_device_table[...].status`
-- function pointers: callback parameter and registered fault hook
-- object-like macros: `DEVICE_HISTORY_SIZE`, `ACTIVE_DEVICE`
-- function-like macros: `RAW_SAMPLE(input, i)`, `LIMIT_DUTY(value)`
-- VC6 project context: Debug/Release configurations, `/D`, `/I`, `/FI"config_alias.h"`, `/Yu"stdafx.h"`
-- multiple source membership: `src/device_control.c` appears in `DeviceControl.dsp` and `FactoryTest.dsp`
+- file-scope static変数: `s_state`, `s_history`, `s_history_pos`, `s_fault_hook`
+- externグローバル: `g_system_tick`, `g_active_device`, `g_device_table`, `g_calibration`
+- 構造体メンバと配列: `input->raw_samples[i]`, `out->channels[...]`, `s_state.filtered`, `g_device_table[...].status`
+- 関数ポインタ: callback引数と登録済みfault hook
+- object-like macro: `DEVICE_HISTORY_SIZE`, `ACTIVE_DEVICE`
+- function-like macro: `RAW_SAMPLE(input, i)`, `LIMIT_DUTY(value)`
+- VC6プロジェクト文脈: Debug/Release構成、`/D`, `/I`, `/FI"config_alias.h"`, `/Yu"stdafx.h"`
+- 複数プロジェクト所属: `src/device_control.c` は `DeviceControl.dsp` と `FactoryTest.dsp` に含まれる
 
-## Manual Smoke
+## 手動スモーク
 
-Run from the repository root:
+リポジトリルートから実行します。
 
 ```powershell
 $env:PYTHONPATH = "$PWD\src"
@@ -72,4 +69,18 @@ py -m unit_test_runner analyze-function `
 py -m unit_test_runner build-probe `
   --dossier "$out\reports\function_dossier.json" `
   --dry-run
+```
+
+レビュー用dossierまで生成する場合は、`analyze-function` に `--finalize-dossier` を追加します。
+
+```powershell
+py -m unit_test_runner --json analyze-function `
+  --workspace $fixture `
+  --dsw "$fixture\Product.dsw" `
+  --source src\device_control.c `
+  --function DeviceControl_Update `
+  --configuration "DeviceControl - Win32 Debug" `
+  --project DeviceControl `
+  --out $out `
+  --finalize-dossier
 ```

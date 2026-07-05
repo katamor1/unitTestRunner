@@ -1,38 +1,58 @@
 # unitTestRunner
 
-Function-level VC6/C90 unit test dossier generator.
+`unitTestRunner` は、Visual C++ 6.0 / C90 で開発された既存Cプロジェクトに対して、関数単位の単体テスト準備情報を生成するためのツールです。
 
-This repository implements the v0.1 scope from `docs/function_level_vc6_unit_test_codex_design.md`.
-The initial goal is not to generate a complete executable harness. It collects VC6 project context
-and function-level analysis into reviewable JSON, Markdown, and CSV artifacts outside the production
-source tree.
+このリポジトリは [関数単位 VC6/C90 単体テスト支援ツール 企画・設計書](docs/function_level_vc6_unit_test_codex_design.md) の v0.1 範囲を実装しています。初期ゴールは完全な実行可能テストハーネスを自動生成することではありません。VC6プロジェクト情報と指定関数の解析結果を、本番ソースツリーの外側に、レビュー可能なJSON、Markdown、CSV成果物として出力します。
 
-## Development
+## 主要方針
 
-Run the unit and CLI smoke tests:
+- 本番リポジトリは読み取り専用入力として扱い、生成物は外部ワークスペースへ出力する
+- モジュール単位ではなく、まず指定関数の dossier 生成を安定させる
+- Python CLI core を中心に置き、VS Code拡張はCLIを呼び出す薄いadapterに限定する
+- VC6/C90、Shift-JIS/CP932、古い `.dsw` / `.dsp` を通常ケースとして扱う
+- AIや自動生成は候補作成に使い、最終判断はビルド、ログ、人間レビュー、エビデンスに置く
+
+詳細は以下を参照してください。
+
+- [基本設計書](docs/basic_design.md)
+- [詳細設計書](docs/detailed_design.md)
+- [テスト仕様書](docs/test_specification.md)
+- [配布用バイナリ作成手順書](docs/distribution_binary_build_guide.md)
+- [v0.1スモークサンプル](docs/v0.1_smoke_sample.md)
+
+## 開発と検証
+
+Python側の単体テストとCLIスモークを実行します。
 
 ```powershell
 py -m unittest discover -s tests -p "test_*.py"
 ```
 
-Run the CLI from a checkout without installing:
+インストールせずにチェックアウトからCLIを起動する場合は、`src` を `PYTHONPATH` に追加します。
 
 ```powershell
 $env:PYTHONPATH = "$PWD\src"
 py -m unit_test_runner --help
 ```
 
-After packaging or editable install, the console entry point is:
+editable install または配布用バイナリ化後のコンソール入口は次の名前です。
 
 ```powershell
 unit-test-runner --help
 ```
 
-## Smoke Sample
+VS Code adapter は `vscode/extension` 配下で検証します。
 
-The repository includes a VC6-style fixture under `tests/fixtures/vc6_project`.
+```powershell
+Push-Location vscode\extension
+npm ci
+npm.cmd test
+Pop-Location
+```
 
-Analysis and test design flow:
+## 基本スモーク
+
+小さなVC6風fixtureは `tests/fixtures/vc6_project` にあります。以下は `Control_Update` を対象に、プロジェクト発見、ソース所属判定、関数解析、build probe dry-run、テスト設計生成までを確認する流れです。
 
 ```powershell
 $env:PYTHONPATH = "$PWD\src"
@@ -47,7 +67,7 @@ py -m unit_test_runner build-probe --dossier "$out\reports\function_dossier.json
 py -m unit_test_runner generate-test-design --dossier "$out\reports\function_dossier.json"
 ```
 
-Finalized dossier review flow:
+レビュー用に確定済みdossierを作る場合は `--finalize-dossier` を付けます。
 
 ```powershell
 py -m unit_test_runner --json analyze-function --workspace $fixture --dsw "$fixture\Product.dsw" --source src\control.c --function Control_Update --configuration "Win32 Debug" --project Control --out $out --finalize-dossier
@@ -57,8 +77,11 @@ py -m unit_test_runner --json run-tests --workspace $out --dry-run
 py -m unit_test_runner --json prepare-evidence --workspace $out
 ```
 
-Primary outputs:
+主要な出力は以下です。
 
+- `$out\input\request.json`
+- `$out\extracted\`
+- `$out\generated\`
 - `$out\reports\function_dossier.json`
 - `$out\reports\function_dossier.md`
 - `$out\reports\test_case_design.csv`
@@ -70,15 +93,11 @@ Primary outputs:
 - `$out\reports\unresolved_items.md`
 - `$out\reports\next_actions.md`
 
-`function_dossier.json` remains the public dossier artifact in both flows. After dossier review finalization,
-it keeps the original analysis contract fields (`target`, `project_membership`, `build_context`,
-`function`, `test_design`, and `diagnostics`) and adds review workflow fields such as
-`artifact_index`, `traceability`, `review_items`, `unresolved_items`, `next_actions`, and
-`readiness`.
+`function_dossier.json` は通常解析後もレビュー確定後も公開dossier成果物です。確定後も `target`、`project_membership`、`build_context`、`function`、`test_design`、`diagnostics` を維持し、`artifact_index`、`traceability`、`review_items`、`unresolved_items`、`next_actions`、`readiness` などのレビュー用情報を追加します。
 
-For a denser regression and manual-review sample, use `tests/fixtures/vc6_practical_project`.
-It includes extern globals, file-scope static state, function pointers, struct members, arrays,
-function-like macros, and a multi-function call tree around `DeviceControl_Update`.
+## 実用fixture
+
+より密な解析確認には `tests/fixtures/vc6_practical_project` を使います。`DeviceControl_Update` の周辺に、externグローバル、file-scope static、関数ポインタ、構造体メンバ、配列、function-like macro、複数関数の呼び出し木を含めています。
 
 ```powershell
 $env:PYTHONPATH = "$PWD\src"
@@ -92,54 +111,55 @@ py -m unit_test_runner build-probe --dossier "$out\reports\function_dossier.json
 
 ## VS Code Thin Adapter
 
-The TypeScript adapter under `vscode/extension` only invokes the CLI. It does not contain parser or
-report-generation logic.
+`vscode/extension` 配下のTypeScript拡張はCLIを呼び出すadapterです。C解析、レポート生成、dossier確定のロジックは持ちません。
 
-```powershell
-cd vscode\extension
-npm install
-npm test
-```
-
-Required VS Code settings:
+代表設定は以下です。
 
 ```json
 {
   "unitTestRunner.cliPath": "unit-test-runner",
-  "unitTestRunner.workspaceRoot": "D:/work/product",
+  "unitTestRunner.sourceRoot": "D:/work/product",
   "unitTestRunner.dswPath": "D:/work/product/Product.dsw",
   "unitTestRunner.outputRoot": "D:/work/unit_test_workspace",
-  "unitTestRunner.defaultConfiguration": "Win32 Debug"
+  "unitTestRunner.defaultConfiguration": "Win32 Debug",
+  "unitTestRunner.defaultProject": "Control"
 }
 ```
 
-Commands:
+`unitTestRunner.workspaceRoot` と `unitTestRunner.projectName` は互換用の旧設定名です。新規設定では `unitTestRunner.sourceRoot` と `unitTestRunner.defaultProject` を使います。
 
+主なコマンドは以下です。
+
+- `UnitTestRunner: Analyze Current Function`
 - `UnitTestRunner: Analyze Selected Function`
+- `UnitTestRunner: Reanalyze Current Function`
 - `UnitTestRunner: Finalize Dossier`
+- `UnitTestRunner: Open Function Dossier`
 - `UnitTestRunner: Open Review Checklist`
+- `UnitTestRunner: Open Next Actions`
+- `UnitTestRunner: Open Change Impact Report`
+- `UnitTestRunner: Open Regression Selection`
 - `UnitTestRunner: Generate Test Design`
 - `UnitTestRunner: Build Probe Dry Run`
 - `UnitTestRunner: Run Build Probe`
 - `UnitTestRunner: Run Tests`
 - `UnitTestRunner: Prepare Evidence`
+- `UnitTestRunner: Open Output Workspace`
 - `UnitTestRunner: Copy Last CLI Command`
 - `UnitTestRunner: Open Last Function Dossier`
 
-The adapter defaults to JSON CLI output and passes `--finalize-dossier` during analysis when
-`unitTestRunner.finalizeDossierAfterAnalyze` is `true`.
+adapterは既定でJSON出力を使い、`unitTestRunner.finalizeDossierAfterAnalyze` が `true` の場合は解析時に `--finalize-dossier` を渡します。
 
-## Scope
+## 配布
 
-v0.1 deliberately excludes full harness generation, measured runtime coverage, realtime behavior,
-interrupt simulation, and hardware I/O reproduction. Those are Phase 2+ concerns.
+初回配布対象はWindows向けの `unit-test-runner.exe` と VS Code拡張のVSIXです。作成手順は [配布用バイナリ作成手順書](docs/distribution_binary_build_guide.md) を参照してください。
 
-## Encoding Policy
+## 対象外
 
-VC6 project files and target C sources are treated as legacy Windows inputs. The reader accepts
-`utf-8-sig`, `cp932`, and `shift_jis`; Shift-JIS/CP932 source comments are a normal case, not an
-exception path. Extracted source/header files are copied byte-for-byte.
+v0.1では、完全なハーネス自動生成、実行カバレッジ計測、リアルタイム性検証、疑似割込、疑似時間、本番ハードウェアI/O再現は対象外です。これらはPhase 2以降の拡張候補です。
 
-Generated C-family artifacts for future mocks, stubs, and runners must be written as CP932 with
-CRLF line endings so they stay friendly to the target VC6 workflow. JSON and Markdown reports remain
-UTF-8 unless a later workflow requires a different reviewer-facing format.
+## エンコーディング方針
+
+VC6プロジェクトファイルと対象Cソースは、レガシーWindows入力として扱います。読み取り側は `utf-8-sig`、`cp932`、`shift_jis` を受け入れます。Shift-JIS/CP932コメントは例外ではなく通常ケースです。抽出したソースとヘッダはbyte-for-byteでコピーします。
+
+将来のmock、stub、runnerなどC系生成物は、VC6ワークフローで扱いやすいようにCP932かつCRLFで出力します。JSONとMarkdownレポートは、別要件がない限りUTF-8で扱います。
