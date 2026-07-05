@@ -6,6 +6,7 @@ import * as path from 'path';
 import { buildAnalyzeFunctionInvocation, buildFinalizeDossierInvocation, buildGenerateTestDesignInvocation, buildReanalyzeFunctionInvocation, buildRunTestsInvocation } from '../cli/commandBuilder';
 import { runCliInvocation } from '../cli/cliRunner';
 import { parseCliResult, parseCliResultReportPaths } from '../cli/cliResultParser';
+import { DEFAULT_CLI_PATH, resolveCliPath } from '../config/bundledCli';
 import { readAdapterSettingsFromObject } from '../config/settings';
 import { validateSettings } from '../config/validation';
 import { resolveFunctionNameFromText } from '../functionTarget/regexFunctionResolver';
@@ -81,6 +82,18 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.deepEqual(finalize.args.slice(0, 3), ['--json', 'finalize-dossier', '--workspace']);
     assert.deepEqual(testDesign.args.slice(0, 3), ['--json', 'generate-test-design', '--dossier']);
     assert.equal(runTests.requiresConfirmation, true);
+  });
+
+  it('prefers bundled CLI only when cliPath is default or empty', () => {
+    const extensionRoot = 'C:\\Users\\me\\.vscode\\extensions\\unit-test-runner';
+    const bundledPath = path.join(extensionRoot, 'bin', 'win32-x64', 'unit-test-runner.exe');
+    const exists = (candidate: string) => candidate === bundledPath;
+
+    assert.equal(resolveCliPath(DEFAULT_CLI_PATH, extensionRoot, exists, 'win32', 'x64'), bundledPath);
+    assert.equal(resolveCliPath('', extensionRoot, exists, 'win32', 'x64'), bundledPath);
+    assert.equal(resolveCliPath('D:\\tools\\unit-test-runner.exe', extensionRoot, exists, 'win32', 'x64'), 'D:\\tools\\unit-test-runner.exe');
+    assert.equal(resolveCliPath(DEFAULT_CLI_PATH, extensionRoot, () => false, 'win32', 'x64'), DEFAULT_CLI_PATH);
+    assert.equal(resolveCliPath(DEFAULT_CLI_PATH, extensionRoot, exists, 'linux', 'x64'), DEFAULT_CLI_PATH);
   });
 
   it('parses CLI JSON report paths and falls back to conventional report names', () => {

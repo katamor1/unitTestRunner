@@ -1,3 +1,5 @@
+import { DEFAULT_CLI_PATH } from './bundledCli';
+
 export interface AdapterSettings {
   cliPath: string;
   sourceRoot: string;
@@ -18,7 +20,7 @@ type RawSettings = Record<string, unknown>;
 
 export function readAdapterSettingsFromObject(raw: RawSettings, defaultSourceRoot: string): AdapterSettings {
   return {
-    cliPath: stringValue(raw.cliPath, 'unit-test-runner'),
+    cliPath: stringValue(raw.cliPath, DEFAULT_CLI_PATH),
     sourceRoot: stringValue(raw.sourceRoot ?? raw.workspaceRoot, defaultSourceRoot),
     dswPath: stringValue(raw.dswPath, ''),
     outputRoot: stringValue(raw.outputRoot, ''),

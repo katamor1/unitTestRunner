@@ -117,7 +117,6 @@ py -m unit_test_runner build-probe --dossier "$out\reports\function_dossier.json
 
 ```json
 {
-  "unitTestRunner.cliPath": "unit-test-runner",
   "unitTestRunner.sourceRoot": "D:/work/product",
   "unitTestRunner.dswPath": "D:/work/product/Product.dsw",
   "unitTestRunner.outputRoot": "D:/work/unit_test_workspace",
@@ -125,6 +124,8 @@ py -m unit_test_runner build-probe --dossier "$out\reports\function_dossier.json
   "unitTestRunner.defaultProject": "Control"
 }
 ```
+
+VSIXに `bin/win32-x64/unit-test-runner.exe` が同梱されている場合、`unitTestRunner.cliPath` は通常設定不要です。外部CLIを使う場合だけ、`unitTestRunner.cliPath` に絶対パスを指定します。
 
 `unitTestRunner.workspaceRoot` と `unitTestRunner.projectName` は互換用の旧設定名です。新規設定では `unitTestRunner.sourceRoot` と `unitTestRunner.defaultProject` を使います。
 

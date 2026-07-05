@@ -112,7 +112,7 @@
         "unitTestRunner.cliPath": {
           "type": "string",
           "default": "unit-test-runner",
-          "description": "Path to unit-test-runner CLI or executable."
+          "description": "Optional path to unit-test-runner CLI or executable. The bundled Windows x64 executable is used first when this is empty or left as the default."
         },
         "unitTestRunner.sourceRoot": {
           "type": "string",

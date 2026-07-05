@@ -15,6 +15,7 @@ import {
 } from './cli/commandBuilder';
 import { runCliInvocation } from './cli/cliRunner';
 import { parseCliResult } from './cli/cliResultParser';
+import { resolveCliPath } from './config/bundledCli';
 import { AdapterSettings, readAdapterSettingsFromObject } from './config/settings';
 import { validateSettings } from './config/validation';
 import { resolveFunctionNameFromText } from './functionTarget/regexFunctionResolver';
@@ -58,7 +59,7 @@ async function analyzeActiveFunction(context: vscode.ExtensionContext, output: v
   if (!editor) {
     throw new Error('Open a C source file before running UnitTestRunner.');
   }
-  const settings = readConfig();
+  const settings = readConfig(context);
   showValidation(settings);
   const functionName = await resolveFunctionName(editor);
   const sourceRelativePath = relativeSourcePath(editor.document.uri.fsPath, settings.sourceRoot);
@@ -85,7 +86,7 @@ async function reanalyzeActiveFunction(context: vscode.ExtensionContext, output:
   if (!editor) {
     throw new Error('Open a C source file before running UnitTestRunner.');
   }
-  const settings = readConfig();
+  const settings = readConfig(context);
   showValidation(settings);
   const functionName = await resolveFunctionName(editor);
   const sourceRelativePath = relativeSourcePath(editor.document.uri.fsPath, settings.sourceRoot);
@@ -106,10 +107,10 @@ async function reanalyzeActiveFunction(context: vscode.ExtensionContext, output:
   }
 }
 
-function readConfig(): AdapterSettings {
+function readConfig(context: vscode.ExtensionContext): AdapterSettings {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
   const config = vscode.workspace.getConfiguration('unitTestRunner');
-  return readAdapterSettingsFromObject(
+  const settings = readAdapterSettingsFromObject(
     {
       cliPath: config.get('cliPath'),
       sourceRoot: config.get('sourceRoot') || config.get('workspaceRoot'),
@@ -127,6 +128,7 @@ function readConfig(): AdapterSettings {
     },
     workspaceFolder,
   );
+  return { ...settings, cliPath: resolveCliPath(settings.cliPath, context.extensionPath) };
 }
 
 function showValidation(settings: AdapterSettings): void {
@@ -161,7 +163,7 @@ async function resolveFunctionName(editor: vscode.TextEditor): Promise<string> {
 }
 
 async function runWorkspaceCommand(context: vscode.ExtensionContext, output: vscode.OutputChannel, kind: 'finalize' | 'testDesign' | 'buildProbeDryRun' | 'buildProbeRun' | 'runTests' | 'evidence'): Promise<void> {
-  const settings = readConfig();
+  const settings = readConfig(context);
   showValidation(settings);
   const workspace = await lastWorkspace(context);
   const reports = resolveReportPaths(workspace);
