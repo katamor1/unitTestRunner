@@ -53,6 +53,20 @@ Primary outputs:
 - `$out\generated\build\Makefile`
 - `$out\reports\build_probe.log`
 
+For a denser regression and manual-review sample, use `tests/fixtures/vc6_practical_project`.
+It includes extern globals, file-scope static state, function pointers, struct members, arrays,
+function-like macros, and a multi-function call tree around `DeviceControl_Update`.
+
+```powershell
+$env:PYTHONPATH = "$PWD\src"
+$fixture = "$PWD\tests\fixtures\vc6_practical_project"
+$out = "$env:TEMP\unitTestRunner-practical\DeviceControl_Update"
+
+py -m unit_test_runner map-source --workspace $fixture --dsw "$fixture\Product.dsw" --source src\device_control.c
+py -m unit_test_runner analyze-function --workspace $fixture --dsw "$fixture\Product.dsw" --source src\device_control.c --function DeviceControl_Update --configuration "DeviceControl - Win32 Debug" --project DeviceControl --out $out
+py -m unit_test_runner build-probe --dossier "$out\reports\function_dossier.json" --dry-run
+```
+
 ## VS Code Thin Adapter
 
 The TypeScript adapter under `vscode/extension` only invokes the CLI. It does not contain parser or
