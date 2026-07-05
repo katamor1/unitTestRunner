@@ -89,6 +89,56 @@ class BuildWorkspaceGenerationTests(unittest.TestCase):
             self.assertTrue((out_dir / "reports" / "build_workspace_report.json").exists())
             self.assertTrue((out_dir / "reports" / "build_probe_report.json").exists())
 
+    def test_generator_mirrors_declared_include_dirs_into_extracted_workspace(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir) / "project"
+            source = project / "src" / "control.c"
+            header = project / "common" / "include" / "common.h"
+            source.parent.mkdir(parents=True)
+            header.parent.mkdir(parents=True)
+            source.write_text('#include "common.h"\nint Target(void) { return COMMON_VALUE; }\n', encoding="ascii")
+            header.write_text("#define COMMON_VALUE 1\n", encoding="ascii")
+            out_dir = Path(temp_dir) / "out"
+            build_context = {
+                "workspace_root": str(project),
+                "include_dirs": ["common/include"],
+                "defines": [],
+                "compiler_options": [],
+            }
+            source_digest = {
+                "source": {"path": str(source)},
+                "preprocessor": {
+                    "includes": [
+                        {
+                            "name": "common.h",
+                            "resolved_candidates": [str(header)],
+                        }
+                    ]
+                },
+            }
+            harness_report = {
+                "function": {"name": "Target"},
+                "source": {"path": str(source)},
+                "output_root": str(out_dir),
+                "generated_files": [],
+            }
+
+            report, _probe = generate_build_workspace(
+                build_context,
+                source_digest,
+                harness_report,
+                out_dir,
+                run_probe=False,
+                dry_run=True,
+            )
+
+            self.assertTrue((out_dir / "extracted" / "common" / "include" / "common.h").exists())
+            self.assertFalse((out_dir / "extracted" / "include" / "common.h").exists())
+            include_dirs = {item.raw: item for item in report.include_dirs}
+            self.assertTrue((out_dir / include_dirs["common/include"].workspace_path).exists())
+            makefile = (out_dir / "build" / "Makefile").read_text(encoding="cp932")
+            self.assertIn('/I"..\\extracted\\common\\include"', makefile)
+
     def test_run_probe_preserves_redirected_build_log_for_diagnostics(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             out_dir, reports = self.prepare_analysis(temp_dir)
@@ -113,6 +163,35 @@ class BuildWorkspaceGenerationTests(unittest.TestCase):
             self.assertEqual("failed", probe.status)
             self.assertEqual(["missing.h"], [item.include_name for item in probe.missing_includes])
             self.assertIn("missing.h", (out_dir / "logs" / "build.log").read_text(encoding="utf-8"))
+
+    def test_run_probe_with_vcvars_runs_build_script_even_when_tools_are_not_on_initial_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            out_dir, reports = self.prepare_analysis(temp_dir)
+            vcvars = Path(temp_dir) / "vcvars32.bat"
+            vcvars.write_text("@echo off\n", encoding="utf-8")
+
+            def fake_run(*args, **kwargs):
+                build_dir = Path(kwargs["cwd"])
+                (build_dir.parent / "logs" / "build.log").write_text("Build succeeded\n", encoding="utf-8")
+                return subprocess.CompletedProcess(args[0], 0, stdout="")
+
+            with mock.patch("unit_test_runner.build.build_workspace_generator.shutil.which", return_value=None):
+                with mock.patch("unit_test_runner.build.build_workspace_generator.subprocess.run", side_effect=fake_run) as run:
+                    _report, probe = generate_build_workspace(
+                        reports["build_context"],
+                        reports["source_digest"],
+                        reports["harness_report"],
+                        out_dir,
+                        run_probe=True,
+                        dry_run=False,
+                        vcvars=vcvars,
+                    )
+
+            self.assertEqual("succeeded", probe.status)
+            self.assertTrue(probe.executed)
+            self.assertEqual(0, probe.exit_code)
+            self.assertEqual(1, run.call_count)
+            self.assertIn(str(vcvars), (out_dir / "build" / "build.bat").read_text(encoding="cp932"))
 
     def test_log_parser_extracts_include_unresolved_pch_and_vc6_compatibility(self):
         parsed = parse_build_log(
@@ -148,6 +227,8 @@ generated\\tests\\test.c(7) : fatal error C1083: Cannot open include file: 'stdi
                 "Win32 Debug",
                 "--project",
                 "Control",
+                "--phase",
+                "execution",
                 "--out",
                 str(out_dir),
             )

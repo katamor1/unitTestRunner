@@ -6,32 +6,32 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .build import generate_build_workspace
-from .build_completion import analyze_build_errors_from_workspace
-from .build_completion.completion_applier import apply_safe_completions as apply_completion_actions
-from .build_completion.completion_models import BuildCompletionPolicy
-from .build_completion.completion_report_writer import write_completion_reports
-from .c_analyzer import analyze_function
-from .c_analyzer.boundary_candidate_analyzer import generate_boundary_equivalence_candidates
-from .c_analyzer.boundary_candidate_writer import write_boundary_equivalence_candidates
-from .c_analyzer.call_analyzer import analyze_calls
-from .c_analyzer.call_report_writer import write_call_report
-from .c_analyzer.coverage_design_analyzer import analyze_coverage_design
-from .c_analyzer.coverage_design_writer import write_coverage_design
-from .c_analyzer.function_location_writer import write_function_location
-from .c_analyzer.function_locator import locate_function
-from .c_analyzer.global_access_analyzer import analyze_global_access
-from .c_analyzer.global_access_writer import write_global_access
-from .c_analyzer.signature_extractor import extract_signature
-from .c_analyzer.signature_writer import write_function_signature
-from .c_analyzer.source_digest import build_source_digest, write_source_digest
-from .harness import generate_harness_skeleton
-from .execution import prepare_test_execution_evidence
-from .path_utils import normalize_relative
-from .test_design import generate_test_design
-from .test_design.test_case_design_generator import generate_test_case_design, generate_test_case_design_from_payloads
-from .test_design.test_case_design_writer import write_test_case_design_format, write_test_case_design_report
-from .vc6 import select_project_context
+from ..build import generate_build_workspace
+from ..build_completion import analyze_build_errors_from_workspace
+from ..build_completion.completion_applier import apply_safe_completions as apply_completion_actions
+from ..build_completion.completion_models import BuildCompletionPolicy
+from ..build_completion.completion_report_writer import write_completion_reports
+from ..c_analyzer import analyze_function
+from ..c_analyzer.boundary_candidate_analyzer import generate_boundary_equivalence_candidates
+from ..c_analyzer.boundary_candidate_writer import write_boundary_equivalence_candidates
+from ..c_analyzer.call_analyzer import analyze_calls
+from ..c_analyzer.call_report_writer import write_call_report
+from ..c_analyzer.coverage_design_analyzer import analyze_coverage_design
+from ..c_analyzer.coverage_design_writer import write_coverage_design
+from ..c_analyzer.function_location_writer import write_function_location
+from ..c_analyzer.function_locator import locate_function
+from ..c_analyzer.global_access_analyzer import analyze_global_access
+from ..c_analyzer.global_access_writer import write_global_access
+from ..c_analyzer.signature_extractor import extract_signature
+from ..c_analyzer.signature_writer import write_function_signature
+from ..c_analyzer.source_digest import build_source_digest, write_source_digest
+from ..harness import generate_harness_skeleton
+from ..execution import prepare_test_execution_evidence
+from ..path_utils import normalize_relative
+from ..test_design import generate_test_design
+from ..test_design.test_case_design_generator import generate_test_case_design, generate_test_case_design_from_payloads
+from ..test_design.test_case_design_writer import write_test_case_design_format, write_test_case_design_report
+from ..vc6 import select_project_context
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -63,6 +63,16 @@ def _source_relative_to_workspace(workspace_root: Path, source: str | Path) -> s
         return absolute.relative_to(workspace_root).as_posix()
     except ValueError as exc:
         raise ValueError(f"source path is outside workspace: {absolute}") from exc
+
+
+def _normalize_analysis_phase(phase: str) -> str:
+    if phase not in {"analysis", "design", "harness", "build", "execution"}:
+        raise ValueError(f"Unsupported analysis phase: {phase}")
+    return phase
+
+
+def _analysis_phase_rank(phase: str) -> int:
+    return {"analysis": 1, "design": 2, "harness": 3, "build": 4, "execution": 5}[phase]
 
 
 def _markdown_list(items: list[Any], formatter=str) -> str:
@@ -193,7 +203,10 @@ def analyze_function_workflow(
     project_name: str | None = None,
     apply_safe_completions: bool = False,
     run_tests: bool = False,
+    phase: str = "execution",
 ) -> dict[str, Any]:
+    phase = _normalize_analysis_phase(phase)
+    phase_rank = _analysis_phase_rank(phase)
     workspace_root = Path(workspace_root).resolve()
     source = _source_relative_to_workspace(workspace_root, source)
     out_dir = Path(out_dir).resolve()
@@ -250,30 +263,43 @@ def analyze_function_workflow(
     coverage_design_paths = write_coverage_design(out_dir, coverage_design)
     boundary_candidates = generate_boundary_equivalence_candidates(signature, global_access, call_report, coverage_design)
     boundary_paths = write_boundary_equivalence_candidates(out_dir, boundary_candidates)
-    test_case_design = generate_test_case_design(signature, global_access, call_report, coverage_design, boundary_candidates)
-    test_case_design_paths = write_test_case_design_report(out_dir, test_case_design)
-    harness_skeleton = generate_harness_skeleton(signature, global_access, call_report, test_case_design, out_dir)
-    build_workspace, build_probe = generate_build_workspace(
-        dossier["build_context"],
-        digest.to_dict(),
-        harness_skeleton.to_dict(),
-        out_dir,
-        run_probe=False,
-        dry_run=True,
-    )
-    completion_policy = BuildCompletionPolicy(apply_safe_completions=apply_safe_completions)
-    build_completion_plan, build_completion_iteration = analyze_build_errors_from_workspace(out_dir, source_root=workspace_root, policy=completion_policy)
-    if apply_safe_completions:
-        apply_result = apply_completion_actions(out_dir, build_completion_plan)
-        if build_completion_iteration.iterations:
-            first = build_completion_iteration.iterations[0]
-            first.applied_actions = apply_result.applied_actions
-            first.skipped_actions = apply_result.skipped_actions
-            first.generated_files = apply_result.generated_files
-            first.progress = "not_run"
-        build_completion_iteration.warnings.extend(apply_result.warnings)
-        write_completion_reports(out_dir, build_completion_plan, build_completion_iteration)
-    test_execution, evidence_manifest = prepare_test_execution_evidence(out_dir, run_tests=run_tests, dry_run=not run_tests)
+    test_case_design = None
+    test_case_design_paths = None
+    harness_skeleton = None
+    build_workspace = None
+    build_probe = None
+    build_completion_plan = None
+    build_completion_iteration = None
+    test_execution = None
+    evidence_manifest = None
+    if phase_rank >= _analysis_phase_rank("design"):
+        test_case_design = generate_test_case_design(signature, global_access, call_report, coverage_design, boundary_candidates)
+        test_case_design_paths = write_test_case_design_report(out_dir, test_case_design)
+    if phase_rank >= _analysis_phase_rank("harness"):
+        harness_skeleton = generate_harness_skeleton(signature, global_access, call_report, test_case_design, out_dir)
+    if phase_rank >= _analysis_phase_rank("build"):
+        build_workspace, build_probe = generate_build_workspace(
+            dossier["build_context"],
+            digest.to_dict(),
+            harness_skeleton.to_dict(),
+            out_dir,
+            run_probe=False,
+            dry_run=True,
+        )
+        completion_policy = BuildCompletionPolicy(apply_safe_completions=apply_safe_completions)
+        build_completion_plan, build_completion_iteration = analyze_build_errors_from_workspace(out_dir, source_root=workspace_root, policy=completion_policy)
+        if apply_safe_completions:
+            apply_result = apply_completion_actions(out_dir, build_completion_plan)
+            if build_completion_iteration.iterations:
+                first = build_completion_iteration.iterations[0]
+                first.applied_actions = apply_result.applied_actions
+                first.skipped_actions = apply_result.skipped_actions
+                first.generated_files = apply_result.generated_files
+                first.progress = "not_run"
+            build_completion_iteration.warnings.extend(apply_result.warnings)
+            write_completion_reports(out_dir, build_completion_plan, build_completion_iteration)
+    if phase_rank >= _analysis_phase_rank("execution"):
+        test_execution, evidence_manifest = prepare_test_execution_evidence(out_dir, run_tests=run_tests, dry_run=not run_tests)
     dossier["source_digest"] = {
         "json": str(digest_paths["json"]),
         "markdown": str(digest_paths["markdown"]),
@@ -311,49 +337,54 @@ def analyze_function_workflow(
         "markdown": str(boundary_paths["markdown"]),
         "status": boundary_candidates.status,
     }
-    dossier["test_case_design"] = {
-        "json": str(test_case_design_paths["json"]),
-        "markdown": str(test_case_design_paths["markdown"]),
-        "csv": str(test_case_design_paths["csv"]),
-        "status": test_case_design.status,
-    }
-    dossier["harness_skeleton"] = {
-        "json": str(out_dir / "reports" / "harness_skeleton_report.json"),
-        "markdown": str(out_dir / "reports" / "harness_skeleton_report.md"),
-        "status": harness_skeleton.status,
-    }
-    dossier["build_workspace"] = {
-        "json": str(out_dir / "reports" / "build_workspace_report.json"),
-        "markdown": str(out_dir / "reports" / "build_workspace_report.md"),
-        "status": build_workspace.status,
-    }
-    dossier["build_probe"] = {
-        "json": str(out_dir / "reports" / "build_probe_report.json"),
-        "markdown": str(out_dir / "reports" / "build_probe_report.md"),
-        "status": build_probe.status,
-        "executed": build_probe.executed,
-    }
-    dossier["build_completion"] = {
-        "plan_json": str(out_dir / "reports" / "build_completion_plan.json"),
-        "plan_markdown": str(out_dir / "reports" / "build_completion_plan.md"),
-        "iteration_json": str(out_dir / "reports" / "build_completion_iteration_report.json"),
-        "iteration_markdown": str(out_dir / "reports" / "build_completion_iteration_report.md"),
-        "status": build_completion_plan.status,
-        "iteration_status": build_completion_iteration.status,
-    }
-    dossier["test_execution"] = {
-        "json": str(out_dir / "reports" / "test_execution_report.json"),
-        "markdown": str(out_dir / "reports" / "test_execution_report.md"),
-        "result_json": str(out_dir / "reports" / "test_result.json"),
-        "result_csv": str(out_dir / "reports" / "test_result.csv"),
-        "status": test_execution.status,
-        "executed": test_execution.executed,
-    }
-    dossier["evidence"] = {
-        "manifest_json": str(out_dir / "reports" / "evidence_manifest.json"),
-        "package_markdown": str(out_dir / "reports" / "evidence_package.md"),
-        "status": evidence_manifest.summary.test_execution_status,
-    }
+    if test_case_design is not None and test_case_design_paths is not None:
+        dossier["test_case_design"] = {
+            "json": str(test_case_design_paths["json"]),
+            "markdown": str(test_case_design_paths["markdown"]),
+            "csv": str(test_case_design_paths["csv"]),
+            "status": test_case_design.status,
+        }
+    if harness_skeleton is not None:
+        dossier["harness_skeleton"] = {
+            "json": str(out_dir / "reports" / "harness_skeleton_report.json"),
+            "markdown": str(out_dir / "reports" / "harness_skeleton_report.md"),
+            "status": harness_skeleton.status,
+        }
+    if build_workspace is not None and build_probe is not None:
+        dossier["build_workspace"] = {
+            "json": str(out_dir / "reports" / "build_workspace_report.json"),
+            "markdown": str(out_dir / "reports" / "build_workspace_report.md"),
+            "status": build_workspace.status,
+        }
+        dossier["build_probe"] = {
+            "json": str(out_dir / "reports" / "build_probe_report.json"),
+            "markdown": str(out_dir / "reports" / "build_probe_report.md"),
+            "status": build_probe.status,
+            "executed": build_probe.executed,
+        }
+    if build_completion_plan is not None and build_completion_iteration is not None:
+        dossier["build_completion"] = {
+            "plan_json": str(out_dir / "reports" / "build_completion_plan.json"),
+            "plan_markdown": str(out_dir / "reports" / "build_completion_plan.md"),
+            "iteration_json": str(out_dir / "reports" / "build_completion_iteration_report.json"),
+            "iteration_markdown": str(out_dir / "reports" / "build_completion_iteration_report.md"),
+            "status": build_completion_plan.status,
+            "iteration_status": build_completion_iteration.status,
+        }
+    if test_execution is not None and evidence_manifest is not None:
+        dossier["test_execution"] = {
+            "json": str(out_dir / "reports" / "test_execution_report.json"),
+            "markdown": str(out_dir / "reports" / "test_execution_report.md"),
+            "result_json": str(out_dir / "reports" / "test_result.json"),
+            "result_csv": str(out_dir / "reports" / "test_result.csv"),
+            "status": test_execution.status,
+            "executed": test_execution.executed,
+        }
+        dossier["evidence"] = {
+            "manifest_json": str(out_dir / "reports" / "evidence_manifest.json"),
+            "package_markdown": str(out_dir / "reports" / "evidence_package.md"),
+            "status": evidence_manifest.summary.test_execution_status,
+        }
     _write_json(out_dir / "reports" / "function_dossier.json", dossier)
     _write_markdown_reports(out_dir, dossier, copied_files)
     write_function_signature(out_dir, signature)
@@ -473,7 +504,7 @@ def _generate_test_case_report_from_dossier_payload(dossier: dict[str, Any], dos
 
 
 def _legacy_report_from_csv_dossier(dossier: dict[str, Any], dossier_path: Path):
-    from .test_design.test_case_models import CoverageTestDesignSummary, TestCaseDesignReport, TestCaseGenerationPolicy
+    from ..test_design.test_case_models import CoverageTestDesignSummary, TestCaseDesignReport, TestCaseGenerationPolicy
 
     function_name = dossier.get("target", {}).get("function", "unknown")
     return TestCaseDesignReport(

@@ -142,8 +142,7 @@ class CFunctionLocationTests(unittest.TestCase):
             self.assertEqual(0, completed.returncode, completed.stderr)
             self.assertEqual("", completed.stderr)
             payload = json.loads(completed.stdout)
-            self.assertEqual("evidence_prepared", payload["status"])
-            self.assertIn("dossier review", payload["message"])
+            self.assertEqual("analysis_completed", payload["status"])
             self.assertIn("function_location", payload["data"])
             self.assertTrue((out_dir / "reports" / "function_location.json").exists())
 

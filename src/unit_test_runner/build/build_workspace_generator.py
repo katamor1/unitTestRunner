@@ -64,7 +64,7 @@ def generate_build_workspace(
         build_commands=build_commands,
         diagnostics=diagnostics,
     )
-    probe_report = _build_probe_report(output_root, source_path, function_name, build_commands, harness_report, run_probe, dry_run, timeout_seconds)
+    probe_report = _build_probe_report(output_root, source_path, function_name, build_commands, harness_report, run_probe, dry_run, timeout_seconds, vcvars)
     write_build_reports(output_root, workspace_report, probe_report)
     return workspace_report, probe_report
 
@@ -92,7 +92,7 @@ def _copy_target_and_headers(
         if existing is None:
             continue
         include_relative = _relative_or_name(existing, workspace_root)
-        if include_relative.parts and include_relative.parts[0].lower() == "include":
+        if (include_relative.parts and include_relative.parts[0].lower() == "include") or _is_under_declared_include_dir(include_relative, build_context):
             destination_relative = Path("extracted") / include_relative
         else:
             destination_relative = Path("extracted") / "include" / existing.name
@@ -257,6 +257,7 @@ def _build_probe_report(
     run_probe: bool,
     dry_run: bool,
     timeout_seconds: int,
+    vcvars: Path | str | None,
 ) -> BuildProbeReport:
     stub_candidates = {item.get("original_function_name", "") for item in harness_report.get("stub_skeletons", [])}
     if dry_run or not run_probe:
@@ -278,7 +279,7 @@ def _build_probe_report(
         )
     nmake = shutil.which("nmake")
     cl = shutil.which("cl")
-    if not nmake and not cl:
+    if not nmake and not cl and not vcvars:
         diagnostic = BuildDiagnostic("missing_vc6_environment", "error", "VC6 build tools were not found on PATH.", None, None, None)
         return BuildProbeReport(
             source_path=source_path,
@@ -391,3 +392,12 @@ def _relative_or_name(path: Path, root: Path) -> Path:
         return path.resolve().relative_to(root.resolve())
     except (OSError, ValueError):
         return Path(path.name)
+
+
+def _is_under_declared_include_dir(relative_path: Path, build_context: dict[str, Any]) -> bool:
+    normalized = relative_path.as_posix().lower()
+    for raw in build_context.get("include_dirs", []):
+        include_dir = str(raw).replace("\\", "/").strip("/").lower()
+        if include_dir and (normalized == include_dir or normalized.startswith(include_dir + "/")):
+            return True
+    return False

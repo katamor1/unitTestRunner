@@ -63,5 +63,52 @@ def relative_posix(path: Path, root: Path) -> str:
 
 
 def is_c90_compatible_text(text: str) -> bool:
-    forbidden = ["//", "for (int ", "stdint.h", "stdbool.h", "inline "]
-    return not any(item in text for item in forbidden)
+    checked = _mask_c_strings_and_block_comments(text)
+    forbidden_patterns = [
+        r"//",
+        r"^\s*#\s*include\s*<\s*(?:stdint|stdbool)\.h\s*>",
+        r"\bfor\s*\(\s*(?:const\s+|volatile\s+|signed\s+|unsigned\s+|short\s+|long\s+)*int\b",
+        r"\binline\b",
+    ]
+    return not any(re.search(pattern, checked, flags=re.MULTILINE) for pattern in forbidden_patterns)
+
+
+def _mask_c_strings_and_block_comments(text: str) -> str:
+    result: list[str] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        char = text[index]
+        next_char = text[index + 1] if index + 1 < length else ""
+        if char in {'"', "'"}:
+            quote = char
+            result.append(" ")
+            index += 1
+            while index < length:
+                current = text[index]
+                result.append("\n" if current == "\n" else " ")
+                if current == "\\" and index + 1 < length:
+                    escaped = text[index + 1]
+                    result.append("\n" if escaped == "\n" else " ")
+                    index += 2
+                    continue
+                index += 1
+                if current == quote:
+                    break
+            continue
+        if char == "/" and next_char == "*":
+            result.extend([" ", " "])
+            index += 2
+            while index < length:
+                current = text[index]
+                following = text[index + 1] if index + 1 < length else ""
+                result.append("\n" if current == "\n" else " ")
+                index += 1
+                if current == "*" and following == "/":
+                    result.append(" ")
+                    index += 1
+                    break
+            continue
+        result.append(char)
+        index += 1
+    return "".join(result)

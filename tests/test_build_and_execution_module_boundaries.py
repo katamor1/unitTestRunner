@@ -11,6 +11,7 @@ SRC_ROOT = REPO_ROOT / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
 from unit_test_runner.build_completion.compatibility_feedback import plan_compatibility_feedback
+from unit_test_runner.build_completion.completion_applier import apply_safe_completions
 from unit_test_runner.build_completion.completion_loop import build_iteration_report
 from unit_test_runner.build_completion.completion_models import BuildCompletionPlan, BuildCompletionPolicy
 from unit_test_runner.build_completion.diagnostic_classifier import summarize_diagnostics
@@ -23,6 +24,7 @@ from unit_test_runner.execution.execution_models import TestExecutionPolicy, Tes
 from unit_test_runner.execution.execution_runner import build_execution_command
 from unit_test_runner.execution.precondition_validator import validate_execution_preconditions
 from unit_test_runner.execution.result_mapper import map_results_to_test_design
+from unit_test_runner.execution import test_execution as test_execution_module
 from unit_test_runner.execution.test_result_writer import write_test_execution_reports
 from unit_test_runner.reports.build_completion_iteration_markdown import render_build_completion_iteration_markdown
 from unit_test_runner.reports.build_completion_markdown import render_build_completion_markdown
@@ -103,6 +105,44 @@ class BuildCompletionModuleBoundaryTests(unittest.TestCase):
             self.assertEqual("harness_skeleton_generation", feedback[0].feedback_target_item)
             self.assertTrue(feedback_manual)
 
+    def test_stub_completion_applier_uses_call_argument_count_for_generated_signature(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "build").mkdir()
+            (workspace / "build" / "Makefile").write_text("OBJS=\n", encoding="cp932")
+            build_probe = self.sample_build_probe_report()
+            call_report = {
+                "calls": [
+                    {
+                        "call_id": "CALL_001",
+                        "name": "ReadSensor",
+                        "arguments": [
+                            {"index": 0, "raw": "channel"},
+                            {"index": 1, "raw": "gain"},
+                        ],
+                    }
+                ]
+            }
+
+            candidates, actions, warnings = plan_stub_completions(build_probe, call_report)
+            plan = BuildCompletionPlan(
+                source_path=Path("src/control.c"),
+                function_name="Control_Update",
+                status="planned",
+                policy=BuildCompletionPolicy(),
+                completion_actions=actions,
+                stub_completion_candidates=candidates,
+            )
+            result = apply_safe_completions(workspace, plan)
+
+            self.assertFalse(warnings)
+            self.assertEqual(["ACT_STUB_001"], result.applied_actions)
+            header = (workspace / "generated" / "stubs" / "stub_ReadSensor.h").read_text(encoding="cp932")
+            source = (workspace / "generated" / "stubs" / "stub_ReadSensor.c").read_text(encoding="cp932")
+            self.assertIn("int ReadSensor(int arg0, int arg1);", header)
+            self.assertIn("int ReadSensor(int arg0, int arg1)", source)
+            self.assertNotIn("int ReadSensor(void)", source)
+
     def test_completion_loop_builds_iteration_report_from_plan(self):
         build_probe = self.sample_build_probe_report()
         plan = BuildCompletionPlan(
@@ -158,6 +198,18 @@ class ExecutionEvidenceModuleBoundaryTests(unittest.TestCase):
             self.assertEqual("inconclusive", case_results[0].status)
             self.assertTrue(case_results[0].review_required)
             self.assertTrue(mapped_review_items)
+
+    def test_test_execution_entrypoint_does_not_keep_legacy_private_helpers(self):
+        for name in [
+            "_resolve_executable",
+            "_run_executable",
+            "_write_test_reports",
+            "_build_manifest",
+            "_write_manifest_and_package",
+            "_environment_summary",
+        ]:
+            with self.subTest(name=name):
+                self.assertFalse(hasattr(test_execution_module, name))
 
     def test_execution_evidence_writers_and_manifest_are_exposed(self):
         with tempfile.TemporaryDirectory() as temp_dir:

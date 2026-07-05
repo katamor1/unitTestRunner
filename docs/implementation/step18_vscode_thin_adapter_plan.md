@@ -26,7 +26,7 @@ Step 18 では、その方針を維持したまま、ユーザーが普段利用
 - `unit-test-runner analyze-function` を呼び出す
 - `function_dossier.md` / `review_checklist.md` / `next_actions.md` を開く
 - 生成済みレポートや外部ワークスペースを素早く確認する
-- 必要に応じて `finalize-dossier` / `generate-test-draft` / `build-probe` / `run-tests` を明示実行する
+- 必要に応じて `finalize-dossier` / `generate-test-design` / `build-probe` / `run-tests` を明示実行する
 
 VS Code Thin Adapter は、解析ロジックを持たない。
 あくまで CLI の起動、引数生成、結果表示、レポートを開くための薄いUI層である。
@@ -65,7 +65,7 @@ VS Code extension に入れないもの:
 - Signature extractor
 - Global / Call / Branch analyzer
 - Boundary / Equivalence generator
-- Test case draft generator
+- Test case design generator
 - Stub / Harness generator
 - Build probe runner
 - Dossier finalizer
@@ -145,7 +145,7 @@ Step 18 で実装するもの:
 4. CLI command builder
    - `analyze-function`
    - `finalize-dossier`
-   - `generate-test-draft`
+   - `generate-test-design`
    - `build-probe`
    - `run-tests`
    - `prepare-evidence`
@@ -164,7 +164,7 @@ Step 18 で実装するもの:
    - `review_checklist.md`
    - `unresolved_items.md`
    - `next_actions.md`
-   - `test_case_draft.csv`
+   - `test_case_design.csv`
    - workspace folder
 
 7. UI commands
@@ -174,7 +174,7 @@ Step 18 で実装するもの:
    - Open Function Dossier
    - Open Review Checklist
    - Open Next Actions
-   - Generate Test Draft
+   - Generate Test Design
    - Build Probe Dry Run
    - Run Build Probe, explicit
    - Run Tests, explicit
@@ -321,7 +321,7 @@ VS Code settings.json に以下を定義する。
 | `unitTestRunner.openFunctionDossier` | UnitTestRunner: Open Function Dossier | dossier Markdownを開く |
 | `unitTestRunner.openReviewChecklist` | UnitTestRunner: Open Review Checklist | review checklistを開く |
 | `unitTestRunner.openNextActions` | UnitTestRunner: Open Next Actions | next actionsを開く |
-| `unitTestRunner.generateTestDraft` | UnitTestRunner: Generate Test Draft | test_case_draft生成 |
+| `unitTestRunner.generateTestDesign` | UnitTestRunner: Generate Test Design | test_case_design生成 |
 | `unitTestRunner.buildProbeDryRun` | UnitTestRunner: Build Probe Dry Run | build probe dry-run |
 | `unitTestRunner.runBuildProbe` | UnitTestRunner: Run Build Probe | 明示build probe実行 |
 | `unitTestRunner.runTests` | UnitTestRunner: Run Tests | 明示test実行 |
@@ -581,7 +581,7 @@ interface ReportPaths {
   reviewChecklistMd?: string;
   unresolvedItemsMd?: string;
   nextActionsMd?: string;
-  testCaseDraftCsv?: string;
+  testCaseDesignCsv?: string;
   buildProbeReportMd?: string;
   testExecutionReportMd?: string;
   evidencePackageMd?: string;

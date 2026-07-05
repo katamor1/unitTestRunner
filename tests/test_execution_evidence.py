@@ -115,6 +115,8 @@ UTR RUN TC_Control_Update_002
             run_payload = json.loads(run_tests.stdout)
             self.assertEqual("evidence_prepared", run_payload["status"])
             self.assertTrue(Path(run_payload["data"]["test_execution"]["json"]).exists())
+            run_report = json.loads((workspace / "reports" / "test_execution_report.json").read_text(encoding="utf-8"))
+            self.assertFalse(run_report["policy"]["allow_placeholder_tests"])
 
             prepare = run_module("--json", "prepare-evidence", "--workspace", str(workspace))
             self.assertEqual(0, prepare.returncode, prepare.stderr)
@@ -137,6 +139,8 @@ UTR RUN TC_Control_Update_002
                 "Win32 Debug",
                 "--project",
                 "Control",
+                "--phase",
+                "execution",
                 "--out",
                 str(out_dir),
             )
@@ -164,6 +168,8 @@ UTR RUN TC_Control_Update_002
                 "Win32 Debug",
                 "--project",
                 "Control",
+                "--phase",
+                "execution",
                 "--out",
                 str(run_out_dir),
                 "--run-tests",

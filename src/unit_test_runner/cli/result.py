@@ -20,7 +20,7 @@ class CLIResult:
     human_output: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "status": self.status,
             "exit_code": self.exit_code,
             "command": self.command,
@@ -29,6 +29,10 @@ class CLIResult:
             "warnings": self.warnings,
             "errors": self.errors,
         }
+        reports = _reports_from_data(self.data)
+        if reports is not None:
+            payload["reports"] = reports
+        return payload
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2, ensure_ascii=False) + "\n"
@@ -60,3 +64,15 @@ def not_implemented(command: str, planned_item: str) -> CLIResult:
         message="This command is defined but not implemented yet.",
         data={"planned_item": planned_item},
     )
+
+
+def _reports_from_data(data: dict[str, Any]) -> dict[str, Any] | None:
+    direct = data.get("reports")
+    if isinstance(direct, dict):
+        return direct
+    review = data.get("review")
+    if isinstance(review, dict):
+        nested = review.get("reports")
+        if isinstance(nested, dict):
+            return nested
+    return None

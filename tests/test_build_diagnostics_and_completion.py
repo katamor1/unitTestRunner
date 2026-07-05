@@ -139,6 +139,8 @@ generated\\tests\\test_Control_Update.c(7) : error C2143: syntax error : missing
             complete_payload = json.loads(complete.stdout)
             self.assertEqual("completion_applied", complete_payload["status"])
             self.assertTrue((workspace / "reports" / "build_completion_iteration_report.json").exists())
+            completion_plan = json.loads((workspace / "reports" / "build_completion_plan.json").read_text(encoding="utf-8"))
+            self.assertFalse(completion_plan["policy"]["generate_unknown_symbol_stubs"])
 
             out_dir = Path(temp_dir) / "AnalyzeFunctionBuildCompletion"
             full = run_module(
@@ -156,6 +158,8 @@ generated\\tests\\test_Control_Update.c(7) : error C2143: syntax error : missing
                 "Win32 Debug",
                 "--project",
                 "Control",
+                "--phase",
+                "execution",
                 "--out",
                 str(out_dir),
             )
@@ -182,6 +186,8 @@ generated\\tests\\test_Control_Update.c(7) : error C2143: syntax error : missing
                 "Win32 Debug",
                 "--project",
                 "Control",
+                "--phase",
+                "build",
                 "--out",
                 str(apply_out_dir),
                 "--apply-safe-completions",

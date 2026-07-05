@@ -5,7 +5,7 @@ from pathlib import Path
 
 from unit_test_runner.harness.c90_writer import include_guard_for, write_c_file
 
-from .completion_models import BuildCompletionPlan, BuildCompletionWarning, CompletionIteration, DiagnosticsSummary
+from .completion_models import BuildCompletionPlan, BuildCompletionWarning, CompletionIteration, DiagnosticsSummary, StubCompletionCandidate
 
 
 @dataclass
@@ -19,12 +19,19 @@ class CompletionApplyResult:
 def apply_safe_completions(workspace: Path | str, plan: BuildCompletionPlan) -> CompletionApplyResult:
     workspace = Path(workspace).resolve()
     result = CompletionApplyResult()
+    candidates = {candidate.function_name_candidate: candidate for candidate in plan.stub_completion_candidates}
     for action in plan.completion_actions:
         if action.action_kind != "generate_stub" or action.apply_mode != "auto_safe":
             result.skipped_actions.append(action.action_id)
             continue
         stub_name = _function_name_from_action(action)
-        generated = _write_stub(workspace, stub_name, result, overwrite=plan.policy.overwrite_existing_generated_stubs)
+        generated = _write_stub(
+            workspace,
+            stub_name,
+            result,
+            overwrite=plan.policy.overwrite_existing_generated_stubs,
+            candidate=candidates.get(stub_name),
+        )
         if generated:
             _register_stub_in_makefile(workspace, stub_name)
             result.applied_actions.append(action.action_id)
@@ -58,13 +65,15 @@ def _function_name_from_action(action) -> str:
     return action.description.rsplit(" ", 1)[-1]
 
 
-def _write_stub(workspace: Path, function_name: str, result: CompletionApplyResult, overwrite: bool) -> bool:
+def _write_stub(workspace: Path, function_name: str, result: CompletionApplyResult, overwrite: bool, candidate: StubCompletionCandidate | None = None) -> bool:
     source = workspace / "generated" / "stubs" / f"stub_{function_name}.c"
     header = workspace / "generated" / "stubs" / f"stub_{function_name}.h"
     if (source.exists() or header.exists()) and not overwrite:
         result.warnings.append(BuildCompletionWarning("existing_file_not_overwritten", f"Existing generated stub was not overwritten: {function_name}", related_symbol=function_name))
         return False
     guard = include_guard_for(header.name)
+    parameters = _stub_parameter_list(candidate.parameter_count if candidate else 0)
+    unused_parameters = _unused_parameter_lines(candidate.parameter_count if candidate else 0)
     header_text = f"""/* generated completion stub: review required */
 #ifndef {guard}
 #define {guard}
@@ -72,7 +81,7 @@ def _write_stub(workspace: Path, function_name: str, result: CompletionApplyResu
 void Stub_{function_name}_Reset(void);
 void Stub_{function_name}_SetReturn(int value);
 int Stub_{function_name}_GetCallCount(void);
-int {function_name}(void);
+int {function_name}({parameters});
 
 #endif
 """
@@ -98,9 +107,9 @@ int Stub_{function_name}_GetCallCount(void)
     return stub_call_count;
 }}
 
-int {function_name}(void)
+int {function_name}({parameters})
 {{
-    stub_call_count++;
+{unused_parameters}    stub_call_count++;
     return stub_return_value;
 }}
 """
@@ -108,6 +117,18 @@ int {function_name}(void)
     write_c_file(source, source_text, overwrite=True)
     result.generated_files.extend([Path("generated/stubs") / header.name, Path("generated/stubs") / source.name])
     return True
+
+
+def _stub_parameter_list(parameter_count: int) -> str:
+    if parameter_count <= 0:
+        return "void"
+    return ", ".join(f"int arg{index}" for index in range(parameter_count))
+
+
+def _unused_parameter_lines(parameter_count: int) -> str:
+    if parameter_count <= 0:
+        return ""
+    return "".join(f"    (void)arg{index};\n" for index in range(parameter_count))
 
 
 def _register_stub_in_makefile(workspace: Path, function_name: str) -> None:

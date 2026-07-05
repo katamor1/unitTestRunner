@@ -60,6 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--emit-json", action="store_true")
     analyze.add_argument("--emit-md", action="store_true")
     analyze.add_argument("--emit-csv", action="store_true")
+    analyze.add_argument("--phase", choices=["analysis", "design", "harness", "build", "execution"], default="design")
     analyze.add_argument("--analyze-build-errors", action="store_true")
     analyze.add_argument("--apply-safe-completions", action="store_true")
     analyze.add_argument("--run-tests", action="store_true")

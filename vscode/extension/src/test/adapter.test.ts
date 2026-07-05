@@ -100,6 +100,17 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
       '',
       'C:\\work\\out\\Control_Update',
     );
+    const topLevel = parseCliResultReportPaths(
+      JSON.stringify({
+        status: 'dossier_finalized',
+        reports: {
+          function_dossier_md: 'C:\\work\\out\\Control_Update\\reports\\top_level_dossier.md',
+          test_case_design_csv: 'C:\\work\\out\\Control_Update\\reports\\top_level_design.csv',
+        },
+      }),
+      '',
+      'C:\\work\\out\\Control_Update',
+    );
     const fallback = parseCliResultReportPaths('plain output', '', 'C:\\work\\out\\Control_Update');
     const direct = resolveReportPaths('C:\\work\\out\\Control_Update');
     const directStep19 = parseCliResultReportPaths(
@@ -118,6 +129,8 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
 
     assert.equal(path.basename(parsed.functionDossierMd ?? ''), 'function_dossier.md');
     assert.equal(path.basename(parsed.reviewChecklistMd ?? ''), 'review_checklist.md');
+    assert.equal(path.basename(topLevel.functionDossierMd ?? ''), 'top_level_dossier.md');
+    assert.equal(path.basename(topLevel.testCaseDesignCsv ?? ''), 'top_level_design.csv');
     assert.equal(path.basename(fallback.nextActionsMd ?? ''), 'next_actions.md');
     assert.equal(path.basename(direct.unresolvedItemsMd ?? ''), 'unresolved_items.md');
     assert.equal(path.basename(direct.changeImpactReportMd ?? ''), 'change_impact_report.md');

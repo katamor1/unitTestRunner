@@ -34,7 +34,7 @@ def _resolve_extracted_include(root: Path, include_dir: str) -> str:
     return include_dir
 
 
-def build_probe(dossier_path: Path | str, vc6_bin: Path | str | None = None, dry_run: bool = False) -> dict[str, Any]:
+def build_probe(dossier_path: Path | str, vc6_bin: Path | str | None = None, dry_run: bool = False, vcvars: Path | str | None = None) -> dict[str, Any]:
     dossier_path = Path(dossier_path)
     dossier = json.loads(dossier_path.read_text(encoding="utf-8"))
     root = dossier_path.parents[1]
@@ -48,14 +48,17 @@ def build_probe(dossier_path: Path | str, vc6_bin: Path | str | None = None, dry
     cl_exe = str(Path(vc6_bin) / "cl.exe") if vc6_bin else "cl"
     command_parts = [cl_exe, "/nologo", "/W3", *define_args, *include_args, "/c", str(source)]
     command = " ".join(_quote(part) if " " in part and not part.startswith(("/I", "/D")) else part for part in command_parts)
+    if vcvars:
+        command = f"call {_quote(vcvars)} && {command}"
     makefile = build_dir / "Makefile"
     makefile.write_text(f"# Generated build probe for {function_name}\nprobe:\n\t{command}\n", encoding="utf-8")
     log_path = root / "reports" / "build_probe.log"
-    if dry_run or not vc6_bin:
+    if dry_run or (not vc6_bin and not vcvars):
         log_text = f"DRY RUN\n{command}\n"
         log_path.write_text(log_text, encoding="utf-8")
         return {"command": command, "dry_run": True, "diagnostics": parse_build_log(log_text)}
 
-    completed = subprocess.run(command_parts, cwd=build_dir, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+    run_args = ["cmd.exe", "/c", command] if vcvars else command_parts
+    completed = subprocess.run(run_args, cwd=build_dir, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
     log_path.write_text(completed.stdout, encoding="utf-8")
     return {"command": command, "dry_run": False, "returncode": completed.returncode, "diagnostics": parse_build_log(completed.stdout)}

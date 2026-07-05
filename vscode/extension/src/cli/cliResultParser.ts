@@ -35,7 +35,7 @@ export function parseCliResult(stdout: string, stderr: string, workspace: string
 function reportsFromParsed(parsed: Record<string, unknown>, fallback: ReportPaths, warnings: string[]): ReportPaths {
   const data = objectValue(parsed.data);
   const review = objectValue(data.review);
-  const reportSource = optionalObjectValue(review.reports) ?? optionalObjectValue(data.reports);
+  const reportSource = optionalObjectValue(parsed.reports) ?? optionalObjectValue(data.reports) ?? optionalObjectValue(review.reports);
   if (!reportSource) {
     warnings.push('CLI JSON did not include report paths; using conventional report paths.');
     return fallback;

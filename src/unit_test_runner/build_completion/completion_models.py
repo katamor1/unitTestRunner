@@ -122,6 +122,7 @@ class StubCompletionCandidate:
     makefile_registration_required: bool
     confidence: str
     review_required: bool
+    parameter_count: int = 0
     warnings: list[BuildCompletionWarning] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -137,6 +138,7 @@ class StubCompletionCandidate:
             "makefile_registration_required": self.makefile_registration_required,
             "confidence": self.confidence,
             "review_required": self.review_required,
+            "parameter_count": self.parameter_count,
             "warnings": [item.to_dict() for item in self.warnings],
         }
 

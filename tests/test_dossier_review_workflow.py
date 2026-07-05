@@ -180,6 +180,8 @@ class DossierReviewWorkflowTests(unittest.TestCase):
                 "Win32 Debug",
                 "--project",
                 "Control",
+                "--phase",
+                "execution",
                 "--out",
                 str(out_dir),
                 "--finalize-dossier",

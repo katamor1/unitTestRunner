@@ -37,12 +37,14 @@ def _stub_candidates(
             confidence = "high"
             related_call_id = call.get("call_id")
             related_call_name = call.get("name")
+            parameter_count = len(call.get("arguments", []))
         else:
             strategy = "default_int"
             parameter_strategy = "empty_parameter_list"
             confidence = "low"
             related_call_id = None
             related_call_name = None
+            parameter_count = 0
             warnings.append(BuildCompletionWarning("unknown_symbol_stub_generated", f"Unknown symbol stub candidate requires review: {function_name}.", related_symbol=function_name))
         source = Path("generated/stubs") / f"stub_{function_name}.c"
         header = Path("generated/stubs") / f"stub_{function_name}.h"
@@ -75,6 +77,7 @@ def _stub_candidates(
                 makefile_registration_required=True,
                 confidence=confidence,
                 review_required=True,
+                parameter_count=parameter_count,
             )
         )
     return candidates

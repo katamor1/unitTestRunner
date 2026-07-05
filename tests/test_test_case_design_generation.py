@@ -123,8 +123,7 @@ class TestCaseDesignGenerationTests(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             result = json.loads(completed.stdout)
-            self.assertEqual("evidence_prepared", result["status"])
-            self.assertIn("dossier review", result["message"])
+            self.assertEqual("analysis_completed", result["status"])
             reports = out_dir / "reports"
             for filename in ["test_case_design.json", "test_case_design.md", "test_case_design.csv"]:
                 self.assertTrue((reports / filename).exists(), filename)

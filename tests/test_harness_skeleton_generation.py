@@ -21,6 +21,7 @@ from unit_test_runner.c_analyzer.function_locator import locate_function
 from unit_test_runner.c_analyzer.global_access_analyzer import analyze_global_access
 from unit_test_runner.c_analyzer.signature_extractor import extract_signature
 from unit_test_runner.c_analyzer.source_digest import build_source_digest
+from unit_test_runner.harness.c90_writer import is_c90_compatible_text
 from unit_test_runner.harness.harness_skeleton_generator import generate_harness_skeleton
 from unit_test_runner.test_design.test_case_design_generator import generate_test_case_design
 
@@ -98,6 +99,14 @@ class HarnessSkeletonGenerationTests(unittest.TestCase):
             self.assertTrue((Path(temp_dir) / "reports" / "harness_skeleton_report.json").exists())
             self.assertIn("# Harness Skeleton Report", (Path(temp_dir) / "reports" / "harness_skeleton_report.md").read_text(encoding="utf-8"))
 
+    def test_c90_compatibility_check_ignores_strings_and_matches_tokens(self):
+        self.assertTrue(is_c90_compatible_text('const char *url = "http://example";\n'))
+        self.assertTrue(is_c90_compatible_text("int inline_value;\n"))
+        self.assertFalse(is_c90_compatible_text("for(int i = 0; i < 3; i++) { }\n"))
+        self.assertFalse(is_c90_compatible_text("for ( int i = 0; i < 3; i++) { }\n"))
+        self.assertFalse(is_c90_compatible_text("#include <stdint.h>\n"))
+        self.assertFalse(is_c90_compatible_text("static inline int helper(void) { return 0; }\n"))
+
     def test_generate_harness_cli_and_analyze_function_connect_harness_generation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             out_dir = Path(temp_dir) / "Control_Update"
@@ -116,6 +125,8 @@ class HarnessSkeletonGenerationTests(unittest.TestCase):
                 "Win32 Debug",
                 "--project",
                 "Control",
+                "--phase",
+                "execution",
                 "--out",
                 str(out_dir),
             )
