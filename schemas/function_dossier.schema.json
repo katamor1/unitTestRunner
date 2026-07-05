@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Function Dossier",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "target",
+    "project_membership",
+    "build_context",
+    "function",
+    "test_design",
+    "diagnostics"
+  ],
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "target": { "type": "object" },
+    "project_membership": { "type": "array" },
+    "build_context": { "type": "object" },
+    "function": { "type": "object" },
+    "test_design": { "type": "object" },
+    "diagnostics": { "type": "array" }
+  }
+}

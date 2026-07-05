@@ -30,3 +30,13 @@
 *.exe
 *.out
 *.app
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Node / VS Code extension
+node_modules/

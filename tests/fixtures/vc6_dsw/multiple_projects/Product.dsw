@@ -1,0 +1,37 @@
+Microsoft Developer Studio Workspace File, Format Version 6.00
+
+###############################################################################
+
+Project: "Control"=.\Control\Control.dsp - Package Owner=<4>
+
+Package=<5>
+{{{
+}}}
+
+Package=<4>
+{{{
+}}}
+
+###############################################################################
+
+Project: "Common"=.\Common\Common.DSP - Package Owner=<4>
+
+Package=<5>
+{{{
+}}}
+
+Package=<4>
+{{{
+}}}
+
+###############################################################################
+
+Global:
+
+Package=<5>
+{{{
+}}}
+
+Package=<3>
+{{{
+}}}

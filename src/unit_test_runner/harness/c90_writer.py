@@ -1,0 +1,67 @@
+from __future__ import annotations
+
+import hashlib
+import re
+from pathlib import Path
+
+
+C_CODE_ENCODING = "cp932"
+
+
+def sanitize_identifier(value: str | None, fallback: str = "item") -> str:
+    raw = value or fallback
+    sanitized = re.sub(r"\W+", "_", raw)
+    sanitized = sanitized.strip("_")
+    if not sanitized:
+        sanitized = fallback
+    if sanitized[0].isdigit():
+        sanitized = f"_{sanitized}"
+    return sanitized
+
+
+def include_guard_for(path: Path | str) -> str:
+    name = Path(path).as_posix().upper()
+    name = re.sub(r"[^A-Z0-9]+", "_", name).strip("_")
+    return f"UTR_{name}_"
+
+
+def write_c_file(path: Path, text: str, overwrite: bool = False) -> tuple[bool, str | None]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and not overwrite:
+        return False, sha256_file(path)
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    with path.open("w", encoding=C_CODE_ENCODING, newline="\r\n") as handle:
+        handle.write(normalized)
+        if not normalized.endswith("\n"):
+            handle.write("\n")
+    return True, sha256_file(path)
+
+
+def write_text_file(path: Path, text: str, encoding: str = "utf-8", overwrite: bool = True) -> tuple[bool, str | None]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and not overwrite:
+        return False, sha256_file(path)
+    path.write_text(text if text.endswith("\n") else text + "\n", encoding=encoding)
+    return True, sha256_file(path)
+
+
+def sha256_file(path: Path) -> str | None:
+    if not path.exists() or not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def relative_posix(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def is_c90_compatible_text(text: str) -> bool:
+    forbidden = ["//", "for (int ", "stdint.h", "stdbool.h", "inline "]
+    return not any(item in text for item in forbidden)
