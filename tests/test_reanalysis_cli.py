@@ -198,6 +198,66 @@ class ReanalysisCliTests(unittest.TestCase):
             impact = json.loads((current_out / "reports" / "change_impact_report.json").read_text(encoding="utf-8"))
             self.assertTrue(any(item["change_kind"] == "source_hash_changed" for item in impact["source_changes"]))
 
+    def test_reanalyze_function_reads_finalized_previous_dossier_artifact_index(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            product = temp / "product"
+            shutil.copytree(FIXTURE_ROOT, product)
+            previous_out = temp / "previous"
+            current_out = temp / "current"
+
+            run_cli(
+                "--json",
+                "analyze-function",
+                "--workspace",
+                str(product),
+                "--dsw",
+                str(product / "Product.dsw"),
+                "--source",
+                "src/control.c",
+                "--function",
+                "Control_Update",
+                "--configuration",
+                "Win32 Debug",
+                "--project",
+                "Control",
+                "--out",
+                str(previous_out),
+                "--finalize-dossier",
+            )
+            previous_digest = json.loads((previous_out / "reports" / "source_digest.json").read_text(encoding="utf-8"))
+            source_path = product / "src" / "control.c"
+            source_text = source_path.read_text(encoding="utf-8")
+            source_path.write_text(source_text.replace("sensor_value < SENSOR_MIN", "sensor_value <= SENSOR_MIN"), encoding="utf-8")
+
+            run_cli(
+                "--json",
+                "reanalyze-function",
+                "--workspace",
+                str(product),
+                "--dsw",
+                str(product / "Product.dsw"),
+                "--source",
+                "src/control.c",
+                "--function",
+                "Control_Update",
+                "--configuration",
+                "Win32 Debug",
+                "--project",
+                "Control",
+                "--out",
+                str(current_out),
+                "--previous-dossier",
+                str(previous_out / "reports" / "function_dossier.json"),
+                "--previous-test-case-design",
+                str(previous_out / "reports" / "test_case_design.json"),
+            )
+
+            impact = json.loads((current_out / "reports" / "change_impact_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(previous_digest["source"]["sha256"], impact["previous_snapshot"]["source_sha256"])
+            self.assertIn("source_digest", impact["previous_snapshot"]["artifacts"])
+            self.assertIn("function_signature", impact["previous_snapshot"]["artifacts"])
+
     def test_reconcile_test_cases_cli_writes_updated_design_when_requested(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)

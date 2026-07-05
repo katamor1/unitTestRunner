@@ -213,12 +213,39 @@ def _payloads_from_previous_dossier(dossier_path: Path) -> tuple[dict[str, Any],
 
 def _artifact_json_path(dossier: dict[str, Any], key: str, dossier_path: Path) -> Path | None:
     value = dossier.get(key)
-    if not isinstance(value, dict) or not isinstance(value.get("json"), str):
+    if isinstance(value, dict) and isinstance(value.get("json"), str):
+        path = Path(value["json"])
+        if not path.is_absolute():
+            path = dossier_path.parent / path
+        return path.resolve()
+    return _artifact_index_json_path(dossier, key, dossier_path)
+
+
+def _artifact_index_json_path(dossier: dict[str, Any], key: str, dossier_path: Path) -> Path | None:
+    artifacts = dossier.get("artifact_index")
+    if not isinstance(artifacts, list):
         return None
-    path = Path(value["json"])
-    if not path.is_absolute():
-        path = dossier_path.parent / path
-    return path.resolve()
+    artifact_root = _artifact_index_root(dossier, dossier_path)
+    for artifact in artifacts:
+        if not isinstance(artifact, dict) or artifact.get("artifact_kind") != key:
+            continue
+        raw_path = artifact.get("path")
+        if not isinstance(raw_path, str) or not raw_path:
+            return None
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = artifact_root / path
+        return path.resolve()
+    return None
+
+
+def _artifact_index_root(dossier: dict[str, Any], dossier_path: Path) -> Path:
+    workspace_root = dossier.get("workspace_root")
+    if isinstance(workspace_root, str) and workspace_root:
+        return Path(workspace_root).expanduser().resolve()
+    if dossier_path.parent.name == "reports":
+        return dossier_path.parent.parent.resolve()
+    return dossier_path.parent.resolve()
 
 
 def _snapshot_from_previous_dossier(
