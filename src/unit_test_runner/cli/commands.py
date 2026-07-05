@@ -18,6 +18,7 @@ from unit_test_runner.build_completion.completion_report_writer import write_com
 from unit_test_runner.c_analyzer import list_functions
 from unit_test_runner.dsw_parser import discover_dsw_workspaces, parse_dsw as parse_dsw_step03
 from unit_test_runner.execution import prepare_test_execution_evidence
+from unit_test_runner.path_utils import normalize_relative
 from unit_test_runner.dossier import (
     analyze_function_workflow,
     finalize_function_dossier,
@@ -211,12 +212,12 @@ def handle_list_functions(args: argparse.Namespace) -> CLIResult:
 def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
     dsw = _existing_file(args.dsw, "dsw", args.command)
     workspace = _workspace_from_args(args.workspace, dsw)
-    _existing_source(workspace, args.source, args.command)
+    source = normalize_relative(_existing_source(workspace, args.source, args.command), workspace)
     try:
         dossier = analyze_function_workflow(
             workspace,
             dsw,
-            args.source,
+            source,
             args.function,
             args.configuration,
             args.out,
@@ -648,7 +649,12 @@ def _existing_source(workspace: Path, source: str, command: str) -> Path:
     path = Path(source)
     if not path.is_absolute():
         path = workspace / source
-    return _existing_file(path, "source", command)
+    resolved = path.expanduser().resolve()
+    try:
+        resolved.relative_to(workspace.resolve())
+    except ValueError as exc:
+        raise CLIError(f"source path is outside workspace: {resolved}", EXIT_INPUT_ERROR, command) from exc
+    return _existing_file(resolved, "source", command)
 
 
 def _workspace_from_args(workspace: str | None, dsw: Path) -> Path:

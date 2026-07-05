@@ -53,6 +53,18 @@ def _copy_source_tree(workspace_root: Path, source: str, out_dir: Path, project:
     return copied
 
 
+def _source_relative_to_workspace(workspace_root: Path, source: str | Path) -> str:
+    source_path = Path(source)
+    if source_path.is_absolute():
+        absolute = source_path.resolve()
+    else:
+        absolute = (workspace_root / str(source).replace("\\", "/")).resolve()
+    try:
+        return absolute.relative_to(workspace_root).as_posix()
+    except ValueError as exc:
+        raise ValueError(f"source path is outside workspace: {absolute}") from exc
+
+
 def _markdown_list(items: list[Any], formatter=str) -> str:
     if not items:
         return "- None\n"
@@ -183,6 +195,7 @@ def analyze_function_workflow(
     run_tests: bool = False,
 ) -> dict[str, Any]:
     workspace_root = Path(workspace_root).resolve()
+    source = _source_relative_to_workspace(workspace_root, source)
     out_dir = Path(out_dir).resolve()
     for child in ("input", "extracted", "generated", "reports", "intermediate"):
         (out_dir / child).mkdir(parents=True, exist_ok=True)
@@ -190,11 +203,11 @@ def analyze_function_workflow(
     source_path = (workspace_root / source).resolve()
     function = analyze_function(source_path, function_name)
     test_design = generate_test_design(function)
-    copied_files = _copy_source_tree(workspace_root, source.replace("\\", "/"), out_dir, project)
+    copied_files = _copy_source_tree(workspace_root, source, out_dir, project)
     request = {
         "workspace": str(workspace_root),
         "dsw": normalize_relative(Path(dsw_path).resolve(), workspace_root),
-        "source": source.replace("\\", "/"),
+        "source": source,
         "function": function_name,
         "configuration": configuration,
         "project": project_name,
@@ -204,7 +217,7 @@ def analyze_function_workflow(
     dossier = {
         "schema_version": "0.1",
         "target": {
-            "source": source.replace("\\", "/"),
+            "source": source,
             "function": function_name,
             "configuration": configuration,
             "project": project["project_name"],

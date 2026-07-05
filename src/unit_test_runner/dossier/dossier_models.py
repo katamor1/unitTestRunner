@@ -60,6 +60,7 @@ class DossierArtifact:
     produced_by_step: str
     required_level: str
     stale_candidate: bool = False
+    modified_at: str | None = None
     warnings: list[DossierWarning] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -73,6 +74,7 @@ class DossierArtifact:
             "produced_by_step": self.produced_by_step,
             "required_level": self.required_level,
             "stale_candidate": self.stale_candidate,
+            "modified_at": self.modified_at,
             "warnings": [item.to_dict() for item in self.warnings],
         }
 
@@ -228,16 +230,30 @@ class FunctionDossier:
     next_actions: list[DossierNextAction]
     readiness: DossierReadiness
     warnings: list[DossierWarning] = field(default_factory=list)
+    target: dict[str, Any] = field(default_factory=dict)
+    project_membership: list[dict[str, Any]] = field(default_factory=list)
+    build_context: dict[str, Any] = field(default_factory=dict)
+    function: dict[str, Any] = field(default_factory=dict)
+    test_design: dict[str, Any] = field(default_factory=dict)
+    diagnostics: list[Any] = field(default_factory=list)
     schema_version: str = "0.1"
 
     def to_dict(self) -> dict[str, Any]:
+        target = dict(self.target)
+        target.setdefault("source", _path_text(self.source_path) or "")
+        target.setdefault("function", self.function_name)
+        function = dict(self.function)
+        function.setdefault("name", self.function_name)
+        function.setdefault("source_path", _path_text(self.source_path))
+        function["status"] = self.status
         return {
             "schema_version": self.schema_version,
-            "function": {
-                "name": self.function_name,
-                "source_path": _path_text(self.source_path),
-                "status": self.status,
-            },
+            "target": target,
+            "project_membership": self.project_membership,
+            "build_context": self.build_context,
+            "function": function,
+            "test_design": self.test_design,
+            "diagnostics": self.diagnostics,
             "workspace_root": _path_text(self.workspace_root),
             "created_at": self.created_at,
             "artifact_index": [item.to_dict() for item in self.artifact_index],

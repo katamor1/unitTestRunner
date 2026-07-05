@@ -55,6 +55,14 @@ class VscodeAdapterTests(unittest.TestCase):
         self.assertIn("unitTestRunner.openLastFunctionDossier", extension)
         self.assertIn("markdown.showPreview", extension)
 
+    def test_vscode_task_template_uses_json_and_finalized_review_flow(self):
+        template = json.loads((REPO_ROOT / "templates" / "vscode" / "tasks.json").read_text(encoding="utf-8"))
+        analyze_args = template["tasks"][0]["args"]
+
+        self.assertIn("--json", analyze_args)
+        self.assertIn("analyze-function", analyze_args)
+        self.assertIn("--finalize-dossier", analyze_args)
+
 
 if __name__ == "__main__":
     unittest.main()

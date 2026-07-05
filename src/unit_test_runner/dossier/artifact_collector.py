@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ STANDARD_ARTIFACTS: list[tuple[str, str, str, str, str]] = [
 
 def collect_artifacts(workspace: Path | str) -> tuple[list[DossierArtifact], dict[str, dict[str, Any]], list[DossierWarning]]:
     workspace = Path(workspace).resolve()
+    request_mtime = _request_mtime(workspace)
     artifacts: list[DossierArtifact] = []
     payloads: dict[str, dict[str, Any]] = {}
     warnings: list[DossierWarning] = []
@@ -41,34 +43,55 @@ def collect_artifacts(workspace: Path | str) -> tuple[list[DossierArtifact], dic
         artifact_warnings: list[DossierWarning] = []
         schema_version = None
         exists = absolute.exists()
+        modified_at = _modified_at(absolute) if exists else None
         if not exists:
             warning = DossierWarning("missing_artifact", f"Artifact is missing: {path.as_posix()}", artifact_id, step)
             artifact_warnings.append(warning)
             warnings.append(warning)
-        elif file_kind == "json":
-            try:
-                payload = json.loads(absolute.read_text(encoding="utf-8"))
-                payloads[kind] = payload
-                schema_version = payload.get("schema_version")
-                if schema_version is None:
-                    warning = DossierWarning("schema_version_unknown", f"Schema version is not present: {path.as_posix()}", artifact_id, step)
-                    artifact_warnings.append(warning)
-                    warnings.append(warning)
-            except (OSError, json.JSONDecodeError) as exc:
-                warning = DossierWarning("artifact_parse_failed", f"Failed to parse artifact {path.as_posix()}: {exc}", artifact_id, step)
+        else:
+            if request_mtime is not None and absolute.stat().st_mtime < request_mtime:
+                warning = DossierWarning("artifact_older_than_request", f"Artifact is older than input/request.json: {path.as_posix()}", artifact_id, step)
                 artifact_warnings.append(warning)
                 warnings.append(warning)
-        artifacts.append(
-            DossierArtifact(
-                artifact_id=artifact_id,
-                artifact_kind=kind,
-                path=path,
-                exists=exists,
-                sha256=sha256_file(absolute),
-                schema_version=schema_version,
-                produced_by_step=step,
-                required_level=required_level,
-                warnings=artifact_warnings,
-            )
+            if file_kind == "json":
+                try:
+                    payload = json.loads(absolute.read_text(encoding="utf-8"))
+                    payloads[kind] = payload
+                    schema_version = payload.get("schema_version")
+                    if schema_version is None:
+                        warning = DossierWarning("schema_version_unknown", f"Schema version is not present: {path.as_posix()}", artifact_id, step)
+                        artifact_warnings.append(warning)
+                        warnings.append(warning)
+                except (OSError, json.JSONDecodeError) as exc:
+                    warning = DossierWarning("artifact_parse_failed", f"Failed to parse artifact {path.as_posix()}: {exc}", artifact_id, step)
+                    artifact_warnings.append(warning)
+                    warnings.append(warning)
+        artifact = DossierArtifact(
+            artifact_id=artifact_id,
+            artifact_kind=kind,
+            path=path,
+            exists=exists,
+            sha256=sha256_file(absolute),
+            schema_version=schema_version,
+            produced_by_step=step,
+            required_level=required_level,
+            stale_candidate=any(warning.code == "artifact_older_than_request" for warning in artifact_warnings),
+            modified_at=modified_at,
+            warnings=artifact_warnings,
         )
+        artifacts.append(artifact)
     return artifacts, payloads, warnings
+
+
+def _request_mtime(workspace: Path) -> float | None:
+    request = workspace / "input" / "request.json"
+    if not request.exists():
+        return None
+    return request.stat().st_mtime
+
+
+def _modified_at(path: Path) -> str | None:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
+    except OSError:
+        return None
