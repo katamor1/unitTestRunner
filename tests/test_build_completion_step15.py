@@ -166,6 +166,30 @@ generated\\tests\\test_Control_Update.c(7) : error C2143: syntax error : missing
             self.assertIn("build_completion", full_payload["data"])
             self.assertTrue((out_dir / "reports" / "build_completion_plan.json").exists())
 
+            apply_out_dir = Path(temp_dir) / "AnalyzeFunctionApplyCompletions"
+            apply_full = run_module(
+                "--json",
+                "analyze-function",
+                "--workspace",
+                str(VC6_FIXTURE_ROOT),
+                "--dsw",
+                str(VC6_FIXTURE_ROOT / "Product.dsw"),
+                "--source",
+                "src/control.c",
+                "--function",
+                "Control_Update",
+                "--configuration",
+                "Win32 Debug",
+                "--project",
+                "Control",
+                "--out",
+                str(apply_out_dir),
+                "--apply-safe-completions",
+            )
+            self.assertEqual(0, apply_full.returncode, apply_full.stderr)
+            completion_plan = json.loads((apply_out_dir / "reports" / "build_completion_plan.json").read_text(encoding="utf-8"))
+            self.assertTrue(completion_plan["policy"]["apply_safe_completions"])
+
 
 if __name__ == "__main__":
     unittest.main()

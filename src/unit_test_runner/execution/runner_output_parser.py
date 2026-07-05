@@ -33,6 +33,7 @@ def parse_runner_output(text: str) -> ParsedRunnerOutput:
             continue
         run_id = _match_case(raw, r"\[\s*RUN\s*\]\s*(\S+)") or _match_case(raw, r"UTR RUN\s+(\S+)")
         if run_id:
+            _mark_current_passed_if_unresolved(cases, current_id)
             current_id = run_id
             cases.setdefault(run_id, TestCaseExecutionResult(run_id, None, "unknown", False, evidence="runner output observed"))
             continue
@@ -58,10 +59,12 @@ def parse_runner_output(text: str) -> ParsedRunnerOutput:
             continue
         summary = _parse_summary(raw)
         if summary:
+            _mark_current_passed_if_unresolved(cases, current_id)
             summary.assertion_failures = assertion_failures
             explicit_summary = summary
             continue
         unknown.append(raw)
+    _mark_current_passed_if_unresolved(cases, current_id)
     if explicit_summary is None:
         explicit_summary = _summary_from_cases(list(cases.values()), assertion_failures)
     else:
@@ -72,6 +75,14 @@ def parse_runner_output(text: str) -> ParsedRunnerOutput:
 def _match_case(raw: str, pattern: str) -> str | None:
     match = re.search(pattern, raw)
     return match.group(1) if match else None
+
+
+def _mark_current_passed_if_unresolved(cases: dict[str, TestCaseExecutionResult], current_id: str | None) -> None:
+    if current_id is None:
+        return
+    case = cases.get(current_id)
+    if case is not None and case.status == "unknown":
+        case.status = "passed"
 
 
 def _parse_summary(raw: str) -> TestResultSummary | None:

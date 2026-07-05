@@ -8,6 +8,9 @@ from typing import Any
 
 from .build import generate_build_workspace
 from .build_completion import analyze_build_errors_from_workspace
+from .build_completion.completion_applier import apply_safe_completions as apply_completion_actions
+from .build_completion.completion_models import BuildCompletionPolicy
+from .build_completion.completion_report_writer import write_completion_reports
 from .c_analyzer import analyze_function
 from .c_analyzer.boundary_candidate_analyzer import generate_boundary_equivalence_candidates
 from .c_analyzer.boundary_candidate_writer import write_boundary_equivalence_candidates
@@ -176,6 +179,8 @@ def analyze_function_workflow(
     configuration: str,
     out_dir: Path | str,
     project_name: str | None = None,
+    apply_safe_completions: bool = False,
+    run_tests: bool = False,
 ) -> dict[str, Any]:
     workspace_root = Path(workspace_root).resolve()
     out_dir = Path(out_dir).resolve()
@@ -243,8 +248,19 @@ def analyze_function_workflow(
         run_probe=False,
         dry_run=True,
     )
-    build_completion_plan, build_completion_iteration = analyze_build_errors_from_workspace(out_dir, source_root=workspace_root)
-    test_execution, evidence_manifest = prepare_test_execution_evidence(out_dir, run_tests=False, dry_run=True)
+    completion_policy = BuildCompletionPolicy(apply_safe_completions=apply_safe_completions)
+    build_completion_plan, build_completion_iteration = analyze_build_errors_from_workspace(out_dir, source_root=workspace_root, policy=completion_policy)
+    if apply_safe_completions:
+        apply_result = apply_completion_actions(out_dir, build_completion_plan)
+        if build_completion_iteration.iterations:
+            first = build_completion_iteration.iterations[0]
+            first.applied_actions = apply_result.applied_actions
+            first.skipped_actions = apply_result.skipped_actions
+            first.generated_files = apply_result.generated_files
+            first.progress = "not_run"
+        build_completion_iteration.warnings.extend(apply_result.warnings)
+        write_completion_reports(out_dir, build_completion_plan, build_completion_iteration)
+    test_execution, evidence_manifest = prepare_test_execution_evidence(out_dir, run_tests=run_tests, dry_run=not run_tests)
     dossier["source_digest"] = {
         "json": str(digest_paths["json"]),
         "markdown": str(digest_paths["markdown"]),
@@ -333,10 +349,6 @@ def analyze_function_workflow(
     write_coverage_design(out_dir, coverage_design)
     write_boundary_equivalence_candidates(out_dir, boundary_candidates)
     write_test_case_draft_report(out_dir, test_case_draft)
-    generate_harness_skeleton(signature, global_access, call_report, test_case_draft, out_dir, overwrite=True)
-    generate_build_workspace(dossier["build_context"], digest.to_dict(), harness_skeleton.to_dict(), out_dir, run_probe=False, dry_run=True)
-    analyze_build_errors_from_workspace(out_dir, source_root=workspace_root)
-    prepare_test_execution_evidence(out_dir, run_tests=False, dry_run=True)
     _write_json(out_dir / "generated" / "prompt_pack.json", {"function_dossier": dossier})
     return dossier
 

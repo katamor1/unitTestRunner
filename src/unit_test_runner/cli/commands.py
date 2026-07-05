@@ -221,6 +221,8 @@ def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
             args.configuration,
             args.out,
             args.project,
+            apply_safe_completions=args.apply_safe_completions,
+            run_tests=args.run_tests,
         )
     except ValueError as exc:
         raise CLIError(str(exc), EXIT_NOT_FOUND, args.command) from exc

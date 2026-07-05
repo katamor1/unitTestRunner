@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -688,7 +689,15 @@ def _signature_parameters(function_payload: dict[str, Any]) -> list[dict[str, An
 def _signature_parameter_list(parameters: list[dict[str, Any]]) -> str:
     if not parameters:
         return "void"
-    return ", ".join(f"{parameter['type_raw']} {parameter['name']}" if parameter["name"] not in parameter["type_raw"].split() else parameter["type_raw"] for parameter in parameters)
+    return ", ".join(_signature_parameter_declaration(parameter) for parameter in parameters)
+
+
+def _signature_parameter_declaration(parameter: dict[str, Any]) -> str:
+    type_raw = str(parameter["type_raw"])
+    name = str(parameter["name"])
+    if parameter.get("is_array") or re.search(rf"\b{re.escape(name)}\b", type_raw):
+        return type_raw
+    return f"{type_raw} {name}"
 
 
 def _return_type(function_payload: dict[str, Any]) -> str:

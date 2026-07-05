@@ -89,6 +89,10 @@ class HarnessSkeletonStep13Tests(unittest.TestCase):
             self.assertIn("Target_Invoke_Control_Update", test_source)
             self.assertEqual([], c90_forbidden_tokens(test_source))
 
+            target_header = (Path(temp_dir) / "generated" / "harness" / "target_invocation.h").read_bytes().decode("cp932")
+            self.assertIn("char buffer[16]", target_header)
+            self.assertNotIn("char buffer[16] buffer", target_header)
+
             self.assertTrue(payload["unresolved_placeholders"])
             self.assertTrue(payload["build_hints"])
             self.assertTrue((Path(temp_dir) / "reports" / "harness_skeleton_report.json").exists())

@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -79,11 +80,39 @@ class BuildWorkspaceStep14Tests(unittest.TestCase):
             self.assertTrue(any(source.startswith("generated/stubs/") for source in compile_sources))
             self.assertTrue(any(item["raw"] == "generated/include" for item in payload["include_dirs"]))
             self.assertIn("build_workspace_report.json", [Path(item["workspace_path"]).name for item in payload["generated_build_files"]])
+            makefile = (out_dir / "build" / "Makefile").read_text(encoding="cp932")
+            self.assertIn('/I"..\\generated\\include"', makefile)
+            self.assertNotIn('/I"generated/include"', makefile)
 
             self.assertEqual("not_run", probe_payload["function"]["status"])
             self.assertFalse(probe_payload["executed"])
             self.assertTrue((out_dir / "reports" / "build_workspace_report.json").exists())
             self.assertTrue((out_dir / "reports" / "build_probe_report.json").exists())
+
+    def test_run_probe_preserves_redirected_build_log_for_diagnostics(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            out_dir, reports = self.prepare_analysis(temp_dir)
+            diagnostic_log = "control.c(4) : fatal error C1083: Cannot open include file: 'missing.h': No such file or directory\n"
+
+            def fake_run(*args, **kwargs):
+                build_dir = Path(kwargs["cwd"])
+                (build_dir.parent / "logs" / "build.log").write_text(diagnostic_log, encoding="utf-8")
+                return subprocess.CompletedProcess(args[0], 2, stdout="")
+
+            with mock.patch("unit_test_runner.build.build_workspace_generator.shutil.which", return_value="tool.exe"):
+                with mock.patch("unit_test_runner.build.build_workspace_generator.subprocess.run", side_effect=fake_run):
+                    _report, probe = generate_build_workspace(
+                        reports["build_context"],
+                        reports["source_digest"],
+                        reports["harness_report"],
+                        out_dir,
+                        run_probe=True,
+                        dry_run=False,
+                    )
+
+            self.assertEqual("failed", probe.status)
+            self.assertEqual(["missing.h"], [item.include_name for item in probe.missing_includes])
+            self.assertIn("missing.h", (out_dir / "logs" / "build.log").read_text(encoding="utf-8"))
 
     def test_log_parser_extracts_include_unresolved_pch_and_vc6_compatibility(self):
         parsed = parse_build_log(

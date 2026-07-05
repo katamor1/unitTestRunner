@@ -67,6 +67,21 @@ UTR ASSERT EQ_INT: test_Control_Update.c:120 actual_return
         self.assertEqual("passed", cases["TC_Control_Update_001"]["status"])
         self.assertEqual("failed", cases["TC_Control_Update_002"]["status"])
 
+    def test_runner_output_parser_treats_generated_clean_cases_as_passed(self):
+        parsed = parse_runner_output(
+            """
+UTR RUN TC_Control_Update_001
+UTR RUN TC_Control_Update_002
+"""
+        )
+        payload = parsed.to_dict()
+
+        self.assertEqual(2, payload["summary"]["total"])
+        self.assertEqual(2, payload["summary"]["passed"])
+        cases = {case["test_case_id"]: case for case in payload["case_results"]}
+        self.assertEqual("passed", cases["TC_Control_Update_001"]["status"])
+        self.assertEqual("passed", cases["TC_Control_Update_002"]["status"])
+
     def test_prepare_evidence_dry_run_generates_reports_manifest_and_csv(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = self.prepare_workspace(temp_dir)
@@ -132,6 +147,33 @@ UTR ASSERT EQ_INT: test_Control_Update.c:120 actual_return
             self.assertIn("test_execution", full_payload["data"])
             self.assertIn("evidence", full_payload["data"])
             self.assertTrue((out_dir / "reports" / "evidence_manifest.json").exists())
+
+            run_out_dir = Path(temp_dir) / "AnalyzeFunctionRunTests"
+            run_full = run_module(
+                "--json",
+                "analyze-function",
+                "--workspace",
+                str(VC6_FIXTURE_ROOT),
+                "--dsw",
+                str(VC6_FIXTURE_ROOT / "Product.dsw"),
+                "--source",
+                "src/control.c",
+                "--function",
+                "Control_Update",
+                "--configuration",
+                "Win32 Debug",
+                "--project",
+                "Control",
+                "--out",
+                str(run_out_dir),
+                "--run-tests",
+            )
+            self.assertEqual(0, run_full.returncode, run_full.stderr)
+            run_payload = json.loads(run_full.stdout)
+            self.assertEqual("blocked", run_payload["data"]["test_execution"]["status"])
+            execution_report = json.loads((run_out_dir / "reports" / "test_execution_report.json").read_text(encoding="utf-8"))
+            self.assertTrue(execution_report["policy"]["run_tests"])
+            self.assertFalse(execution_report["policy"]["dry_run"])
 
 
 if __name__ == "__main__":

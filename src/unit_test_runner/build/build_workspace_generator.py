@@ -300,8 +300,12 @@ def _build_probe_report(
     duration_ms = int((time.monotonic() - start_tick) * 1000)
     finished = datetime.now(timezone.utc)
     log_path = output_root / "logs" / "build.log"
-    log_path.write_text(completed.stdout, encoding="utf-8")
-    parsed = parse_build_log(completed.stdout, stub_candidates)
+    if log_path.exists():
+        log_text = log_path.read_text(encoding="utf-8", errors="replace")
+    else:
+        log_text = completed.stdout
+        log_path.write_text(log_text, encoding="utf-8")
+    parsed = parse_build_log(log_text, stub_candidates)
     status = "succeeded" if completed.returncode == 0 else "failed"
     return BuildProbeReport(
         source_path=source_path,
@@ -346,7 +350,7 @@ def _render_makefile(compile_units: list[CompileUnit], include_dirs: list[BuildP
         "# generated VC6 build probe Makefile",
         "CC=cl",
         "LINK=link",
-        f"CFLAGS={' '.join(compiler_options)} {' '.join('/D\"' + item + '\"' for item in defines)} {' '.join('/I\"' + item.raw + '\"' for item in include_dirs)}",
+        f"CFLAGS={' '.join(compiler_options)} {' '.join('/D\"' + item + '\"' for item in defines)} {' '.join(_makefile_include_arg(item) for item in include_dirs)}",
         f"OBJS={objects}",
         "",
         "all: ..\\bin\\utr_probe.exe",
@@ -368,6 +372,18 @@ def _render_build_bat(vcvars: Path | str | None) -> str:
         lines.append(f'if exist "{vcvars}" call "{vcvars}"')
     lines.extend(["nmake /f Makefile > ..\\logs\\build.log 2>&1", "set BUILD_EXIT=%ERRORLEVEL%", "exit /b %BUILD_EXIT%"])
     return "\n".join(lines)
+
+
+def _makefile_include_arg(entry: BuildPathEntry) -> str:
+    if "$(" in entry.raw:
+        include_path = entry.raw
+    elif Path(entry.raw).is_absolute():
+        include_path = entry.raw
+    else:
+        workspace_path = entry.workspace_path or Path(entry.raw)
+        include_path = (Path("..") / workspace_path).as_posix()
+    include_path = include_path.replace("/", "\\")
+    return f'/I"{include_path}"'
 
 
 def _relative_or_name(path: Path, root: Path) -> Path:
