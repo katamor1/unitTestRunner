@@ -1,0 +1,8 @@
+UNLICENSED
+
+Copyright (c) 2026.
+
+All rights reserved. This VS Code extension package is provided for local or
+internal distribution only. No permission is granted to copy, modify,
+redistribute, sublicense, or use this package outside the authorized project
+context without prior written permission.
