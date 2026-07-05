@@ -21,9 +21,9 @@ analyze_function_workflow = _legacy.analyze_function_workflow
 generate_build_workspace_from_reports = _legacy.generate_build_workspace_from_reports
 generate_build_workspace_from_workspace = _legacy.generate_build_workspace_from_workspace
 generate_harness_skeleton_from_reports = _legacy.generate_harness_skeleton_from_reports
-generate_test_draft_from_dossier = _legacy.generate_test_draft_from_dossier
-generate_test_draft_from_reports = _legacy.generate_test_draft_from_reports
-write_test_case_draft = _legacy.write_test_case_draft
+generate_test_design_from_dossier = _legacy.generate_test_design_from_dossier
+generate_test_design_from_reports = _legacy.generate_test_design_from_reports
+write_test_case_design = _legacy.write_test_case_design
 
 from .finalizer import finalize_function_dossier, prepare_review_from_dossier  # noqa: E402
 
@@ -33,8 +33,8 @@ __all__ = [
     "generate_build_workspace_from_reports",
     "generate_build_workspace_from_workspace",
     "generate_harness_skeleton_from_reports",
-    "generate_test_draft_from_dossier",
-    "generate_test_draft_from_reports",
+    "generate_test_design_from_dossier",
+    "generate_test_design_from_reports",
     "prepare_review_from_dossier",
-    "write_test_case_draft",
+    "write_test_case_design",
 ]

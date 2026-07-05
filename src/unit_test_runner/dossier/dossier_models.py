@@ -38,14 +38,14 @@ class DossierWarning:
     code: str
     message: str
     related_artifact_id: str | None = None
-    related_step: str | None = None
+    related_item: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "code": self.code,
             "message": self.message,
             "related_artifact_id": self.related_artifact_id,
-            "related_step": self.related_step,
+            "related_item": self.related_item,
         }
 
 
@@ -57,7 +57,7 @@ class DossierArtifact:
     exists: bool
     sha256: str | None
     schema_version: str | None
-    produced_by_step: str
+    produced_by_item: str
     required_level: str
     stale_candidate: bool = False
     modified_at: str | None = None
@@ -71,7 +71,7 @@ class DossierArtifact:
             "exists": self.exists,
             "sha256": self.sha256,
             "schema_version": self.schema_version,
-            "produced_by_step": self.produced_by_step,
+            "produced_by_item": self.produced_by_item,
             "required_level": self.required_level,
             "stale_candidate": self.stale_candidate,
             "modified_at": self.modified_at,
@@ -142,7 +142,7 @@ class DossierReviewItem:
 @dataclass
 class DossierUnresolvedItem:
     item_id: str
-    source_step: str
+    source_item: str
     item_kind: str
     description: str
     impact: str
@@ -154,7 +154,7 @@ class DossierUnresolvedItem:
     def to_dict(self) -> dict[str, Any]:
         return {
             "item_id": self.item_id,
-            "source_step": self.source_step,
+            "source_item": self.source_item,
             "item_kind": self.item_kind,
             "description": self.description,
             "impact": self.impact,

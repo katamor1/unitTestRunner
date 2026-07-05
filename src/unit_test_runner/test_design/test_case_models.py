@@ -30,7 +30,7 @@ class TestCaseGenerationPolicy:
 
 
 @dataclass
-class TestCaseDraftWarning:
+class TestCaseDesignWarning:
     code: str
     message: str
     related_test_case_id: str | None = None
@@ -182,7 +182,7 @@ class TestCoverageLink:
 
 
 @dataclass
-class TestCaseDraft:
+class TestCaseDesign:
     test_case_id: str
     title: str
     target_function: str
@@ -199,7 +199,7 @@ class TestCaseDraft:
     candidate_links: list[str] = field(default_factory=list)
     review_status: str = "review_required"
     confidence: str = "medium"
-    warnings: list[TestCaseDraftWarning] = field(default_factory=list)
+    warnings: list[TestCaseDesignWarning] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -224,16 +224,16 @@ class TestCaseDraft:
 
 
 @dataclass
-class CoverageDraftSummary:
+class CoverageTestDesignSummary:
     total_coverage_items: int
-    covered_by_draft_count: int
+    covered_by_design_count: int
     uncovered_coverage_ids: list[str]
     coverage_to_test_cases: dict[str, list[str]]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "total_coverage_items": self.total_coverage_items,
-            "covered_by_draft_count": self.covered_by_draft_count,
+            "covered_by_design_count": self.covered_by_design_count,
             "uncovered_coverage_ids": self.uncovered_coverage_ids,
             "coverage_to_test_cases": self.coverage_to_test_cases,
         }
@@ -260,7 +260,7 @@ class UnresolvedTestDesignItem:
 
 
 @dataclass
-class TestCaseDraftRequest:
+class TestCaseDesignRequest:
     source_path: Path
     function_signature: Any
     global_access: Any
@@ -271,17 +271,17 @@ class TestCaseDraftRequest:
 
 
 @dataclass
-class TestCaseDraftReport:
+class TestCaseDesignReport:
     source_path: Path
     source_sha256: str
     function_name: str
     status: str
     generation_policy: TestCaseGenerationPolicy
-    test_cases: list[TestCaseDraft]
-    additional_case_candidates: list[TestCaseDraft]
-    coverage_summary: CoverageDraftSummary
+    test_cases: list[TestCaseDesign]
+    additional_case_candidates: list[TestCaseDesign]
+    coverage_summary: CoverageTestDesignSummary
     unresolved_items: list[UnresolvedTestDesignItem] = field(default_factory=list)
-    warnings: list[TestCaseDraftWarning] = field(default_factory=list)
+    warnings: list[TestCaseDesignWarning] = field(default_factory=list)
     schema_version: str = "0.1"
 
     def to_dict(self) -> dict[str, Any]:

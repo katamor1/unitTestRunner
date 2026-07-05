@@ -22,8 +22,8 @@ from unit_test_runner.c_analyzer.function_locator import locate_function
 from unit_test_runner.c_analyzer.global_access_analyzer import analyze_global_access
 from unit_test_runner.c_analyzer.signature_extractor import extract_signature
 from unit_test_runner.c_analyzer.source_digest import build_source_digest
-from unit_test_runner.test_design.test_case_draft_generator import generate_test_case_draft
-from unit_test_runner.test_design.test_case_draft_writer import write_test_case_draft_report
+from unit_test_runner.test_design.test_case_design_generator import generate_test_case_design
+from unit_test_runner.test_design.test_case_design_writer import write_test_case_design_report
 
 
 def run_module(*args):
@@ -40,7 +40,7 @@ def run_module(*args):
     )
 
 
-class TestCaseDraftStep12Tests(unittest.TestCase):
+class TestCaseDesignGenerationTests(unittest.TestCase):
     def setUp(self):
         digest = build_source_digest(PIPELINE)
         location = locate_function(digest, "Control_Update")
@@ -49,15 +49,15 @@ class TestCaseDraftStep12Tests(unittest.TestCase):
         call_report = analyze_calls(digest, location, signature, global_access)
         coverage = analyze_coverage_design(digest, location, signature, global_access, call_report)
         boundary = generate_boundary_equivalence_candidates(signature, global_access, call_report, coverage)
-        self.report = generate_test_case_draft(signature, global_access, call_report, coverage, boundary)
+        self.report = generate_test_case_design(signature, global_access, call_report, coverage, boundary)
 
-    def test_generator_maps_coverage_candidates_and_placeholders_to_draft_cases(self):
+    def test_generator_maps_coverage_candidates_and_placeholders_to_design_cases(self):
         payload = self.report.to_dict()
 
         self.assertEqual("generated", payload["function"]["status"])
         summary = payload["coverage_summary"]
         self.assertGreater(summary["total_coverage_items"], 0)
-        self.assertEqual(summary["total_coverage_items"], summary["covered_by_draft_count"])
+        self.assertEqual(summary["total_coverage_items"], summary["covered_by_design_count"])
         self.assertFalse(summary["uncovered_coverage_ids"])
 
         cases = payload["test_cases"]
@@ -83,7 +83,7 @@ class TestCaseDraftStep12Tests(unittest.TestCase):
 
     def test_writer_outputs_json_markdown_and_csv(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            paths = write_test_case_draft_report(Path(temp_dir), self.report)
+            paths = write_test_case_design_report(Path(temp_dir), self.report)
 
             self.assertTrue(paths["json"].exists())
             self.assertTrue(paths["markdown"].exists())
@@ -91,7 +91,7 @@ class TestCaseDraftStep12Tests(unittest.TestCase):
             json_payload = json.loads(paths["json"].read_text(encoding="utf-8"))
             self.assertEqual("generated", json_payload["function"]["status"])
             markdown = paths["markdown"].read_text(encoding="utf-8")
-            self.assertIn("# Test Case Draft Report", markdown)
+            self.assertIn("# Test Case Design Report", markdown)
             with paths["csv"].open(encoding="utf-8", newline="") as handle:
                 rows = list(csv.DictReader(handle))
             self.assertTrue(rows)
@@ -99,7 +99,7 @@ class TestCaseDraftStep12Tests(unittest.TestCase):
             self.assertIn("input_assignments", rows[0])
             self.assertIn("coverage_ids", rows[0])
 
-    def test_analyze_function_generates_step12_artifacts(self):
+    def test_analyze_function_generates_test_case_design_artifacts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             out_dir = Path(temp_dir) / "Control_Update"
             completed = run_module(
@@ -124,16 +124,16 @@ class TestCaseDraftStep12Tests(unittest.TestCase):
             self.assertEqual(0, completed.returncode, completed.stderr)
             result = json.loads(completed.stdout)
             self.assertEqual("evidence_prepared", result["status"])
-            self.assertIn("Step 17", result["message"])
+            self.assertIn("dossier review", result["message"])
             reports = out_dir / "reports"
-            for filename in ["test_case_draft.json", "test_case_draft.md", "test_case_draft.csv"]:
+            for filename in ["test_case_design.json", "test_case_design.md", "test_case_design.csv"]:
                 self.assertTrue((reports / filename).exists(), filename)
-            draft = json.loads((reports / "test_case_draft.json").read_text(encoding="utf-8"))
-            self.assertTrue(draft["test_cases"])
+            design = json.loads((reports / "test_case_design.json").read_text(encoding="utf-8"))
+            self.assertTrue(design["test_cases"])
             dossier = json.loads((reports / "function_dossier.json").read_text(encoding="utf-8"))
-            self.assertIn("test_case_draft", dossier)
+            self.assertIn("test_case_design", dossier)
 
-    def test_generate_test_draft_cli_supports_all_and_explicit_report_inputs(self):
+    def test_generate_test_design_cli_supports_all_and_explicit_report_inputs(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             out_dir = Path(temp_dir) / "Control_Update"
             analyze = run_module(
@@ -157,10 +157,10 @@ class TestCaseDraftStep12Tests(unittest.TestCase):
             self.assertEqual(0, analyze.returncode, analyze.stderr)
             reports = out_dir / "reports"
 
-            all_out = Path(temp_dir) / "draft-all"
+            all_out = Path(temp_dir) / "design-all"
             from_dossier = run_module(
                 "--json",
-                "generate-test-draft",
+                "generate-test-design",
                 "--dossier",
                 str(reports / "function_dossier.json"),
                 "--format",
@@ -170,15 +170,15 @@ class TestCaseDraftStep12Tests(unittest.TestCase):
             )
             self.assertEqual(0, from_dossier.returncode, from_dossier.stderr)
             payload = json.loads(from_dossier.stdout)
-            self.assertEqual("test_case_draft_generated", payload["status"])
-            self.assertTrue(Path(payload["data"]["test_case_draft"]["json"]).exists())
-            self.assertTrue(Path(payload["data"]["test_case_draft"]["markdown"]).exists())
-            self.assertTrue(Path(payload["data"]["test_case_draft"]["csv"]).exists())
+            self.assertEqual("test_case_design_generated", payload["status"])
+            self.assertTrue(Path(payload["data"]["test_case_design"]["json"]).exists())
+            self.assertTrue(Path(payload["data"]["test_case_design"]["markdown"]).exists())
+            self.assertTrue(Path(payload["data"]["test_case_design"]["csv"]).exists())
 
-            explicit_json = Path(temp_dir) / "explicit_draft.json"
+            explicit_json = Path(temp_dir) / "explicit_design.json"
             explicit = run_module(
                 "--json",
-                "generate-test-draft",
+                "generate-test-design",
                 "--function-signature",
                 str(reports / "function_signature.json"),
                 "--global-access",
@@ -196,7 +196,7 @@ class TestCaseDraftStep12Tests(unittest.TestCase):
             )
             self.assertEqual(0, explicit.returncode, explicit.stderr)
             explicit_payload = json.loads(explicit.stdout)
-            self.assertEqual(str(explicit_json), explicit_payload["data"]["test_case_draft"])
+            self.assertEqual(str(explicit_json), explicit_payload["data"]["test_case_design"])
             self.assertTrue(json.loads(explicit_json.read_text(encoding="utf-8"))["test_cases"])
 
 

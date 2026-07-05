@@ -132,7 +132,7 @@ class CliWorkflowTests(unittest.TestCase):
             self.assertTrue((out_dir / "input" / "request.json").exists())
             self.assertTrue((out_dir / "extracted" / "src" / "control.c").exists())
             self.assertTrue((out_dir / "reports" / "function_dossier.md").exists())
-            self.assertTrue((out_dir / "reports" / "test_case_draft.csv").exists())
+            self.assertTrue((out_dir / "reports" / "test_case_design.csv").exists())
 
             probe = run_cli("build-probe", "--dossier", str(dossier_path), "--dry-run")
             probe_result = json.loads(probe.stdout)
@@ -141,10 +141,10 @@ class CliWorkflowTests(unittest.TestCase):
             self.assertTrue((out_dir / "generated" / "build" / "Makefile").exists())
             self.assertTrue((out_dir / "reports" / "build_probe.log").exists())
 
-            draft = run_cli("generate-test-draft", "--dossier", str(dossier_path))
+            design = run_cli("generate-test-design", "--dossier", str(dossier_path))
             self.assertEqual(
-                str(out_dir / "reports" / "test_case_draft.csv"),
-                json.loads(draft.stdout)["test_case_draft"],
+                str(out_dir / "reports" / "test_case_design.csv"),
+                json.loads(design.stdout)["test_case_design"],
             )
 
         self.assertEqual(before, source.read_text(encoding="utf-8"))

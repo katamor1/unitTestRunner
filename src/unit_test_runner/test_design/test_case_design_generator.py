@@ -10,9 +10,9 @@ from .input_assignment_builder import build_input_assignments
 from .state_setup_builder import build_state_setups
 from .stub_setup_builder import build_stub_setups
 from .test_case_models import (
-    CoverageDraftSummary,
-    TestCaseDraft,
-    TestCaseDraftReport,
+    CoverageTestDesignSummary,
+    TestCaseDesign,
+    TestCaseDesignReport,
     TestCaseGenerationPolicy,
     TestCoverageLink,
     TestExecutionStep,
@@ -20,14 +20,14 @@ from .test_case_models import (
 )
 
 
-def generate_test_case_draft(
+def generate_test_case_design(
     function_signature: Any,
     global_access: Any,
     call_report: Any,
     coverage_design: Any,
     boundary_candidates: Any,
     policy: TestCaseGenerationPolicy | None = None,
-) -> TestCaseDraftReport:
+) -> TestCaseDesignReport:
     policy = policy or TestCaseGenerationPolicy()
     signature_payload = _as_dict(function_signature)
     global_payload = _as_dict(global_access)
@@ -36,8 +36,8 @@ def generate_test_case_draft(
     boundary_payload = _as_dict(boundary_candidates)
     function = signature_payload["function"]
     source = signature_payload.get("source", {})
-    cases: list[TestCaseDraft] = []
-    additional_cases: list[TestCaseDraft] = []
+    cases: list[TestCaseDesign] = []
+    additional_cases: list[TestCaseDesign] = []
     unresolved = []
     warnings = []
     coverage_to_cases: dict[str, list[str]] = {}
@@ -53,7 +53,7 @@ def generate_test_case_draft(
         stubs, stub_warnings, stub_candidate_ids = build_stub_setups(related_candidates, call_payload, coverage_item, test_case_id)
         observations, observation_warnings, unresolved_items = build_expected_observations(test_case_id, coverage_item)
         candidate_links = input_candidate_ids + state_candidate_ids + stub_candidate_ids
-        case = TestCaseDraft(
+        case = TestCaseDesign(
             test_case_id=test_case_id,
             title=title_for_coverage(function["name"], coverage_item),
             target_function=function["name"],
@@ -72,7 +72,7 @@ def generate_test_case_draft(
                     coverage_type=coverage_item.get("coverage_type", "unknown"),
                     target_id=coverage_item.get("target_id", ""),
                     intended_value=coverage_item.get("condition_value"),
-                    link_reason="one draft case generated for coverage item",
+                    link_reason="one test design case generated for coverage item",
                     confidence=coverage_item.get("confidence", "medium"),
                 )
             ],
@@ -89,9 +89,9 @@ def generate_test_case_draft(
 
     coverage_ids = [item["coverage_id"] for item in coverage_payload.get("coverage_items", [])]
     uncovered = [coverage_id for coverage_id in coverage_ids if coverage_id not in coverage_to_cases]
-    summary = CoverageDraftSummary(len(coverage_ids), len(coverage_ids) - len(uncovered), uncovered, coverage_to_cases)
+    summary = CoverageTestDesignSummary(len(coverage_ids), len(coverage_ids) - len(uncovered), uncovered, coverage_to_cases)
     status = "generated" if cases and not uncovered else ("partial" if cases else "insufficient_information")
-    return TestCaseDraftReport(
+    return TestCaseDesignReport(
         source_path=Path(source.get("path") or ""),
         source_sha256=source.get("sha256") or "",
         function_name=function["name"],
@@ -105,15 +105,15 @@ def generate_test_case_draft(
     )
 
 
-def generate_test_case_draft_from_payloads(
+def generate_test_case_design_from_payloads(
     function_signature: dict,
     global_access: dict,
     call_report: dict,
     coverage_design: dict,
     boundary_candidates: dict,
     policy: TestCaseGenerationPolicy | None = None,
-) -> TestCaseDraftReport:
-    return generate_test_case_draft(function_signature, global_access, call_report, coverage_design, boundary_candidates, policy)
+) -> TestCaseDesignReport:
+    return generate_test_case_design(function_signature, global_access, call_report, coverage_design, boundary_candidates, policy)
 
 
 def _as_dict(value: Any) -> dict:
@@ -136,7 +136,7 @@ def _execution_steps(function_name: str) -> list[TestExecutionStep]:
     return [
         TestExecutionStep(1, "reset_stubs", "Reset generated stub state.", True),
         TestExecutionStep(2, "setup_state", "Apply input assignments, globals, and stub settings.", True),
-        TestExecutionStep(3, "call_function", f"Call {function_name} with drafted inputs.", True),
+        TestExecutionStep(3, "call_function", f"Call {function_name} with designed inputs.", True),
         TestExecutionStep(4, "observe_results", "Observe return value, state changes, and stub calls.", True),
     ]
 
@@ -148,13 +148,13 @@ def _case_confidence(coverage_item: dict, selected: list[dict]) -> str:
     return worst
 
 
-def _additional_candidate_cases(function_name: str, coverage_item: dict, candidates: list[dict], start_index: int) -> list[TestCaseDraft]:
+def _additional_candidate_cases(function_name: str, coverage_item: dict, candidates: list[dict], start_index: int) -> list[TestCaseDesign]:
     result = []
     for offset, candidate in enumerate(candidates, start=1):
         candidate_id = candidate.get("candidate_id", f"CAND_{offset}")
         test_case_id = f"TC_{function_name}_ADD_{start_index + offset:03d}"
         result.append(
-            TestCaseDraft(
+            TestCaseDesign(
                 test_case_id=test_case_id,
                 title=f"{function_name}: additional candidate {candidate_id}",
                 target_function=function_name,
@@ -162,7 +162,7 @@ def _additional_candidate_cases(function_name: str, coverage_item: dict, candida
                 priority="low",
                 case_kind=case_kind_for_coverage(coverage_item.get("coverage_type", "")),
                 candidate_links=[candidate_id],
-                review_status="draft",
+                review_status="candidate",
                 confidence=candidate.get("confidence", "medium"),
             )
         )

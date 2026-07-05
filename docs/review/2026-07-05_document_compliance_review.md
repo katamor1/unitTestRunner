@@ -64,7 +64,7 @@ Observed behavior:
 Impact:
 
 - A consumer validating `reports/function_dossier.json` against the checked-in schema will reject finalized dossiers.
-- `build-probe --dossier` and `generate-test-draft --dossier` semantics become ambiguous after finalization because the same filename is used for two incompatible dossier shapes.
+- `build-probe --dossier` and `generate-test-design --dossier` semantics become ambiguous after finalization because the same filename is used for two incompatible dossier shapes.
 - The design document, schema, and finalizer contract no longer describe one stable public artifact.
 
 Recommendation:
@@ -163,7 +163,7 @@ Observed behavior:
 - `README.md` and `docs/v0.1_smoke_sample.md` still primarily show the Step16-compatible flow:
   - `analyze-function`
   - `build-probe --dossier <reports/function_dossier.json>`
-  - `generate-test-draft --dossier <reports/function_dossier.json>`
+  - `generate-test-design --dossier <reports/function_dossier.json>`
 - They do not document the review-finalization path:
   - `analyze-function --finalize-dossier`
   - `finalize-dossier --workspace`
@@ -219,7 +219,7 @@ Recommendation:
 | Step05 lexer/masker | Pass | Source reader supports `utf-8-sig`, `utf-8`, `cp932`, and `shift_jis`; masker tests cover comments/strings and fake braces. |
 | Step06 function locator | Pass | Function location and list-functions paths are implemented and tested. |
 | Step07-11 analyzers | Pass with residual heuristic risk | Signature, globals, calls, coverage/branch design, and boundary/equivalence candidates are generated and tested. The implementation remains intentionally lightweight. |
-| Step12 test case draft | Pass | JSON/Markdown/CSV draft generation and CLI paths are covered. |
+| Step12 test case design | Pass | JSON/Markdown/CSV test design generation and CLI paths are covered. |
 | Step13 harness skeleton | Pass with residual compiler risk | Generated C artifacts are CP932/CRLF and avoid known C99 markers. A real VC6 compile remains optional/manual. |
 | Step14 build workspace/probe | Pass | Dry-run generation works without VC6; log parser handles include, PCH, unresolved symbol, and VC6 compatibility diagnostics. |
 | Step15 build completion loop | Pass | Build completion planning and safe generated-stub application are implemented with review-required outputs. |

@@ -15,7 +15,7 @@ def warning_codes(workspace):
     return [warning.code for warning in workspace.warnings]
 
 
-class DswParserStep03Tests(unittest.TestCase):
+class Vc6DswParserTests(unittest.TestCase):
     def test_minimal_dsw_extracts_project_and_resolved_paths(self):
         workspace = parse_dsw(FIXTURE_ROOT / "minimal" / "Product.dsw")
 

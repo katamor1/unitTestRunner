@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from .test_case_models import TestCaseDraftWarning, TestStateSetup
+from .test_case_models import TestCaseDesignWarning, TestStateSetup
 
 
-def build_state_setups(selected_candidates: list[dict], test_case_id: str, coverage_id: str) -> tuple[list[TestStateSetup], list[TestCaseDraftWarning], list[str]]:
+def build_state_setups(selected_candidates: list[dict], test_case_id: str, coverage_id: str) -> tuple[list[TestStateSetup], list[TestCaseDesignWarning], list[str]]:
     setups: list[TestStateSetup] = []
-    warnings: list[TestCaseDraftWarning] = []
+    warnings: list[TestCaseDesignWarning] = []
     candidate_ids: list[str] = []
     for candidate in selected_candidates:
         if candidate.get("_candidate_collection") != "state_candidates":
@@ -15,7 +15,7 @@ def build_state_setups(selected_candidates: list[dict], test_case_id: str, cover
         if scope == "file_static":
             setup_hint = "not_directly_accessible"
             warnings.append(
-                TestCaseDraftWarning(
+                TestCaseDesignWarning(
                     "file_static_setup_requires_wrapper",
                     f"File static state may require a wrapper or initialization path: {candidate.get('variable_name')}",
                     related_test_case_id=test_case_id,

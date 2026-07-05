@@ -22,7 +22,7 @@ from unit_test_runner.c_analyzer.global_access_analyzer import analyze_global_ac
 from unit_test_runner.c_analyzer.signature_extractor import extract_signature
 from unit_test_runner.c_analyzer.source_digest import build_source_digest
 from unit_test_runner.harness.harness_skeleton_generator import generate_harness_skeleton
-from unit_test_runner.test_design.test_case_draft_generator import generate_test_case_draft
+from unit_test_runner.test_design.test_case_design_generator import generate_test_case_design
 
 
 def run_module(*args):
@@ -43,7 +43,7 @@ def c90_forbidden_tokens(text):
     return [token for token in ["//", "for (int ", "stdint.h", "stdbool.h", "inline "] if token in text]
 
 
-class HarnessSkeletonStep13Tests(unittest.TestCase):
+class HarnessSkeletonGenerationTests(unittest.TestCase):
     def setUp(self):
         digest = build_source_digest(PIPELINE)
         location = locate_function(digest, "Control_Update")
@@ -52,7 +52,7 @@ class HarnessSkeletonStep13Tests(unittest.TestCase):
         self.call_report = analyze_calls(digest, location, self.signature, self.global_access)
         coverage = analyze_coverage_design(digest, location, self.signature, self.global_access, self.call_report)
         boundary = generate_boundary_equivalence_candidates(self.signature, self.global_access, self.call_report, coverage)
-        self.test_case_draft = generate_test_case_draft(self.signature, self.global_access, self.call_report, coverage, boundary)
+        self.test_case_design = generate_test_case_design(self.signature, self.global_access, self.call_report, coverage, boundary)
 
     def test_generator_outputs_cp932_c90_harness_stubs_tests_and_report(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -60,7 +60,7 @@ class HarnessSkeletonStep13Tests(unittest.TestCase):
                 self.signature.to_dict(),
                 self.global_access.to_dict(),
                 self.call_report.to_dict(),
-                self.test_case_draft.to_dict(),
+                self.test_case_design.to_dict(),
                 Path(temp_dir),
             )
             payload = report.to_dict()
@@ -98,7 +98,7 @@ class HarnessSkeletonStep13Tests(unittest.TestCase):
             self.assertTrue((Path(temp_dir) / "reports" / "harness_skeleton_report.json").exists())
             self.assertIn("# Harness Skeleton Report", (Path(temp_dir) / "reports" / "harness_skeleton_report.md").read_text(encoding="utf-8"))
 
-    def test_generate_harness_cli_and_analyze_function_connect_step13(self):
+    def test_generate_harness_cli_and_analyze_function_connect_harness_generation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             out_dir = Path(temp_dir) / "Control_Update"
             analyze = run_module(
@@ -123,7 +123,7 @@ class HarnessSkeletonStep13Tests(unittest.TestCase):
             self.assertEqual(0, analyze.returncode, analyze.stderr)
             analyze_payload = json.loads(analyze.stdout)
             self.assertEqual("evidence_prepared", analyze_payload["status"])
-            self.assertIn("Step 17", analyze_payload["message"])
+            self.assertIn("dossier review", analyze_payload["message"])
             self.assertIn("harness_skeleton", analyze_payload["data"])
             self.assertTrue((out_dir / "reports" / "harness_skeleton_report.json").exists())
 
@@ -138,8 +138,8 @@ class HarnessSkeletonStep13Tests(unittest.TestCase):
                 str(reports / "global_access.json"),
                 "--call-report",
                 str(reports / "call_report.json"),
-                "--test-case-draft",
-                str(reports / "test_case_draft.json"),
+                "--test-case-design",
+                str(reports / "test_case_design.json"),
                 "--out",
                 str(explicit_out),
             )

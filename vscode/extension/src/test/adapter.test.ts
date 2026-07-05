@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import { describe, it } from 'node:test';
 import * as path from 'path';
 
-import { buildAnalyzeFunctionInvocation, buildFinalizeDossierInvocation, buildRunTestsInvocation } from '../cli/commandBuilder';
+import { buildAnalyzeFunctionInvocation, buildFinalizeDossierInvocation, buildGenerateTestDesignInvocation, buildRunTestsInvocation } from '../cli/commandBuilder';
 import { runCliInvocation } from '../cli/cliRunner';
 import { parseCliResult, parseCliResultReportPaths } from '../cli/cliResultParser';
 import { readAdapterSettingsFromObject } from '../config/settings';
@@ -67,6 +67,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     const analyze = buildAnalyzeFunctionInvocation(settings, target);
     const finalize = buildFinalizeDossierInvocation(settings, target.outputWorkspace);
     const runTests = buildRunTestsInvocation(settings, target.outputWorkspace, true);
+    const testDesign = buildGenerateTestDesignInvocation(settings, path.join(target.outputWorkspace, 'reports', 'function_dossier.json'));
 
     assert.equal(analyze.command, settings.cliPath);
     assert.ok(analyze.args.includes('--json'));
@@ -74,6 +75,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.deepEqual(analyze.args.slice(analyze.args.indexOf('--configuration'), analyze.args.indexOf('--configuration') + 2), ['--configuration', 'Win32 Debug']);
     assert.ok(analyze.displayCommand.includes('"C:\\unit test workspace\\Control_Update"'));
     assert.deepEqual(finalize.args.slice(0, 3), ['--json', 'finalize-dossier', '--workspace']);
+    assert.deepEqual(testDesign.args.slice(0, 3), ['--json', 'generate-test-design', '--dossier']);
     assert.equal(runTests.requiresConfirmation, true);
   });
 
@@ -140,6 +142,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
       'unitTestRunner.analyzeCurrentFunction',
       'unitTestRunner.analyzeSelectedFunction',
       'unitTestRunner.finalizeDossier',
+      'unitTestRunner.generateTestDesign',
       'unitTestRunner.copyLastCommand',
       'unitTestRunner.openLastFunctionDossier',
     ]) {

@@ -22,7 +22,7 @@ from unit_test_runner.execution.executable_resolver import resolve_executable
 from unit_test_runner.execution.execution_models import TestExecutionPolicy, TestExecutionReport
 from unit_test_runner.execution.execution_runner import build_execution_command
 from unit_test_runner.execution.precondition_validator import validate_execution_preconditions
-from unit_test_runner.execution.result_mapper import map_results_to_draft
+from unit_test_runner.execution.result_mapper import map_results_to_test_design
 from unit_test_runner.execution.test_result_writer import write_test_execution_reports
 from unit_test_runner.reports.build_completion_iteration_markdown import render_build_completion_iteration_markdown
 from unit_test_runner.reports.build_completion_markdown import render_build_completion_markdown
@@ -30,7 +30,7 @@ from unit_test_runner.reports.evidence_package_markdown import render_evidence_p
 from unit_test_runner.reports.test_execution_markdown import render_test_execution_markdown
 
 
-class Step15ModuleBoundaryTests(unittest.TestCase):
+class BuildCompletionModuleBoundaryTests(unittest.TestCase):
     def sample_build_probe_report(self):
         return {
             "schema_version": "0.1",
@@ -65,7 +65,7 @@ class Step15ModuleBoundaryTests(unittest.TestCase):
             ],
         }
 
-    def test_step15_planners_are_exposed_as_separate_modules(self):
+    def test_build_completion_planners_are_exposed_as_separate_modules(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             source_root = Path(temp_dir)
             (source_root / "include").mkdir()
@@ -100,7 +100,7 @@ class Step15ModuleBoundaryTests(unittest.TestCase):
             self.assertFalse(stub_warnings)
             self.assertEqual("adjust_pch_option", pch_actions[0].action_kind)
             self.assertTrue(pch_manual)
-            self.assertEqual("Step 13", feedback[0].feedback_target_step)
+            self.assertEqual("harness_skeleton_generation", feedback[0].feedback_target_item)
             self.assertTrue(feedback_manual)
 
     def test_completion_loop_builds_iteration_report_from_plan(self):
@@ -121,8 +121,8 @@ class Step15ModuleBoundaryTests(unittest.TestCase):
         self.assertIn("# Build Completion Iteration Report", render_build_completion_iteration_markdown(report))
 
 
-class Step16ModuleBoundaryTests(unittest.TestCase):
-    def sample_test_case_draft(self):
+class ExecutionEvidenceModuleBoundaryTests(unittest.TestCase):
+    def sample_test_case_design(self):
         return {
             "test_cases": [
                 {
@@ -134,7 +134,7 @@ class Step16ModuleBoundaryTests(unittest.TestCase):
             ]
         }
 
-    def test_step16_execution_modules_are_exposed_and_composable(self):
+    def test_execution_evidence_modules_are_exposed_and_composable(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             (workspace / "bin").mkdir()
@@ -147,7 +147,7 @@ class Step16ModuleBoundaryTests(unittest.TestCase):
 
             command = build_execution_command(workspace, executable, timeout_seconds=5, dry_run=True)
             status, warnings, review_items = validate_execution_preconditions(build_probe, executable, TestExecutionPolicy(run_tests=True, dry_run=False))
-            case_results, mapped_review_items = map_results_to_draft(None, self.sample_test_case_draft())
+            case_results, mapped_review_items = map_results_to_test_design(None, self.sample_test_case_design())
 
             self.assertTrue(executable.exists)
             self.assertEqual("bin/utr_probe.exe", executable.path.as_posix())
@@ -159,7 +159,7 @@ class Step16ModuleBoundaryTests(unittest.TestCase):
             self.assertTrue(case_results[0].review_required)
             self.assertTrue(mapped_review_items)
 
-    def test_step16_writers_and_manifest_are_exposed(self):
+    def test_execution_evidence_writers_and_manifest_are_exposed(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             (workspace / "reports").mkdir()

@@ -55,7 +55,7 @@ function reportsFromParsed(parsed: Record<string, unknown>, fallback: ReportPath
     reviewChecklistMd: stringValue(reportSource.review_checklist) ?? fallback.reviewChecklistMd,
     unresolvedItemsMd: stringValue(reportSource.unresolved_items) ?? fallback.unresolvedItemsMd,
     nextActionsMd: stringValue(reportSource.next_actions) ?? fallback.nextActionsMd,
-    testCaseDraftCsv: stringValue(reportSource.test_case_draft_csv) ?? fallback.testCaseDraftCsv,
+    testCaseDesignCsv: stringValue(reportSource.test_case_design_csv) ?? fallback.testCaseDesignCsv,
     buildProbeReportMd: stringValue(reportSource.build_probe_report_md) ?? fallback.buildProbeReportMd,
     testExecutionReportMd: stringValue(reportSource.test_execution_report_md) ?? fallback.testExecutionReportMd,
     evidencePackageMd: stringValue(reportSource.evidence_package_md) ?? fallback.evidencePackageMd,

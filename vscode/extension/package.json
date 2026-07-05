@@ -4,6 +4,11 @@
   "description": "Thin VS Code adapter for the unit-test-runner CLI.",
   "version": "0.1.0",
   "publisher": "local",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/katamor1/unitTestRunner.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -17,7 +22,7 @@
     "onCommand:unitTestRunner.openFunctionDossier",
     "onCommand:unitTestRunner.openReviewChecklist",
     "onCommand:unitTestRunner.openNextActions",
-    "onCommand:unitTestRunner.generateTestDraft",
+    "onCommand:unitTestRunner.generateTestDesign",
     "onCommand:unitTestRunner.buildProbeDryRun",
     "onCommand:unitTestRunner.runBuildProbe",
     "onCommand:unitTestRunner.runTests",
@@ -54,8 +59,8 @@
         "title": "UnitTestRunner: Open Next Actions"
       },
       {
-        "command": "unitTestRunner.generateTestDraft",
-        "title": "UnitTestRunner: Generate Test Draft"
+        "command": "unitTestRunner.generateTestDesign",
+        "title": "UnitTestRunner: Generate Test Design"
       },
       {
         "command": "unitTestRunner.buildProbeDryRun",

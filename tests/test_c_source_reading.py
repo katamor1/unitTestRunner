@@ -18,7 +18,7 @@ SOURCE = REPO_ROOT / "tests" / "fixtures" / "c_sources" / "integration" / "contr
 FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "vc6_project"
 
 
-class SourceLexerStep05Tests(unittest.TestCase):
+class CSourceReadingTests(unittest.TestCase):
     def test_masker_removes_comment_string_and_char_braces_without_changing_lines(self):
         text = "int f(void) {\n  char c = '}';\n  puts(\"}\"); // }\n  /* } */\n}\n"
 

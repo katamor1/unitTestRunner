@@ -32,7 +32,7 @@ def run_module(*args):
     )
 
 
-class DspParserStep04Tests(unittest.TestCase):
+class Vc6DspParserTests(unittest.TestCase):
     def test_parse_dsp_extracts_metadata_configurations_files_and_warnings(self):
         project = parse_dsp(DSP_FIXTURE / "Control.dsp")
 
@@ -86,7 +86,7 @@ class DspParserStep04Tests(unittest.TestCase):
         self.assertEqual("not_found", missing_config.status)
         self.assertEqual([], missing_config.matches)
 
-    def test_map_source_cli_without_workspace_is_full_step04_mapping(self):
+    def test_map_source_cli_without_workspace_is_full_vc6_mapping(self):
         completed = run_module(
             "--json",
             "map-source",

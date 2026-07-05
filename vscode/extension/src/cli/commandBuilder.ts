@@ -64,8 +64,8 @@ export function buildPrepareEvidenceInvocation(settings: AdapterSettings, worksp
   return invocation(settings, jsonPrefix(settings).concat(['prepare-evidence', '--workspace', workspace]), false);
 }
 
-export function buildGenerateTestDraftInvocation(settings: AdapterSettings, dossierPath: string): CliInvocation {
-  return invocation(settings, jsonPrefix(settings).concat(['generate-test-draft', '--dossier', dossierPath]), false);
+export function buildGenerateTestDesignInvocation(settings: AdapterSettings, dossierPath: string): CliInvocation {
+  return invocation(settings, jsonPrefix(settings).concat(['generate-test-design', '--dossier', dossierPath]), false);
 }
 
 export function relativeSourcePath(sourcePath: string, sourceRoot: string): string {

@@ -33,7 +33,7 @@ def run_module(*args):
     )
 
 
-class BuildWorkspaceStep14Tests(unittest.TestCase):
+class BuildWorkspaceGenerationTests(unittest.TestCase):
     def prepare_analysis(self, temp_dir):
         out_dir = Path(temp_dir) / "Control_Update"
         analyze_function_workflow(
@@ -130,7 +130,7 @@ generated\\tests\\test.c(7) : fatal error C1083: Cannot open include file: 'stdi
         self.assertTrue(parsed.pch_issues)
         self.assertTrue(parsed.vc6_compatibility_issues)
 
-    def test_build_probe_cli_and_analyze_function_connect_step14(self):
+    def test_build_probe_cli_and_analyze_function_connect_build_workspace(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             out_dir = Path(temp_dir) / "Control_Update"
             analyze = run_module(
@@ -154,7 +154,7 @@ generated\\tests\\test.c(7) : fatal error C1083: Cannot open include file: 'stdi
             self.assertEqual(0, analyze.returncode, analyze.stderr)
             payload = json.loads(analyze.stdout)
             self.assertEqual("evidence_prepared", payload["status"])
-            self.assertIn("Step 17", payload["message"])
+            self.assertIn("dossier review", payload["message"])
             self.assertIn("build_workspace", payload["data"])
             self.assertIn("build_probe", payload["data"])
 

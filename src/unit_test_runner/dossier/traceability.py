@@ -25,13 +25,13 @@ TRACEABILITY_FIELDS = [
 
 def build_traceability(payloads: dict[str, dict[str, Any]]) -> list[TraceabilityLink]:
     links: list[TraceabilityLink] = []
-    draft = payloads.get("test_case_draft", {})
+    test_design = payloads.get("test_case_design", {})
     execution_cases = {
         item.get("test_case_id"): item
         for item in payloads.get("test_execution_report", {}).get("case_results", [])
         if item.get("test_case_id")
     }
-    for case_index, case in enumerate(draft.get("test_cases", []), start=1):
+    for case_index, case in enumerate(test_design.get("test_cases", []), start=1):
         test_case_id = case.get("test_case_id") or case.get("id") or f"TC_{case_index:03d}"
         coverage_links = case.get("coverage_links", [])
         if not coverage_links and case.get("coverage"):

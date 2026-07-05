@@ -27,7 +27,7 @@ def validate_artifacts(
     if function_name is not None:
         for kind, names in _function_names_by_artifact(payloads).items():
             if names and function_name not in names:
-                warning = DossierWarning("function_name_mismatch", f"{kind} has function name(s) {sorted(names)}; expected {function_name}.", related_step=_step_for_kind(artifacts, kind))
+                warning = DossierWarning("function_name_mismatch", f"{kind} has function name(s) {sorted(names)}; expected {function_name}.", related_item=_item_for_kind(artifacts, kind))
                 warnings.append(warning)
                 _mark_stale(artifacts, kind, warning)
     source_path = _source_path(payloads)
@@ -40,7 +40,7 @@ def validate_artifacts(
                 warning = DossierWarning(
                     "source_path_mismatch",
                     f"{kind} has source path {path}; expected {source_path}.",
-                    related_step=_step_for_kind(artifacts, kind),
+                    related_item=_item_for_kind(artifacts, kind),
                 )
                 warnings.append(warning)
                 _mark_stale(artifacts, kind, warning)
@@ -127,10 +127,10 @@ def _source_path_from_payload(payload: Any) -> str | None:
     return None
 
 
-def _step_for_kind(artifacts: list[DossierArtifact], kind: str) -> str | None:
+def _item_for_kind(artifacts: list[DossierArtifact], kind: str) -> str | None:
     for artifact in artifacts:
         if artifact.artifact_kind == kind:
-            return artifact.produced_by_step
+            return artifact.produced_by_item
     return None
 
 

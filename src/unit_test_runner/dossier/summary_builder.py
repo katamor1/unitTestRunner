@@ -9,7 +9,7 @@ def build_summaries(payloads: dict[str, dict[str, Any]]) -> dict[str, Any]:
     call_report = payloads.get("call_report", {})
     coverage_design = payloads.get("coverage_design", {})
     boundary = payloads.get("boundary_equivalence_candidates", {})
-    draft = payloads.get("test_case_draft", {})
+    test_design = payloads.get("test_case_design", {})
     build_probe = payloads.get("build_probe_report", {})
     completion = payloads.get("build_completion_plan", {})
     execution = payloads.get("test_execution_report", {})
@@ -25,7 +25,7 @@ def build_summaries(payloads: dict[str, dict[str, Any]]) -> dict[str, Any]:
         "coverage_summary": {
             "coverage_item_count": _count_coverage_items(coverage_design),
             "boundary_candidate_count": len(boundary.get("boundary_value_candidates", boundary.get("candidates", []))),
-            "test_case_draft_count": len(draft.get("test_cases", [])),
+            "test_case_design_count": len(test_design.get("test_cases", [])),
         },
         "build_summary": {
             "build_probe_status": build_probe.get("function", {}).get("status", build_probe.get("status", "unknown")),

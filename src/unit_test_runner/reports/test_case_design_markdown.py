@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 
-def render_test_case_draft_markdown(payload: dict) -> str:
+def render_test_case_design_markdown(payload: dict) -> str:
     function = payload["function"]
     summary = payload["coverage_summary"]
     lines = [
-        "# Test Case Draft Report",
+        "# Test Case Design Report",
         "",
         "## Target",
         f"- Source: {payload['source']['path']}",
@@ -18,7 +18,7 @@ def render_test_case_draft_markdown(payload: dict) -> str:
         "|---|---:|",
         f"| Test Cases | {len(payload['test_cases'])} |",
         f"| Coverage Items | {summary['total_coverage_items']} |",
-        f"| Covered by Draft | {summary['covered_by_draft_count']} |",
+        f"| Covered by Design | {summary['covered_by_design_count']} |",
         f"| Unresolved Items | {len(payload['unresolved_items'])} |",
         "",
         "## Test Cases",

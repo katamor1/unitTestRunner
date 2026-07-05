@@ -47,7 +47,7 @@ def prepare_test_execution_evidence(
     logs = workspace / "logs"
     reports.mkdir(parents=True, exist_ok=True)
     logs.mkdir(parents=True, exist_ok=True)
-    test_case_draft = _read_json(reports / "test_case_draft.json")
+    test_case_design = _read_json(reports / "test_case_design.json")
     harness_report = _read_json(reports / "harness_skeleton_report.json")
     build_probe = _read_json(reports / "build_probe_report.json")
     build_workspace = _read_json(reports / "build_workspace_report.json")
@@ -59,15 +59,15 @@ def prepare_test_execution_evidence(
         allow_placeholder_tests=allow_placeholder_tests,
         treat_placeholder_as_inconclusive=treat_placeholder_as_inconclusive,
     )
-    function_name = test_case_draft.get("function", {}).get("name") or build_workspace.get("function", {}).get("name") or "unknown_function"
+    function_name = test_case_design.get("function", {}).get("name") or build_workspace.get("function", {}).get("name") or "unknown_function"
     source_path = Path(build_workspace.get("source", {}).get("path") or "")
     executable_info = resolve_executable(workspace, executable, build_probe)
     command = build_execution_command(workspace, executable_info, timeout_seconds=timeout_seconds, dry_run=dry_run or not run_tests)
-    review_items = _placeholder_review_items(harness_report, test_case_draft)
+    review_items = _placeholder_review_items(harness_report, test_case_design)
     warnings: list[TestExecutionWarning] = []
     command_result: ExecutionCommandResult | None = None
     parsed_summary = TestResultSummary()
-    case_results = _case_results_from_draft(test_case_draft)
+    case_results = _case_results_from_design(test_case_design)
     status = "not_run"
     executed = False
     if run_tests and not dry_run:
@@ -154,9 +154,9 @@ def _run_executable(workspace: Path, executable: Path, timeout_seconds: int):
         return result, TestResultSummary(parser_confidence="low"), [], "timeout"
 
 
-def _case_results_from_draft(test_case_draft: dict[str, Any]) -> list[TestCaseExecutionResult]:
+def _case_results_from_design(test_case_design: dict[str, Any]) -> list[TestCaseExecutionResult]:
     results = []
-    for case in test_case_draft.get("test_cases", []):
+    for case in test_case_design.get("test_cases", []):
         coverage = [link.get("coverage_id", "") for link in case.get("coverage_links", []) if link.get("coverage_id")]
         review = case.get("review_status") == "review_required"
         results.append(
@@ -173,7 +173,7 @@ def _case_results_from_draft(test_case_draft: dict[str, Any]) -> list[TestCaseEx
     return results
 
 
-def _placeholder_review_items(harness_report: dict[str, Any], test_case_draft: dict[str, Any]) -> list[ExecutionReviewItem]:
+def _placeholder_review_items(harness_report: dict[str, Any], test_case_design: dict[str, Any]) -> list[ExecutionReviewItem]:
     items = []
     for index, placeholder in enumerate(harness_report.get("unresolved_placeholders", []), start=1):
         items.append(
@@ -186,7 +186,7 @@ def _placeholder_review_items(harness_report: dict[str, Any], test_case_draft: d
                 "warning",
             )
         )
-    for case in test_case_draft.get("test_cases", []):
+    for case in test_case_design.get("test_cases", []):
         for observation in case.get("expected_observations", []):
             expected = observation.get("expected_expression")
             if expected is None or str(expected).startswith("TBD"):

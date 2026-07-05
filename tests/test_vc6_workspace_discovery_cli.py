@@ -25,7 +25,7 @@ def run_module(*args):
     )
 
 
-class DswCliStep03Tests(unittest.TestCase):
+class Vc6WorkspaceDiscoveryCliTests(unittest.TestCase):
     def test_discover_projects_workspace_file_writes_json_report(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             out = Path(temp_dir) / "projects.json"

@@ -23,7 +23,7 @@ FIELDNAMES = [
 ]
 
 
-def render_test_case_draft_csv(payload: dict) -> str:
+def render_test_case_design_csv(payload: dict) -> str:
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=FIELDNAMES, lineterminator="\n")
     writer.writeheader()

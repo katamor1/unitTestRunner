@@ -5,7 +5,7 @@ import {
   buildAnalyzeFunctionInvocation,
   buildBuildProbeInvocation,
   buildFinalizeDossierInvocation,
-  buildGenerateTestDraftInvocation,
+  buildGenerateTestDesignInvocation,
   buildPrepareEvidenceInvocation,
   buildRunTestsInvocation,
   CliInvocation,
@@ -34,7 +34,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('unitTestRunner.openFunctionDossier', async () => openLastReport(context, 'functionDossierMd')),
     vscode.commands.registerCommand('unitTestRunner.openReviewChecklist', async () => openLastReport(context, 'reviewChecklistMd')),
     vscode.commands.registerCommand('unitTestRunner.openNextActions', async () => openLastReport(context, 'nextActionsMd')),
-    vscode.commands.registerCommand('unitTestRunner.generateTestDraft', async () => runWorkspaceCommand(context, output, 'draft')),
+    vscode.commands.registerCommand('unitTestRunner.generateTestDesign', async () => runWorkspaceCommand(context, output, 'testDesign')),
     vscode.commands.registerCommand('unitTestRunner.buildProbeDryRun', async () => runWorkspaceCommand(context, output, 'buildProbeDryRun')),
     vscode.commands.registerCommand('unitTestRunner.runBuildProbe', async () => runWorkspaceCommand(context, output, 'buildProbeRun')),
     vscode.commands.registerCommand('unitTestRunner.runTests', async () => runWorkspaceCommand(context, output, 'runTests')),
@@ -130,7 +130,7 @@ async function resolveFunctionName(editor: vscode.TextEditor): Promise<string> {
   return prompt;
 }
 
-async function runWorkspaceCommand(context: vscode.ExtensionContext, output: vscode.OutputChannel, kind: 'finalize' | 'draft' | 'buildProbeDryRun' | 'buildProbeRun' | 'runTests' | 'evidence'): Promise<void> {
+async function runWorkspaceCommand(context: vscode.ExtensionContext, output: vscode.OutputChannel, kind: 'finalize' | 'testDesign' | 'buildProbeDryRun' | 'buildProbeRun' | 'runTests' | 'evidence'): Promise<void> {
   const settings = readConfig();
   showValidation(settings);
   const workspace = await lastWorkspace(context);
@@ -138,8 +138,8 @@ async function runWorkspaceCommand(context: vscode.ExtensionContext, output: vsc
   let invocation: CliInvocation;
   if (kind === 'finalize') {
     invocation = buildFinalizeDossierInvocation(settings, workspace);
-  } else if (kind === 'draft') {
-    invocation = buildGenerateTestDraftInvocation(settings, path.join(workspace, 'reports', 'function_dossier.json'));
+  } else if (kind === 'testDesign') {
+    invocation = buildGenerateTestDesignInvocation(settings, path.join(workspace, 'reports', 'function_dossier.json'));
   } else if (kind === 'buildProbeDryRun') {
     invocation = buildBuildProbeInvocation(settings, workspace, false);
   } else if (kind === 'buildProbeRun') {

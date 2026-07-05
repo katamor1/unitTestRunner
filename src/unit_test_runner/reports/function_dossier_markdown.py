@@ -26,7 +26,7 @@ def render_function_dossier_markdown(dossier: FunctionDossier) -> str:
         "",
         "## Coverage And Tests",
         f"- Coverage items: {dossier.summaries.get('coverage_summary', {}).get('coverage_item_count', 0)}",
-        f"- Test cases: {dossier.summaries.get('coverage_summary', {}).get('test_case_draft_count', 0)}",
+        f"- Test cases: {dossier.summaries.get('coverage_summary', {}).get('test_case_design_count', 0)}",
         "",
         "## Build And Execution",
         f"- Build probe: {dossier.summaries.get('build_summary', {}).get('build_probe_status', 'unknown')}",

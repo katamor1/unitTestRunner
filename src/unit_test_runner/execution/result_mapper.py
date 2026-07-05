@@ -5,9 +5,9 @@ from typing import Any
 from .execution_models import ExecutionReviewItem, TestCaseExecutionResult, TestExecutionWarning
 
 
-def map_results_to_draft(
+def map_results_to_test_design(
     parsed_output: Any | None,
-    test_case_draft: dict[str, Any],
+    test_case_design: dict[str, Any],
     treat_placeholder_as_inconclusive: bool = True,
 ) -> tuple[list[TestCaseExecutionResult], list[ExecutionReviewItem]]:
     parsed_cases = {}
@@ -15,7 +15,7 @@ def map_results_to_draft(
         parsed_cases = {case.test_case_id: case for case in getattr(parsed_output, "case_results", []) if case.test_case_id}
     results: list[TestCaseExecutionResult] = []
     review_items: list[ExecutionReviewItem] = []
-    for case in test_case_draft.get("test_cases", []):
+    for case in test_case_design.get("test_cases", []):
         test_case_id = case.get("test_case_id")
         parsed_case = parsed_cases.get(test_case_id)
         coverage = [link.get("coverage_id", "") for link in case.get("coverage_links", []) if link.get("coverage_id")]
@@ -58,16 +58,16 @@ def map_results_to_draft(
             )
         )
     if parsed_output is not None:
-        draft_ids = {case.get("test_case_id") for case in test_case_draft.get("test_cases", [])}
+        design_ids = {case.get("test_case_id") for case in test_case_design.get("test_cases", [])}
         for test_case_id in parsed_cases:
-            if test_case_id not in draft_ids:
+            if test_case_id not in design_ids:
                 review_items.append(
                     ExecutionReviewItem(
                         f"REVIEW_UNMAPPED_{len(review_items) + 1:03d}",
                         "unmapped_test_output",
                         test_case_id,
-                        "Runner output contains a test case that is not present in the draft.",
-                        "Review runner generation and test case draft synchronization.",
+                        "Runner output contains a test case that is not present in the test design.",
+                        "Review runner generation and test case design synchronization.",
                         "warning",
                     )
                 )

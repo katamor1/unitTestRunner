@@ -32,7 +32,7 @@ def run_module(*args):
     )
 
 
-class FunctionLocatorStep06Tests(unittest.TestCase):
+class CFunctionLocationTests(unittest.TestCase):
     def digest(self):
         return build_source_digest(FUNCTION_SOURCE, {"defines": []})
 
@@ -143,7 +143,7 @@ class FunctionLocatorStep06Tests(unittest.TestCase):
             self.assertEqual("", completed.stderr)
             payload = json.loads(completed.stdout)
             self.assertEqual("evidence_prepared", payload["status"])
-            self.assertIn("Step 17", payload["message"])
+            self.assertIn("dossier review", payload["message"])
             self.assertIn("function_location", payload["data"])
             self.assertTrue((out_dir / "reports" / "function_location.json").exists())
 

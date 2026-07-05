@@ -168,7 +168,7 @@ class CompatibilityFeedbackItem:
     line_number: int | None
     suspected_generator: str | None
     suggested_fix: str
-    feedback_target_step: str
+    feedback_target_item: str
     review_required: bool
 
     def to_dict(self) -> dict[str, Any]:
@@ -178,7 +178,7 @@ class CompatibilityFeedbackItem:
             "line_number": self.line_number,
             "suspected_generator": self.suspected_generator,
             "suggested_fix": self.suggested_fix,
-            "feedback_target_step": self.feedback_target_step,
+            "feedback_target_item": self.feedback_target_item,
             "review_required": self.review_required,
         }
 

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from .test_case_models import TestCaseDraftWarning, TestStubSetup
+from .test_case_models import TestCaseDesignWarning, TestStubSetup
 
 
-def build_stub_setups(selected_candidates: list[dict], call_report: dict, coverage_item: dict, test_case_id: str) -> tuple[list[TestStubSetup], list[TestCaseDraftWarning], list[str]]:
+def build_stub_setups(selected_candidates: list[dict], call_report: dict, coverage_item: dict, test_case_id: str) -> tuple[list[TestStubSetup], list[TestCaseDesignWarning], list[str]]:
     setups: list[TestStubSetup] = []
-    warnings: list[TestCaseDraftWarning] = []
+    warnings: list[TestCaseDesignWarning] = []
     candidate_ids: list[str] = []
     for candidate in selected_candidates:
         if candidate.get("_candidate_collection") != "stub_return_candidates":
@@ -55,7 +55,7 @@ def build_stub_setups(selected_candidates: list[dict], call_report: dict, covera
                 )
             )
         warnings.append(
-            TestCaseDraftWarning(
+            TestCaseDesignWarning(
                 "stub_required_but_not_generated",
                 f"Stub behavior must be reviewed for {stub.get('name', 'unknown')}.",
                 related_test_case_id=test_case_id,

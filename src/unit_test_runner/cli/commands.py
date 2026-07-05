@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import platform
-import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -16,7 +15,7 @@ from unit_test_runner.build_completion.completion_applier import apply_safe_comp
 from unit_test_runner.build_completion.completion_models import BuildCompletionIterationReport, BuildCompletionPolicy, CompletionIteration
 from unit_test_runner.build_completion.completion_report_writer import write_completion_reports
 from unit_test_runner.c_analyzer import list_functions
-from unit_test_runner.dsw_parser import discover_dsw_workspaces, parse_dsw as parse_dsw_step03
+from unit_test_runner.dsw_parser import discover_dsw_workspaces, parse_dsw as parse_dsw_workspace
 from unit_test_runner.execution import prepare_test_execution_evidence
 from unit_test_runner.path_utils import normalize_relative
 from unit_test_runner.dossier import (
@@ -25,14 +24,14 @@ from unit_test_runner.dossier import (
     generate_build_workspace_from_reports,
     generate_build_workspace_from_workspace,
     generate_harness_skeleton_from_reports,
-    generate_test_draft_from_dossier,
-    generate_test_draft_from_reports,
+    generate_test_design_from_dossier,
+    generate_test_design_from_reports,
     prepare_review_from_dossier,
 )
 from unit_test_runner.reports.dsw_markdown import render_dsw_discovery_markdown
 from unit_test_runner.reports.source_membership_markdown import render_source_membership_markdown
 from unit_test_runner.vc6 import discover_workspace, map_source_to_projects
-from unit_test_runner.vc6.dsp_parser import parse_dsp as parse_dsp_step04
+from unit_test_runner.vc6.dsp_parser import parse_dsp as parse_dsp_project
 from unit_test_runner.vc6.source_membership import map_source_membership
 
 from .errors import CLIError
@@ -55,7 +54,7 @@ def dispatch(args: argparse.Namespace) -> CLIResult:
         "prepare-evidence": handle_prepare_evidence,
         "finalize-dossier": handle_finalize_dossier,
         "prepare-review": handle_prepare_review,
-        "generate-test-draft": handle_generate_test_draft,
+        "generate-test-design": handle_generate_test_design,
     }
     return handlers[args.command](args)
 
@@ -237,7 +236,7 @@ def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
         "call_report": dossier.get("call_report"),
         "coverage_design": dossier.get("coverage_design"),
         "boundary_equivalence_candidates": dossier.get("boundary_equivalence_candidates"),
-        "test_case_draft": dossier.get("test_case_draft"),
+        "test_case_design": dossier.get("test_case_design"),
         "harness_skeleton": dossier.get("harness_skeleton"),
         "build_workspace": dossier.get("build_workspace"),
         "build_probe": dossier.get("build_probe"),
@@ -252,7 +251,7 @@ def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
             status="dossier_finalized",
             exit_code=EXIT_OK,
             command=args.command,
-            message="Function analysis generated and finalized through Step 17.",
+            message="Function analysis generated and finalized for dossier review.",
             data=payload,
             legacy_payload=payload,
         )
@@ -260,7 +259,7 @@ def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
         status="evidence_prepared",
         exit_code=EXIT_OK,
         command=args.command,
-        message="Function analysis generated through Step 16. Use --finalize-dossier or finalize-dossier for Step 17 review packaging.",
+        message="Function analysis generated. Use --finalize-dossier or finalize-dossier for dossier review packaging.",
         data=payload,
         legacy_payload=payload,
     )
@@ -271,7 +270,7 @@ def handle_generate_harness_skeleton(args: argparse.Namespace) -> CLIResult:
         _existing_file(args.function_signature, "function-signature", args.command),
         _existing_file(args.global_access, "global-access", args.command),
         _existing_file(args.call_report, "call-report", args.command),
-        _existing_file(args.test_case_draft, "test-case-draft", args.command),
+        _existing_file(args.test_case_design, "test-case-design", args.command),
         Path(args.out),
         overwrite=args.overwrite,
     )
@@ -466,11 +465,11 @@ def _completion_payload(workspace: Path, plan, iteration) -> dict[str, Any]:
     }
 
 
-def handle_generate_test_draft(args: argparse.Namespace) -> CLIResult:
+def handle_generate_test_design(args: argparse.Namespace) -> CLIResult:
     out = Path(args.out) if args.out else None
     if args.dossier:
         dossier = _existing_file(args.dossier, "dossier", args.command)
-        result = generate_test_draft_from_dossier(dossier, args.format, out)
+        result = generate_test_design_from_dossier(dossier, args.format, out)
     else:
         missing = [
             label
@@ -484,8 +483,8 @@ def handle_generate_test_draft(args: argparse.Namespace) -> CLIResult:
             if not value
         ]
         if missing:
-            raise CLIError("generate-test-draft requires --dossier or all explicit report inputs: " + ", ".join(missing), EXIT_INPUT_ERROR, args.command)
-        result = generate_test_draft_from_reports(
+            raise CLIError("generate-test-design requires --dossier or all explicit report inputs: " + ", ".join(missing), EXIT_INPUT_ERROR, args.command)
+        result = generate_test_design_from_reports(
             _existing_file(args.function_signature, "function-signature", args.command),
             _existing_file(args.global_access, "global-access", args.command),
             _existing_file(args.call_report, "call-report", args.command),
@@ -495,15 +494,15 @@ def handle_generate_test_draft(args: argparse.Namespace) -> CLIResult:
             out,
         )
     if isinstance(result, dict):
-        draft_value: str | dict[str, str] = {key: str(value) for key, value in result.items()}
+        design_value: str | dict[str, str] = {key: str(value) for key, value in result.items()}
     else:
-        draft_value = str(result)
-    payload = {"test_case_draft": draft_value}
+        design_value = str(result)
+    payload = {"test_case_design": design_value}
     return CLIResult(
-        status="test_case_draft_generated",
+        status="test_case_design_generated",
         exit_code=EXIT_OK,
         command=args.command,
-        message="Test draft generated.",
+        message="Test design generated.",
         data=payload,
         legacy_payload=payload,
     )
@@ -758,7 +757,7 @@ def _with_dsp_details(value: dict[str, Any]) -> dict[str, Any]:
             if not absolute:
                 continue
             try:
-                dsp = parse_dsp_step04(Path(absolute), Path(workspace["root_dir"]))
+                dsp = parse_dsp_project(Path(absolute), Path(workspace["root_dir"]))
             except OSError as exc:
                 project["dsp_summary"] = {"error": str(exc)}
                 continue
@@ -779,14 +778,3 @@ def _with_dsp_details(value: dict[str, Any]) -> dict[str, Any]:
                 "warnings": [warning.to_dict() for warning in dsp.warnings],
             }
     return value
-
-
-def _copy_test_draft(source: Path, target: Path, output_format: str, command: str) -> Path:
-    if output_format != "csv":
-        raise CLIError(f"Unsupported draft output format for current implementation: {output_format}", EXIT_OUTPUT_ERROR, command)
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-        return target
-    except OSError as exc:
-        raise CLIError(f"Failed to write test draft {target}: {exc}", EXIT_OUTPUT_ERROR, command) from exc

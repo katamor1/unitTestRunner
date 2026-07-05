@@ -23,7 +23,7 @@ def generate_harness_skeleton(
     function_signature: Any,
     global_access: Any,
     call_report: Any,
-    test_case_draft: Any,
+    test_case_design: Any,
     output_root: Path | str,
     overwrite: bool = False,
 ) -> HarnessSkeletonReport:
@@ -32,10 +32,10 @@ def generate_harness_skeleton(
     policy = HarnessGenerationPolicy(overwrite_existing=overwrite)
     signature = _payload(function_signature)
     calls = _payload(call_report)
-    draft = _payload(test_case_draft)
+    test_case_design_payload = _payload(test_case_design)
     function_payload = signature.get("function", {})
-    function_name = function_payload.get("name") or draft.get("function", {}).get("name") or "unknown_function"
-    source_path = Path(signature.get("source", {}).get("path") or draft.get("source", {}).get("path") or "")
+    function_name = function_payload.get("name") or test_case_design_payload.get("function", {}).get("name") or "unknown_function"
+    source_path = Path(signature.get("source", {}).get("path") or test_case_design_payload.get("source", {}).get("path") or "")
     generated_files: list[GeneratedFile] = []
     warnings: list[HarnessGenerationWarning] = []
     unresolved: list[UnresolvedPlaceholder] = []
@@ -43,8 +43,8 @@ def generate_harness_skeleton(
 
     _ensure_layout(output_root)
     _write_assert_files(output_root, generated_files, overwrite)
-    stubs = _write_stub_files(output_root, calls, draft, generated_files, warnings, overwrite)
-    tests = _write_test_files(output_root, signature, draft, stubs, generated_files, unresolved, warnings, overwrite)
+    stubs = _write_stub_files(output_root, calls, test_case_design_payload, generated_files, warnings, overwrite)
+    tests = _write_test_files(output_root, signature, test_case_design_payload, stubs, generated_files, unresolved, warnings, overwrite)
     _write_target_invocation(output_root, signature, generated_files, warnings, overwrite)
     _write_runner_files(output_root, function_name, tests, generated_files, overwrite)
     build_hints.extend(_build_hints(source_path, stubs, tests))
@@ -193,8 +193,8 @@ void Utr_ResetFailureCount(void)
     utr_failure_count = 0;
 }
 """
-    _write_c(output_root, generated_files, "generated/include/utr_assert.h", "assert_header", header, ["Step13"], False, overwrite)
-    _write_c(output_root, generated_files, "generated/harness/utr_assert.c", "assert_source", source, ["Step13"], False, overwrite)
+    _write_c(output_root, generated_files, "generated/include/utr_assert.h", "assert_header", header, ["harness_skeleton_generation"], False, overwrite)
+    _write_c(output_root, generated_files, "generated/harness/utr_assert.c", "assert_source", source, ["harness_skeleton_generation"], False, overwrite)
 
 
 def _write_runner_files(output_root: Path, function_name: str, tests: list[TestSkeleton], generated_files: list[GeneratedFile], overwrite: bool) -> None:
@@ -247,21 +247,21 @@ void Utr_RunAllTests(void);
 
 #endif
 """
-    _write_c(output_root, generated_files, "generated/include/utr_runner.h", "runner_header", header, ["Step13"], False, overwrite)
-    _write_c(output_root, generated_files, "generated/harness/utr_runner.c", "runner_source", source, ["Step13"], True, overwrite)
+    _write_c(output_root, generated_files, "generated/include/utr_runner.h", "runner_header", header, ["harness_skeleton_generation"], False, overwrite)
+    _write_c(output_root, generated_files, "generated/harness/utr_runner.c", "runner_source", source, ["harness_skeleton_generation"], True, overwrite)
 
 
 def _write_stub_files(
     output_root: Path,
     call_report: dict[str, Any],
-    draft: dict[str, Any],
+    test_case_design: dict[str, Any],
     generated_files: list[GeneratedFile],
     warnings: list[HarnessGenerationWarning],
     overwrite: bool,
 ) -> list[StubSkeleton]:
     calls_by_id = {item.get("call_id"): item for item in call_report.get("calls", [])}
     calls_by_name = {item.get("name"): item for item in call_report.get("calls", [])}
-    test_case_ids_by_stub = _test_case_ids_by_stub(draft)
+    test_case_ids_by_stub = _test_case_ids_by_stub(test_case_design)
     skeletons: list[StubSkeleton] = []
     for candidate in call_report.get("stub_candidates", []):
         original_name = candidate.get("name", "UnknownStub")
@@ -415,9 +415,9 @@ def _parameter_list(parameters: list[StubParameter]) -> str:
     return ", ".join(f"{parameter.type_raw} {parameter.name}" for parameter in parameters)
 
 
-def _test_case_ids_by_stub(draft: dict[str, Any]) -> dict[str, list[str]]:
+def _test_case_ids_by_stub(test_case_design: dict[str, Any]) -> dict[str, list[str]]:
     mapping: dict[str, list[str]] = {}
-    for test_case in draft.get("test_cases", []):
+    for test_case in test_case_design.get("test_cases", []):
         test_case_id = test_case.get("test_case_id", "")
         for setup in test_case.get("stub_setups", []):
             mapping.setdefault(setup.get("stub_name", ""), []).append(test_case_id)
@@ -442,7 +442,7 @@ def _write_target_invocation(
         warnings.append(
             HarnessGenerationWarning(
                 code="static_target_direct_call_warning",
-                message="Static target function may require an expose wrapper in Step 14 or later.",
+                message="Static target function may require an expose wrapper during build workspace generation.",
                 related_file=Path("generated/harness/target_invocation.c"),
             )
         )
@@ -475,7 +475,7 @@ def _write_target_invocation(
 def _write_test_files(
     output_root: Path,
     signature: dict[str, Any],
-    draft: dict[str, Any],
+    test_case_design: dict[str, Any],
     stubs: list[StubSkeleton],
     generated_files: list[GeneratedFile],
     unresolved: list[UnresolvedPlaceholder],
@@ -483,7 +483,7 @@ def _write_test_files(
     overwrite: bool,
 ) -> list[TestSkeleton]:
     function_payload = signature.get("function", {})
-    function_name = function_payload.get("name") or draft.get("function", {}).get("name") or "unknown_function"
+    function_name = function_payload.get("name") or test_case_design.get("function", {}).get("name") or "unknown_function"
     safe_function = sanitize_identifier(function_name)
     parameters = _signature_parameters(function_payload)
     return_type = _return_type(function_payload)
@@ -492,7 +492,7 @@ def _write_test_files(
     test_skeletons: list[TestSkeleton] = []
     functions: list[str] = []
     prototypes: list[str] = []
-    for index, case in enumerate(draft.get("test_cases", []), start=1):
+    for index, case in enumerate(test_case_design.get("test_cases", []), start=1):
         case_id = case.get("test_case_id") or f"TC_{safe_function}_{index:03d}"
         test_func = f"Test_{sanitize_identifier(case_id)}"
         prototypes.append(f"void {test_func}(void);")
@@ -507,7 +507,7 @@ def _write_test_files(
                     name="TBD_EXPECTED_RETURN_INT",
                     related_test_case_id=case_id,
                     related_stub_name=None,
-                    reason="Expected result is not determined in Step 12.",
+                    reason="Expected result is not determined during test design generation.",
                     suggested_action="Review generated test case and replace TBD expected values.",
                 )
             )

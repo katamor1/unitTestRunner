@@ -13,7 +13,7 @@ class ArgumentParseError(Exception):
         self.command = command
 
 
-class Step02ArgumentParser(argparse.ArgumentParser):
+class CLIArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
         parts = self.prog.split()
         command = parts[-1] if len(parts) > 1 else "unknown"
@@ -21,14 +21,14 @@ class Step02ArgumentParser(argparse.ArgumentParser):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = Step02ArgumentParser(prog="unit-test-runner")
+    parser = CLIArgumentParser(prog="unit-test-runner")
     parser.add_argument("--version", action="version", version=f"unit-test-runner {__version__}")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging.")
     parser.add_argument("--quiet", action="store_true", help="Reduce non-essential output.")
     parser.add_argument("--log-file", help="Write logs to this file.")
     parser.add_argument("--json", action="store_true", help="Write machine-readable JSON to stdout.")
     parser.add_argument("--no-color", action="store_true", help="Disable colored output.")
-    subcommands = parser.add_subparsers(dest="command", required=True, parser_class=Step02ArgumentParser)
+    subcommands = parser.add_subparsers(dest="command", required=True, parser_class=CLIArgumentParser)
 
     subcommands.add_parser("doctor", help="Check the local execution environment.")
 
@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     harness.add_argument("--function-signature", required=True)
     harness.add_argument("--global-access", required=True)
     harness.add_argument("--call-report", required=True)
-    harness.add_argument("--test-case-draft", required=True)
+    harness.add_argument("--test-case-design", required=True)
     harness.add_argument("--out", required=True)
     harness.add_argument("--overwrite", action="store_true")
 
@@ -130,14 +130,14 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--dossier", required=True)
     review.add_argument("--out")
 
-    draft = subcommands.add_parser("generate-test-draft", help="Generate a test draft from a dossier or analysis reports.")
-    draft.add_argument("--dossier")
-    draft.add_argument("--function-signature")
-    draft.add_argument("--global-access")
-    draft.add_argument("--call-report")
-    draft.add_argument("--coverage-design")
-    draft.add_argument("--boundary-candidates")
-    draft.add_argument("--out")
-    draft.add_argument("--format", choices=("csv", "md", "json", "all"), default="csv")
+    design = subcommands.add_parser("generate-test-design", help="Generate a test design from a dossier or analysis reports.")
+    design.add_argument("--dossier")
+    design.add_argument("--function-signature")
+    design.add_argument("--global-access")
+    design.add_argument("--call-report")
+    design.add_argument("--coverage-design")
+    design.add_argument("--boundary-candidates")
+    design.add_argument("--out")
+    design.add_argument("--format", choices=("csv", "md", "json", "all"), default="csv")
 
     return parser

@@ -32,7 +32,7 @@ def run_module(*args):
     )
 
 
-class DossierFinalizerStep17Tests(unittest.TestCase):
+class DossierReviewWorkflowTests(unittest.TestCase):
     def prepare_workspace(self, temp_dir):
         out_dir = Path(temp_dir) / "Control_Update"
         analyze_function_workflow(
@@ -113,7 +113,7 @@ class DossierFinalizerStep17Tests(unittest.TestCase):
             (reports / "source_digest.json").write_text(json.dumps({"schema_version": "0.1", "function": {"name": "Control_Update"}}), encoding="utf-8")
             (reports / "function_location.json").write_text(json.dumps({"schema_version": "0.1", "function": {"name": "Control_Update"}}), encoding="utf-8")
             (reports / "function_signature.json").write_text(json.dumps({"schema_version": "0.1", "function": {"name": "Control_Update"}}), encoding="utf-8")
-            (reports / "test_case_draft.json").write_text(json.dumps({"schema_version": "0.1", "function": {"name": "Other_Function"}, "test_cases": []}), encoding="utf-8")
+            (reports / "test_case_design.json").write_text(json.dumps({"schema_version": "0.1", "function": {"name": "Other_Function"}, "test_cases": []}), encoding="utf-8")
 
             dossier = finalize_function_dossier(workspace, function_name="Control_Update")
             self.assertTrue(any(warning.code == "function_name_mismatch" for warning in dossier.warnings))
@@ -149,7 +149,7 @@ class DossierFinalizerStep17Tests(unittest.TestCase):
             self.assertIn("artifact_older_than_request", warning_codes)
             self.assertIn("modified_at", stale["source_digest"])
 
-    def test_cli_finalize_prepare_review_and_analyze_function_step17(self):
+    def test_cli_finalize_prepare_review_and_analyze_function_dossier_review(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = self.prepare_workspace(temp_dir)
 
@@ -164,7 +164,7 @@ class DossierFinalizerStep17Tests(unittest.TestCase):
             prepare_payload = json.loads(prepare.stdout)
             self.assertEqual("review_prepared", prepare_payload["status"])
 
-            out_dir = Path(temp_dir) / "AnalyzeFunctionStep17"
+            out_dir = Path(temp_dir) / "AnalyzeFunctionDossierReview"
             full = run_module(
                 "--json",
                 "analyze-function",
@@ -203,9 +203,9 @@ class DossierFinalizerStep17Tests(unittest.TestCase):
             self.assertEqual(0, probe.returncode, probe.stderr)
             self.assertIn("extracted", json.loads(probe.stdout)["data"]["command"])
 
-            draft = run_module("--json", "generate-test-draft", "--dossier", str(final_dossier_path))
-            self.assertEqual(0, draft.returncode, draft.stderr)
-            self.assertEqual("test_case_draft_generated", json.loads(draft.stdout)["status"])
+            design = run_module("--json", "generate-test-design", "--dossier", str(final_dossier_path))
+            self.assertEqual(0, design.returncode, design.stderr)
+            self.assertEqual("test_case_design_generated", json.loads(design.stdout)["status"])
 
 
 if __name__ == "__main__":

@@ -52,11 +52,11 @@ class CLIResult:
         return "\n".join(lines) + "\n"
 
 
-def not_implemented(command: str, planned_step: str) -> CLIResult:
+def not_implemented(command: str, planned_item: str) -> CLIResult:
     return CLIResult(
         status="not_implemented",
         exit_code=EXIT_NOT_IMPLEMENTED,
         command=command,
         message="This command is defined but not implemented yet.",
-        data={"planned_step": planned_step},
+        data={"planned_item": planned_item},
     )

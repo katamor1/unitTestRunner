@@ -32,7 +32,7 @@ unit-test-runner --help
 
 The repository includes a VC6-style fixture under `tests/fixtures/vc6_project`.
 
-Step16-compatible analysis flow:
+Analysis and test design flow:
 
 ```powershell
 $env:PYTHONPATH = "$PWD\src"
@@ -44,10 +44,10 @@ py -m unit_test_runner map-source --workspace $fixture --dsw "$fixture\Product.d
 py -m unit_test_runner list-functions --source "$fixture\src\control.c"
 py -m unit_test_runner analyze-function --workspace $fixture --dsw "$fixture\Product.dsw" --source src\control.c --function Control_Update --configuration "Win32 Debug" --project Control --out $out
 py -m unit_test_runner build-probe --dossier "$out\reports\function_dossier.json" --dry-run
-py -m unit_test_runner generate-test-draft --dossier "$out\reports\function_dossier.json"
+py -m unit_test_runner generate-test-design --dossier "$out\reports\function_dossier.json"
 ```
 
-Step17 finalized review flow:
+Finalized dossier review flow:
 
 ```powershell
 py -m unit_test_runner --json analyze-function --workspace $fixture --dsw "$fixture\Product.dsw" --source src\control.c --function Control_Update --configuration "Win32 Debug" --project Control --out $out --finalize-dossier
@@ -61,7 +61,7 @@ Primary outputs:
 
 - `$out\reports\function_dossier.json`
 - `$out\reports\function_dossier.md`
-- `$out\reports\test_case_draft.csv`
+- `$out\reports\test_case_design.csv`
 - `$out\generated\build\Makefile`
 - `$out\reports\build_probe.log`
 - `$out\reports\dossier_manifest.json`
@@ -70,7 +70,7 @@ Primary outputs:
 - `$out\reports\unresolved_items.md`
 - `$out\reports\next_actions.md`
 
-`function_dossier.json` remains the public dossier artifact in both flows. After Step17 finalization,
+`function_dossier.json` remains the public dossier artifact in both flows. After dossier review finalization,
 it keeps the original analysis contract fields (`target`, `project_membership`, `build_context`,
 `function`, `test_design`, and `diagnostics`) and adds review workflow fields such as
 `artifact_index`, `traceability`, `review_items`, `unresolved_items`, `next_actions`, and
@@ -118,7 +118,7 @@ Commands:
 - `UnitTestRunner: Analyze Selected Function`
 - `UnitTestRunner: Finalize Dossier`
 - `UnitTestRunner: Open Review Checklist`
-- `UnitTestRunner: Generate Test Draft`
+- `UnitTestRunner: Generate Test Design`
 - `UnitTestRunner: Build Probe Dry Run`
 - `UnitTestRunner: Run Build Probe`
 - `UnitTestRunner: Run Tests`

@@ -32,7 +32,7 @@ def run_module(*args):
     )
 
 
-class ExecutionEvidenceStep16Tests(unittest.TestCase):
+class ExecutionEvidenceTests(unittest.TestCase):
     def prepare_workspace(self, temp_dir):
         out_dir = Path(temp_dir) / "Control_Update"
         analyze_function_workflow(
@@ -106,7 +106,7 @@ UTR RUN TC_Control_Update_002
             package = (workspace / "reports" / "evidence_package.md").read_text(encoding="utf-8")
             self.assertIn("# Function Unit Test Evidence Package", package)
 
-    def test_cli_run_tests_prepare_evidence_and_analyze_function_connect_step16(self):
+    def test_cli_run_tests_prepare_evidence_and_analyze_function_connect_execution_evidence(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = self.prepare_workspace(temp_dir)
 
@@ -121,7 +121,7 @@ UTR RUN TC_Control_Update_002
             prepare_payload = json.loads(prepare.stdout)
             self.assertEqual("evidence_prepared", prepare_payload["status"])
 
-            out_dir = Path(temp_dir) / "AnalyzeFunctionStep16"
+            out_dir = Path(temp_dir) / "AnalyzeFunctionExecutionEvidence"
             full = run_module(
                 "--json",
                 "analyze-function",
@@ -143,7 +143,7 @@ UTR RUN TC_Control_Update_002
             self.assertEqual(0, full.returncode, full.stderr)
             full_payload = json.loads(full.stdout)
             self.assertEqual("evidence_prepared", full_payload["status"])
-            self.assertIn("Step 17", full_payload["message"])
+            self.assertIn("dossier review", full_payload["message"])
             self.assertIn("test_execution", full_payload["data"])
             self.assertIn("evidence", full_payload["data"])
             self.assertTrue((out_dir / "reports" / "evidence_manifest.json").exists())

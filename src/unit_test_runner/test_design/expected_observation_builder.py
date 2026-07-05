@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from .test_case_models import ExpectedObservation, TestCaseDraftWarning, UnresolvedTestDesignItem
+from .test_case_models import ExpectedObservation, TestCaseDesignWarning, UnresolvedTestDesignItem
 
 
-def build_expected_observations(test_case_id: str, coverage_item: dict) -> tuple[list[ExpectedObservation], list[TestCaseDraftWarning], list[UnresolvedTestDesignItem]]:
+def build_expected_observations(test_case_id: str, coverage_item: dict) -> tuple[list[ExpectedObservation], list[TestCaseDesignWarning], list[UnresolvedTestDesignItem]]:
     coverage_id = coverage_item.get("coverage_id", "")
     observations = [
         ExpectedObservation(
@@ -25,7 +25,7 @@ def build_expected_observations(test_case_id: str, coverage_item: dict) -> tuple
             note=None,
         ),
     ]
-    warning = TestCaseDraftWarning(
+    warning = TestCaseDesignWarning(
         "expected_result_not_determined",
         "Expected return value is a review placeholder.",
         related_test_case_id=test_case_id,

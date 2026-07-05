@@ -276,7 +276,7 @@ def _compatibility_feedback(build_probe_report: dict[str, Any], manual_items: li
                 line_number=issue.get("line_number"),
                 suspected_generator="harness_skeleton_generator" if generated else None,
                 suggested_fix=issue.get("suggested_action", "Review generated code for VC6/C90 compatibility."),
-                feedback_target_step="Step 13" if generated else "Step 14",
+                feedback_target_item="harness_skeleton_generation" if generated else "build_workspace_generation",
                 review_required=True,
             )
         )

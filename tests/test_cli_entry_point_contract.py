@@ -39,7 +39,7 @@ class CliEntryPointContractTests(unittest.TestCase):
             ("complete-build", "--help"),
             ("run-tests", "--help"),
             ("prepare-evidence", "--help"),
-            ("generate-test-draft", "--help"),
+            ("generate-test-design", "--help"),
         ]
 
         for command in commands:
@@ -220,7 +220,7 @@ class CliEntryPointContractTests(unittest.TestCase):
         env["PYTHONPATH"] = str(REPO_ROOT / "src")
         script = (
             "from unit_test_runner.cli.result import not_implemented; "
-            "r = not_implemented('future-command', 'Step 99'); "
+            "r = not_implemented('future-command', 'future_cli_contract'); "
             "print(r.to_json())"
         )
 
@@ -239,7 +239,7 @@ class CliEntryPointContractTests(unittest.TestCase):
         self.assertEqual("not_implemented", payload["status"])
         self.assertEqual(20, payload["exit_code"])
         self.assertEqual("future-command", payload["command"])
-        self.assertEqual("Step 99", payload["data"]["planned_step"])
+        self.assertEqual("future_cli_contract", payload["data"]["planned_item"])
 
 
 if __name__ == "__main__":

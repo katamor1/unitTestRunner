@@ -34,7 +34,7 @@ def run_module(*args):
     )
 
 
-class BuildCompletionStep15Tests(unittest.TestCase):
+class BuildDiagnosticsAndCompletionTests(unittest.TestCase):
     def prepare_workspace(self, temp_dir):
         out_dir = Path(temp_dir) / "Control_Update"
         analyze_function_workflow(
@@ -123,7 +123,7 @@ generated\\tests\\test_Control_Update.c(7) : error C2143: syntax error : missing
             second = apply_safe_completions(workspace, plan)
             self.assertTrue(any(warning.code == "existing_file_not_overwritten" for warning in second.warnings))
 
-    def test_cli_analyze_build_errors_complete_build_and_analyze_function_step15(self):
+    def test_cli_analyze_build_errors_complete_build_and_analyze_function_build_completion(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = self.prepare_workspace(temp_dir)
             self.write_probe_report_with_errors(workspace)
@@ -140,7 +140,7 @@ generated\\tests\\test_Control_Update.c(7) : error C2143: syntax error : missing
             self.assertEqual("completion_applied", complete_payload["status"])
             self.assertTrue((workspace / "reports" / "build_completion_iteration_report.json").exists())
 
-            out_dir = Path(temp_dir) / "AnalyzeFunctionStep15"
+            out_dir = Path(temp_dir) / "AnalyzeFunctionBuildCompletion"
             full = run_module(
                 "--json",
                 "analyze-function",
@@ -162,7 +162,7 @@ generated\\tests\\test_Control_Update.c(7) : error C2143: syntax error : missing
             self.assertEqual(0, full.returncode, full.stderr)
             full_payload = json.loads(full.stdout)
             self.assertEqual("evidence_prepared", full_payload["status"])
-            self.assertIn("Step 17", full_payload["message"])
+            self.assertIn("dossier review", full_payload["message"])
             self.assertIn("build_completion", full_payload["data"])
             self.assertTrue((out_dir / "reports" / "build_completion_plan.json").exists())
 

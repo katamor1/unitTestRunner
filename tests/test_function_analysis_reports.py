@@ -37,7 +37,7 @@ def run_module(*args, check=False):
     )
 
 
-class AnalysisPipelineSteps0711Tests(unittest.TestCase):
+class FunctionAnalysisReportTests(unittest.TestCase):
     def setUp(self):
         self.digest = build_source_digest(FIXTURE)
         self.location = locate_function(self.digest, "Control_Update")
@@ -47,7 +47,7 @@ class AnalysisPipelineSteps0711Tests(unittest.TestCase):
         self.coverage = analyze_coverage_design(self.digest, self.location, self.signature, self.global_access, self.call_report)
         self.boundary = generate_boundary_equivalence_candidates(self.signature, self.global_access, self.call_report, self.coverage)
 
-    def test_step07_signature_extracts_types_directions_and_complex_parameters(self):
+    def test_signature_report_extracts_types_directions_and_complex_parameters(self):
         payload = self.signature.to_dict()
 
         self.assertEqual("parsed", payload["function"]["status"])
@@ -79,7 +79,7 @@ class AnalysisPipelineSteps0711Tests(unittest.TestCase):
         self.assertTrue(complex_parameters["ctx"]["type"]["is_struct"])
         self.assertTrue(any(item["is_variadic"] for item in complex_signature["function"]["parameters"]))
 
-    def test_step08_global_access_classifies_state_and_parameter_side_effects(self):
+    def test_global_access_report_classifies_state_and_parameter_side_effects(self):
         payload = self.global_access.to_dict()
 
         declarations = {item["name"]: item for item in payload["file_scope_declarations"]}
@@ -92,7 +92,7 @@ class AnalysisPipelineSteps0711Tests(unittest.TestCase):
         self.assertIn(("out_value", "parameter_write"), parameter_effects)
         self.assertIn(("buffer", "parameter_write"), parameter_effects)
 
-    def test_step09_call_report_classifies_calls_and_stub_candidates(self):
+    def test_call_report_classifies_calls_and_stub_candidates(self):
         payload = self.call_report.to_dict()
 
         calls = {item["name"]: item for item in payload["calls"]}
@@ -105,7 +105,7 @@ class AnalysisPipelineSteps0711Tests(unittest.TestCase):
         self.assertTrue(stubs["CheckLimit"]["return_value_control_needed"])
         self.assertTrue(stubs["WritePort"]["side_effect_control_needed"])
 
-    def test_step10_coverage_design_links_branches_loops_switches_and_returns(self):
+    def test_coverage_design_links_branches_loops_switches_and_returns(self):
         payload = self.coverage.to_dict()
 
         self.assertGreaterEqual(len(payload["branches"]), 3)
@@ -132,7 +132,7 @@ class AnalysisPipelineSteps0711Tests(unittest.TestCase):
         self.assertIn("ternary_false", shapes_coverage_types)
         self.assertNotIn("loop_zero", shapes_coverage_types)
 
-    def test_step11_boundary_equivalence_candidates_use_conditions_types_and_calls(self):
+    def test_boundary_equivalence_candidates_use_conditions_types_and_calls(self):
         payload = self.boundary.to_dict()
 
         values = {(item["target_name"], item["value_expression"], item["value_kind"]) for item in payload["input_candidates"]}
@@ -156,7 +156,7 @@ class AnalysisPipelineSteps0711Tests(unittest.TestCase):
         self.assertIn(("count", "1", "one"), shape_values)
         self.assertIn(("count", "2", "many"), shape_values)
 
-    def test_analyze_function_generates_step07_to_step11_artifacts(self):
+    def test_analyze_function_generates_analysis_and_design_artifacts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             out_dir = Path(temp_dir) / "Control_Update"
             completed = run_module(
@@ -181,7 +181,7 @@ class AnalysisPipelineSteps0711Tests(unittest.TestCase):
             self.assertEqual(0, completed.returncode, completed.stderr)
             result = json.loads(completed.stdout)
             self.assertEqual("evidence_prepared", result["status"])
-            self.assertIn("Step 17", result["message"])
+            self.assertIn("dossier review", result["message"])
             reports = out_dir / "reports"
             for filename in [
                 "function_signature.json",
@@ -194,9 +194,9 @@ class AnalysisPipelineSteps0711Tests(unittest.TestCase):
                 "coverage_design.md",
                 "boundary_equivalence_candidates.json",
                 "boundary_equivalence_candidates.md",
-                "test_case_draft.json",
-                "test_case_draft.md",
-                "test_case_draft.csv",
+                "test_case_design.json",
+                "test_case_design.md",
+                "test_case_design.csv",
                 "harness_skeleton_report.json",
                 "harness_skeleton_report.md",
                 "build_workspace_report.json",
@@ -224,7 +224,7 @@ class AnalysisPipelineSteps0711Tests(unittest.TestCase):
             self.assertIn("call_report", dossier)
             self.assertIn("coverage_design", dossier)
             self.assertIn("boundary_equivalence_candidates", dossier)
-            self.assertIn("test_case_draft", dossier)
+            self.assertIn("test_case_design", dossier)
             self.assertIn("harness_skeleton", dossier)
             self.assertIn("build_workspace", dossier)
             self.assertIn("build_probe", dossier)

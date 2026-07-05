@@ -8,7 +8,7 @@ from .dossier_models import DossierReviewItem, DossierUnresolvedItem
 def build_review_items(payloads: dict[str, dict[str, Any]]) -> tuple[list[DossierReviewItem], list[DossierUnresolvedItem]]:
     review_items: list[DossierReviewItem] = []
     unresolved: list[DossierUnresolvedItem] = []
-    _from_test_case_draft(payloads.get("test_case_draft", {}), review_items, unresolved)
+    _from_test_case_design(payloads.get("test_case_design", {}), review_items, unresolved)
     _from_harness(payloads.get("harness_skeleton_report", {}), review_items, unresolved)
     _from_completion(payloads.get("build_completion_plan", {}), review_items, unresolved)
     _from_execution(payloads.get("test_execution_report", {}), review_items, unresolved)
@@ -27,7 +27,7 @@ def build_review_items(payloads: dict[str, dict[str, Any]]) -> tuple[list[Dossie
         unresolved.append(
             DossierUnresolvedItem(
                 "UNRESOLVED_REVIEW_001",
-                "Step 17",
+                "dossier_review_workflow",
                 "manual_final_review",
                 "Final human review is still required.",
                 "Dossier generation is not an approval decision.",
@@ -37,7 +37,7 @@ def build_review_items(payloads: dict[str, dict[str, Any]]) -> tuple[list[Dossie
     return review_items, unresolved
 
 
-def _from_test_case_draft(payload: dict[str, Any], review_items: list[DossierReviewItem], unresolved: list[DossierUnresolvedItem]) -> None:
+def _from_test_case_design(payload: dict[str, Any], review_items: list[DossierReviewItem], unresolved: list[DossierUnresolvedItem]) -> None:
     for case in payload.get("test_cases", []):
         test_case_id = case.get("test_case_id") or case.get("id")
         needs_review = case.get("review_status") == "review_required"
@@ -47,11 +47,11 @@ def _from_test_case_draft(payload: dict[str, Any], review_items: list[DossierRev
             unresolved.append(
                 DossierUnresolvedItem(
                     item_id,
-                    "Step 12",
+                    "test_case_design_generation",
                     "expected_result_unknown",
                     f"Expected result requires review for {test_case_id}.",
                     "The generated test cannot be treated as approved until expected values are reviewed.",
-                    ["test_case_draft"],
+                    ["test_case_design"],
                     [test_case_id] if test_case_id else [],
                     "Review function specification and replace TBD expected values.",
                 )
@@ -62,7 +62,7 @@ def _from_test_case_draft(payload: dict[str, Any], review_items: list[DossierRev
                     "expected_result_review",
                     "Review expected result",
                     f"Confirm expected observations for {test_case_id}.",
-                    ["test_case_draft"],
+                    ["test_case_design"],
                     [test_case_id] if test_case_id else [],
                 )
             )
@@ -74,7 +74,7 @@ def _from_harness(payload: dict[str, Any], review_items: list[DossierReviewItem]
         unresolved.append(
             DossierUnresolvedItem(
                 f"UNRESOLVED_PLACEHOLDER_{len(unresolved) + 1:03d}",
-                "Step 13",
+                "harness_skeleton_generation",
                 "harness_placeholder",
                 f"Placeholder remains: {placeholder.get('name')}",
                 "Generated harness needs manual completion.",
@@ -91,7 +91,7 @@ def _from_completion(payload: dict[str, Any], review_items: list[DossierReviewIt
         unresolved.append(
             DossierUnresolvedItem(
                 f"UNRESOLVED_BUILD_{len(unresolved) + 1:03d}",
-                "Step 15",
+                "build_completion",
                 manual.get("item_kind", "manual_action"),
                 manual.get("description", "Manual build completion action remains."),
                 manual.get("reason", "Build completion cannot be fully automated."),
@@ -110,7 +110,7 @@ def _from_execution(payload: dict[str, Any], review_items: list[DossierReviewIte
         unresolved.append(
             DossierUnresolvedItem(
                 f"UNRESOLVED_EXEC_{len(unresolved) + 1:03d}",
-                "Step 16",
+                "execution_evidence",
                 "execution_inconclusive",
                 f"Test execution status is {status}.",
                 "Evidence is not a final pass result.",
