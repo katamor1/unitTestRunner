@@ -15,8 +15,9 @@ import {
 } from './cli/commandBuilder';
 import { CliResult, runCliInvocation } from './cli/cliRunner';
 import { parseCliResult } from './cli/cliResultParser';
-import { resolveCliPath } from './config/bundledCli';
-import { AdapterSettings, readAdapterSettingsFromObject } from './config/settings';
+import { DEFAULT_CLI_PATH, resolveCliPath } from './config/bundledCli';
+import { AdapterSettings, defaultSourceRootFromWorkspaceFolders, RawSettings, readAdapterSettingsFromObject } from './config/settings';
+import { buildSettingsViewModel, SettingsActionKind, SettingsFieldId, SettingsViewModel } from './config/settingsViewModel';
 import { validateSettings } from './config/validation';
 import { resolveFunctionNameFromText } from './functionTarget/regexFunctionResolver';
 import { ReportPaths, resolveReportPaths } from './reports/reportPathResolver';
@@ -40,8 +41,22 @@ const LAST_COMMAND_KEY = 'unitTestRunner.lastCliCommand';
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Unit Test Runner');
   context.subscriptions.push(output);
-  const workflowPanel = new WorkflowPanelProvider(context, () => workflowSettingsReady(context));
+  let workflowPanel: WorkflowPanelProvider;
+  workflowPanel = new WorkflowPanelProvider(
+    context,
+    () => workflowSettingsReady(context),
+    () => readSettingsViewModel(),
+    async (fieldId, kind) => {
+      await handleSettingsAction(fieldId, kind);
+      workflowPanel.refresh();
+    },
+  );
   context.subscriptions.push(vscode.window.registerWebviewViewProvider(WorkflowPanelProvider.viewType, workflowPanel));
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
+    if (event.affectsConfiguration('unitTestRunner')) {
+      workflowPanel.refresh();
+    }
+  }));
   context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(async (document) => {
     const state = readWorkflowState(context);
     const result = completeAwaitingSaveIfMatches(state, document.uri.fsPath);
@@ -139,26 +154,39 @@ async function reanalyzeActiveFunction(context: vscode.ExtensionContext, output:
   }
 }
 
-function readConfig(context: vscode.ExtensionContext): AdapterSettings {
-  const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+function readRawConfig(): RawSettings {
   const config = vscode.workspace.getConfiguration('unitTestRunner');
+  return {
+    cliPath: config.get('cliPath'),
+    sourceRoot: config.get('sourceRoot'),
+    workspaceRoot: config.get('workspaceRoot'),
+    dswPath: config.get('dswPath'),
+    outputRoot: config.get('outputRoot'),
+    defaultConfiguration: config.get('defaultConfiguration'),
+    defaultProject: config.get('defaultProject'),
+    projectName: config.get('projectName'),
+    autoOpenDossier: config.get('autoOpenDossier'),
+    finalizeDossierAfterAnalyze: config.get('finalizeDossierAfterAnalyze'),
+    useJsonOutput: config.get('useJsonOutput'),
+    showOutputChannel: config.get('showOutputChannel'),
+    runBuildProbeRequiresConfirmation: config.get('runBuildProbeRequiresConfirmation'),
+    runTestsRequiresConfirmation: config.get('runTestsRequiresConfirmation'),
+    commandTimeoutSeconds: config.get('commandTimeoutSeconds'),
+  };
+}
+
+function defaultSourceRoot(): string {
+  return defaultSourceRootFromWorkspaceFolders(vscode.workspace.workspaceFolders);
+}
+
+function readSettingsViewModel(): SettingsViewModel {
+  return buildSettingsViewModel(readRawConfig(), defaultSourceRoot());
+}
+
+function readConfig(context: vscode.ExtensionContext): AdapterSettings {
   const settings = readAdapterSettingsFromObject(
-    {
-      cliPath: config.get('cliPath'),
-      sourceRoot: config.get('sourceRoot') || config.get('workspaceRoot'),
-      dswPath: config.get('dswPath'),
-      outputRoot: config.get('outputRoot'),
-      defaultConfiguration: config.get('defaultConfiguration'),
-      defaultProject: config.get('defaultProject') || config.get('projectName'),
-      autoOpenDossier: config.get('autoOpenDossier'),
-      finalizeDossierAfterAnalyze: config.get('finalizeDossierAfterAnalyze'),
-      useJsonOutput: config.get('useJsonOutput'),
-      showOutputChannel: config.get('showOutputChannel'),
-      runBuildProbeRequiresConfirmation: config.get('runBuildProbeRequiresConfirmation'),
-      runTestsRequiresConfirmation: config.get('runTestsRequiresConfirmation'),
-      commandTimeoutSeconds: config.get('commandTimeoutSeconds'),
-    },
-    workspaceFolder,
+    readRawConfig(),
+    defaultSourceRoot(),
   );
   return { ...settings, cliPath: resolveCliPath(settings.cliPath, context.extensionPath) };
 }
@@ -173,6 +201,158 @@ function showValidation(settings: AdapterSettings): void {
   if (!validation.ok) {
     throw new Error(`Invalid UnitTestRunner settings: ${validation.warnings.map((warning) => warning.message).join(' ')}`);
   }
+}
+
+async function handleSettingsAction(fieldId: SettingsFieldId, kind: SettingsActionKind): Promise<void> {
+  ensureWorkspaceSettingsTarget();
+  const model = readSettingsViewModel();
+  const field = model.fields.find((item) => item.id === fieldId);
+  if (!field) {
+    throw new Error(`Unknown settings field: ${fieldId}`);
+  }
+  if (kind === 'reset') {
+    await resetSetting(fieldId);
+    return;
+  }
+  if (kind === 'pickFolder') {
+    const selected = await vscode.window.showOpenDialog({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      defaultUri: defaultUriForField(field.effectiveValue, false),
+      openLabel: '選択',
+      title: `${field.label}を選択`,
+    });
+    if (!selected?.[0]) {
+      return;
+    }
+    await updateSetting(fieldId, selected[0].fsPath);
+    return;
+  }
+  if (kind === 'pickFile') {
+    const selected = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: false,
+      defaultUri: defaultUriForField(field.configuredValue || field.effectiveValue, true),
+      filters: filePickerFilters(fieldId),
+      openLabel: '選択',
+      title: `${field.label}を選択`,
+    });
+    if (!selected?.[0]) {
+      return;
+    }
+    await updateSetting(fieldId, selected[0].fsPath);
+    return;
+  }
+  if (kind === 'inputText') {
+    const selected = await vscode.window.showInputBox({
+      prompt: inputPrompt(fieldId),
+      value: field.configuredValue || field.effectiveValue,
+    });
+    if (selected === undefined) {
+      return;
+    }
+    await updateSetting(fieldId, selected.trim());
+  }
+}
+
+function ensureWorkspaceSettingsTarget(): void {
+  if (!vscode.workspace.workspaceFolders?.length && !vscode.workspace.workspaceFile) {
+    throw new Error('UnitTestRunnerの設定を保存するには、フォルダまたはworkspaceを開いてください。');
+  }
+}
+
+async function updateSetting(fieldId: SettingsFieldId, value: string): Promise<void> {
+  const settingKey = settingKeyForField(fieldId);
+  await vscode.workspace.getConfiguration('unitTestRunner').update(settingKey, value, vscode.ConfigurationTarget.Workspace);
+}
+
+async function resetSetting(fieldId: SettingsFieldId): Promise<void> {
+  const config = vscode.workspace.getConfiguration('unitTestRunner');
+  if (fieldId === 'sourceRoot') {
+    await config.update('sourceRoot', '', vscode.ConfigurationTarget.Workspace);
+    await config.update('workspaceRoot', '', vscode.ConfigurationTarget.Workspace);
+    return;
+  }
+  if (fieldId === 'defaultConfiguration') {
+    await config.update('defaultConfiguration', '', vscode.ConfigurationTarget.Workspace);
+    return;
+  }
+  if (fieldId === 'defaultProject') {
+    await config.update('defaultProject', '', vscode.ConfigurationTarget.Workspace);
+    await config.update('projectName', '', vscode.ConfigurationTarget.Workspace);
+    return;
+  }
+  if (fieldId === 'cliPath') {
+    await config.update('cliPath', DEFAULT_CLI_PATH, vscode.ConfigurationTarget.Workspace);
+    return;
+  }
+  await config.update(settingKeyForField(fieldId), undefined, vscode.ConfigurationTarget.Workspace);
+  for (const alias of legacySettingKeysForField(fieldId)) {
+    await config.update(alias, undefined, vscode.ConfigurationTarget.Workspace);
+  }
+}
+
+function settingKeyForField(fieldId: SettingsFieldId): string {
+  const keys: Record<SettingsFieldId, string> = {
+    sourceRoot: 'sourceRoot',
+    dswPath: 'dswPath',
+    outputRoot: 'outputRoot',
+    defaultConfiguration: 'defaultConfiguration',
+    defaultProject: 'defaultProject',
+    cliPath: 'cliPath',
+  };
+  return keys[fieldId];
+}
+
+function legacySettingKeysForField(fieldId: SettingsFieldId): string[] {
+  if (fieldId === 'sourceRoot') {
+    return ['workspaceRoot'];
+  }
+  if (fieldId === 'defaultProject') {
+    return ['projectName'];
+  }
+  return [];
+}
+
+function defaultUriForField(value: string, fileSelection: boolean): vscode.Uri | undefined {
+  if (!value || !path.isAbsolute(value)) {
+    return undefined;
+  }
+  return vscode.Uri.file(fileSelection ? path.dirname(value) : value);
+}
+
+function filePickerFilters(fieldId: SettingsFieldId): Record<string, string[]> {
+  if (fieldId === 'dswPath') {
+    return { 'Visual C++ Workspace': ['dsw'], 'All Files': ['*'] };
+  }
+  if (fieldId === 'cliPath') {
+    return { Executable: ['exe'], 'All Files': ['*'] };
+  }
+  return { 'All Files': ['*'] };
+}
+
+function inputPrompt(fieldId: SettingsFieldId): string {
+  if (fieldId === 'sourceRoot') {
+    return 'プロジェクトルートのフォルダパスを入力してください。空にするとVS Codeで開いたTOPフォルダを使います。';
+  }
+  if (fieldId === 'dswPath') {
+    return 'VC6 .dsw ファイルの絶対パスを入力してください。';
+  }
+  if (fieldId === 'outputRoot') {
+    return '生成物の出力ルートフォルダを入力してください。関数名フォルダはこの下に自動作成されます。';
+  }
+  if (fieldId === 'defaultConfiguration') {
+    return 'VC6構成名を入力してください。';
+  }
+  if (fieldId === 'defaultProject') {
+    return '既定プロジェクト名を入力してください。空にすると指定なしになります。';
+  }
+  if (fieldId === 'cliPath') {
+    return '外部CLI exeの絶対パスを入力してください。同梱CLIを使う場合は unit-test-runner または空にします。';
+  }
+  return '値を入力してください。';
 }
 
 async function resolveFunctionName(editor: vscode.TextEditor): Promise<string> {

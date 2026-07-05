@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 
+import { SettingsAction, SettingsActionKind, SettingsFieldId, SettingsViewModel } from '../config/settingsViewModel';
 import { ReportPaths, resolveReportPaths } from '../reports/reportPathResolver';
 import { openReport } from '../reports/reportOpener';
 import {
@@ -17,13 +18,21 @@ import {
   WORKFLOW_STATE_KEY,
 } from './workflowState';
 
-interface WorkflowMessage {
+interface WorkflowActionMessage {
   type: 'workflowAction';
   kind: WorkflowAction['kind'];
   commandId?: string;
   reportKey?: keyof ReportPaths;
   stepId?: WorkflowStepId;
 }
+
+interface SettingsActionMessage {
+  type: 'settingsAction';
+  kind: SettingsActionKind;
+  fieldId: SettingsFieldId;
+}
+
+type WorkflowMessage = WorkflowActionMessage | SettingsActionMessage;
 
 export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
   static readonly viewType = 'unitTestRunner.workflow';
@@ -33,6 +42,8 @@ export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly settingsReady: () => boolean,
+    private readonly settingsViewModel: () => SettingsViewModel,
+    private readonly handleSettingsAction: (fieldId: SettingsFieldId, kind: SettingsActionKind) => Promise<void>,
   ) {}
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -53,12 +64,15 @@ export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
     const reports = resolveWorkflowReports(state);
     const availability = reportAvailabilityFromPaths(reports, fs.existsSync);
     const steps = buildWorkflowStepViews(state, availability);
-    webview.html = renderWorkflowHtml(webview, state, steps, OPTIONAL_WORKFLOW_ACTIONS);
+    const settings = this.settingsViewModel();
+    webview.html = renderWorkflowHtml(webview, state, settings, steps, OPTIONAL_WORKFLOW_ACTIONS);
   }
 
   private async handleMessage(message: WorkflowMessage): Promise<void> {
     try {
-      if (message.kind === 'command' && message.commandId) {
+      if (message.type === 'settingsAction') {
+        await this.handleSettingsAction(message.fieldId, message.kind);
+      } else if (message.kind === 'command' && message.commandId) {
         await vscode.commands.executeCommand(message.commandId);
       } else if (message.kind === 'openReport' && message.reportKey) {
         await this.openWorkflowReport(message.reportKey, message.stepId);
@@ -121,7 +135,7 @@ export function resolveWorkflowReports(state: WorkflowState): Partial<ReportPath
   };
 }
 
-function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, steps: ReturnType<typeof buildWorkflowStepViews>, optionalActions: WorkflowAction[]): string {
+function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, settings: SettingsViewModel, steps: ReturnType<typeof buildWorkflowStepViews>, optionalActions: WorkflowAction[]): string {
   const nonce = createNonce();
   const functionName = state.functionName || '対象関数未選択';
   const workspace = state.outputWorkspace || state.reports?.workspace || '出力workspace未選択';
@@ -146,6 +160,65 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, steps
       border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-editorGroup-border));
       padding-bottom: 10px;
       margin-bottom: 10px;
+    }
+    .settings {
+      border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-editorGroup-border));
+      margin-bottom: 10px;
+      padding-bottom: 10px;
+    }
+    .settings h2,
+    .optional h2 {
+      font-size: 12px;
+      margin: 0 0 8px 0;
+      text-transform: uppercase;
+      color: var(--vscode-descriptionForeground);
+    }
+    .settings-ready {
+      color: var(--vscode-descriptionForeground);
+      margin: 0 0 8px 0;
+    }
+    .setting-field {
+      border-left: 3px solid var(--vscode-editorGroup-border);
+      margin: 0 0 8px 0;
+      padding: 8px 0 8px 10px;
+    }
+    .setting-field.default {
+      border-left-color: var(--vscode-testing-iconQueued);
+    }
+    .setting-field.configured,
+    .setting-field.optional {
+      border-left-color: var(--vscode-testing-iconPassed);
+    }
+    .setting-field.missing,
+    .setting-field.warning {
+      border-left-color: var(--vscode-inputValidation-warningBorder);
+      background: var(--vscode-inputValidation-warningBackground);
+    }
+    .setting-title {
+      align-items: baseline;
+      display: flex;
+      gap: 6px;
+      justify-content: space-between;
+    }
+    .setting-title h3 {
+      font-size: 12px;
+      line-height: 1.3;
+      margin: 0;
+    }
+    .setting-status {
+      color: var(--vscode-descriptionForeground);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .setting-value {
+      color: var(--vscode-descriptionForeground);
+      margin-top: 4px;
+      overflow-wrap: anywhere;
+    }
+    .setting-message {
+      color: var(--vscode-inputValidation-warningForeground);
+      margin-top: 4px;
+      overflow-wrap: anywhere;
     }
     .name {
       font-weight: 700;
@@ -244,15 +317,10 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, steps
       border-top: 1px solid var(--vscode-editorGroup-border);
       padding-top: 10px;
     }
-    .optional h2 {
-      font-size: 12px;
-      margin: 0 0 8px 0;
-      text-transform: uppercase;
-      color: var(--vscode-descriptionForeground);
-    }
   </style>
 </head>
 <body>
+  ${renderSettings(settings)}
   <div class="summary">
     <div class="name">${escapeHtml(functionName)}</div>
     <div class="path">${escapeHtml(workspace)}</div>
@@ -277,9 +345,44 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, steps
         });
       });
     });
+    document.querySelectorAll('button[data-setting-kind]').forEach((button) => {
+      button.addEventListener('click', () => {
+        vscode.postMessage({
+          type: 'settingsAction',
+          kind: button.dataset.settingKind,
+          fieldId: button.dataset.fieldId
+        });
+      });
+    });
   </script>
 </body>
 </html>`;
+}
+
+function renderSettings(settings: SettingsViewModel): string {
+  const readyLabel = settings.ready ? '設定確認は完了しています。' : '未設定の必須項目があります。';
+  return `<section class="settings">
+  <h2>設定</h2>
+  <p class="settings-ready">${escapeHtml(readyLabel)}</p>
+  ${settings.fields.map(renderSettingField).join('')}
+</section>`;
+}
+
+function renderSettingField(field: SettingsViewModel['fields'][number]): string {
+  const value = field.effectiveValue || '未設定';
+  const configured = field.configuredValue && field.configuredValue !== field.effectiveValue ? `<div class="setting-value">設定値: ${escapeHtml(field.configuredValue)}</div>` : '';
+  const messages = field.messages.map((message) => `<div class="setting-message">${escapeHtml(message)}</div>`).join('');
+  return `<section class="setting-field ${field.state}">
+  <div class="setting-title">
+    <h3>${escapeHtml(field.label)}</h3>
+    <span class="setting-status">${escapeHtml(field.statusLabel)}</span>
+  </div>
+  <p>${escapeHtml(field.description)}</p>
+  <div class="setting-value">${escapeHtml(value)}</div>
+  ${configured}
+  ${messages}
+  <div class="actions">${field.actions.map((action) => renderSettingAction(field.id, action)).join('')}</div>
+</section>`;
 }
 
 function renderStep(step: ReturnType<typeof buildWorkflowStepViews>[number]): string {
@@ -302,6 +405,11 @@ function renderAction(action: WorkflowAction): string {
     action.stepId ? `data-step-id="${escapeAttribute(action.stepId)}"` : '',
   ].filter(Boolean).join(' ');
   return `<button class="${classes}" ${attributes}>${escapeHtml(action.label)}</button>`;
+}
+
+function renderSettingAction(fieldId: SettingsFieldId, action: SettingsAction): string {
+  const classes = action.primary ? 'primary' : '';
+  return `<button class="${classes}" data-setting-kind="${escapeAttribute(action.kind)}" data-field-id="${escapeAttribute(fieldId)}">${escapeHtml(action.label)}</button>`;
 }
 
 function escapeHtml(value: string): string {

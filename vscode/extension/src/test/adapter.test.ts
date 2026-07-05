@@ -7,7 +7,8 @@ import { buildAnalyzeFunctionInvocation, buildFinalizeDossierInvocation, buildGe
 import { runCliInvocation } from '../cli/cliRunner';
 import { parseCliResult, parseCliResultReportPaths } from '../cli/cliResultParser';
 import { DEFAULT_CLI_PATH, resolveCliPath } from '../config/bundledCli';
-import { readAdapterSettingsFromObject } from '../config/settings';
+import { defaultSourceRootFromWorkspaceFolders, readAdapterSettingsFromObject } from '../config/settings';
+import { buildSettingsViewModel } from '../config/settingsViewModel';
 import { validateSettings } from '../config/validation';
 import { resolveFunctionNameFromText } from '../functionTarget/regexFunctionResolver';
 import { resolveReportPaths } from '../reports/reportPathResolver';
@@ -43,6 +44,61 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.equal(settings.cliPath, '');
     assert.ok(validation.warnings.some((warning) => warning.code === 'missing_cli_path'));
     assert.ok(validation.warnings.some((warning) => warning.code === 'output_root_inside_source_root'));
+  });
+
+  it('uses the first VS Code workspace folder as the sourceRoot default', () => {
+    const workspaceRoot = 'C:\\work\\product';
+    const defaultSourceRoot = defaultSourceRootFromWorkspaceFolders([{ uri: { fsPath: workspaceRoot } }, { uri: { fsPath: 'D:\\other' } }]);
+    const settings = readAdapterSettingsFromObject(
+      {
+        dswPath: 'C:\\work\\product\\Product.dsw',
+        outputRoot: 'D:\\unit-test-output',
+      },
+      defaultSourceRoot,
+    );
+
+    assert.equal(defaultSourceRoot, workspaceRoot);
+    assert.equal(settings.sourceRoot, workspaceRoot);
+
+    const legacySettings = readAdapterSettingsFromObject(
+      {
+        sourceRoot: '',
+        workspaceRoot: 'D:\\legacy\\product',
+        defaultProject: '',
+        projectName: 'LegacyControl',
+      },
+      workspaceRoot,
+    );
+    assert.equal(legacySettings.sourceRoot, 'D:\\legacy\\product');
+    assert.equal(legacySettings.defaultProject, 'LegacyControl');
+  });
+
+  it('builds the settings panel model with defaults, missing fields, and warnings', () => {
+    const model = buildSettingsViewModel(
+      {
+        sourceRoot: '',
+        dswPath: '',
+        outputRoot: 'C:\\work\\product\\generated',
+        defaultConfiguration: '',
+        defaultProject: 'Control',
+      },
+      'C:\\work\\product',
+    );
+    const fields = new Map(model.fields.map((field) => [field.id, field]));
+
+    assert.equal(model.ready, false);
+    assert.equal(fields.get('sourceRoot')?.state, 'default');
+    assert.equal(fields.get('sourceRoot')?.effectiveValue, 'C:\\work\\product');
+    assert.equal(fields.get('dswPath')?.state, 'missing');
+    assert.equal(fields.get('outputRoot')?.state, 'warning');
+    assert.ok(fields.get('outputRoot')?.messages.some((message) => message.includes('production repository pollution')));
+    assert.equal(fields.get('defaultConfiguration')?.state, 'default');
+    assert.equal(fields.get('defaultProject')?.state, 'configured');
+    assert.ok(fields.get('sourceRoot')?.actions.some((action) => action.kind === 'inputText'));
+    assert.ok(fields.get('dswPath')?.actions.some((action) => action.kind === 'inputText'));
+    assert.ok(fields.get('outputRoot')?.actions.some((action) => action.kind === 'inputText'));
+    assert.ok(fields.get('cliPath')?.actions.some((action) => action.kind === 'inputText'));
+    assert.ok(fields.get('cliPath')?.actions.some((action) => action.kind === 'reset'));
   });
 
   it('resolves selected and cursor function names without parsing C in VS Code', () => {
@@ -217,13 +273,23 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     const activationEvents = new Set(packageJson.activationEvents);
     const contextMenus = packageJson.contributes.menus['editor/context'] as Array<{ command: string; when: string }>;
     const activityContainers = packageJson.contributes.viewsContainers.activitybar as Array<{ id: string; icon: string }>;
-    const workflowViews = packageJson.contributes.views.unitTestRunner as Array<{ id: string; name: string }>;
+    const workflowViews = packageJson.contributes.views.unitTestRunner as Array<{ id: string; name: string; type?: string }>;
 
     assert.ok(activationEvents.has('onView:unitTestRunner.workflow'));
+    assert.ok(activationEvents.has('onStartupFinished'));
     assert.ok(contextMenus.some((item) => item.command === 'unitTestRunner.analyzeCurrentFunction' && item.when.includes('editorLangId == c')));
     assert.ok(contextMenus.some((item) => item.command === 'unitTestRunner.analyzeSelectedFunction' && item.when.includes('editorHasSelection')));
     assert.ok(activityContainers.some((item) => item.id === 'unitTestRunner' && item.icon === 'media/unit-test-runner.svg'));
-    assert.ok(workflowViews.some((item) => item.id === 'unitTestRunner.workflow' && item.name === 'Workflow'));
+    assert.ok(workflowViews.some((item) => item.id === 'unitTestRunner.workflow' && item.name === 'Workflow' && item.type === 'webview'));
+  });
+
+  it('packages a VS Code extension README for the details view', () => {
+    const readmePath = path.join(process.cwd(), 'README.md');
+    const vscodeIgnore = fs.readFileSync(path.join(process.cwd(), '.vscodeignore'), 'utf-8');
+
+    assert.equal(fs.existsSync(readmePath), true);
+    assert.match(fs.readFileSync(readmePath, 'utf-8'), /# Unit Test Runner/);
+    assert.equal(vscodeIgnore.split(/\r?\n/).some((line) => line.trim().toLowerCase() === 'readme.md'), false);
   });
 
   it('derives the current workflow step from generated artifacts', () => {

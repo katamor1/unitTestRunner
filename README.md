@@ -116,11 +116,15 @@ py -m unit_test_runner build-probe --dossier "$out\reports\function_dossier.json
 
 VS Code上からの操作手順は [VS Code利用手順書](docs/vscode_usage_guide.md) にまとめています。
 
-利用時は、Activity Bar の `Unit Test Runner` から `Workflow` パネルを開きます。最初の解析は対象Cファイル上の右クリックメニュー、またはパネルの `現在関数を解析` / `選択関数を解析` から開始できます。以降はパネルが `function_dossier.md`、レビュー項目、テスト設計、build probe、テスト実行、エビデンス確認の順に現在の推奨工程を強調します。
+利用時は、Activity Bar の `Unit Test Runner` から `Workflow` パネルを開きます。パネル上部の `設定` で、プロジェクトルート、`.dsw`、出力ルート、既定構成、既定プロジェクト、必要に応じて外部CLIを設定できます。ファイル/フォルダ選択に加えて、`パスを入力` から貼り付け入力できます。設定はWorkspace設定へ保存され、User設定には書きません。
+
+`unitTestRunner.sourceRoot` が未設定の場合は、VS Codeで開いた先頭workspace folderをプロジェクトルートとして使います。単一フォルダを開いた場合は、そのTOPフォルダが既定のプロジェクトルートです。
+
+最初の解析は対象Cファイル上の右クリックメニュー、またはパネルの `現在関数を解析` / `選択関数を解析` から開始できます。以降はパネルが `function_dossier.md`、レビュー項目、テスト設計、build probe、テスト実行、エビデンス確認の順に現在の推奨工程を強調します。
 
 パネルから開いたレポートは保存検知で次工程へ進みます。編集不要の場合は、パネルの `保存済みとして確定` で次のアクションへ進めます。
 
-代表設定は以下です。
+通常はパネルから設定します。手動でWorkspace設定を書く場合の代表例は以下です。
 
 ```json
 {

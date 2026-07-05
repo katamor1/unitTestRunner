@@ -16,16 +16,26 @@ export interface AdapterSettings {
   commandTimeoutSeconds: number;
 }
 
-type RawSettings = Record<string, unknown>;
+export type RawSettings = Record<string, unknown>;
+
+export interface WorkspaceFolderLike {
+  uri: {
+    fsPath: string;
+  };
+}
+
+export function defaultSourceRootFromWorkspaceFolders(workspaceFolders: readonly WorkspaceFolderLike[] | undefined): string {
+  return workspaceFolders?.[0]?.uri.fsPath ?? '';
+}
 
 export function readAdapterSettingsFromObject(raw: RawSettings, defaultSourceRoot: string): AdapterSettings {
   return {
     cliPath: stringValue(raw.cliPath, DEFAULT_CLI_PATH),
-    sourceRoot: stringValue(raw.sourceRoot ?? raw.workspaceRoot, defaultSourceRoot),
+    sourceRoot: stringValue(nonEmptyString(raw.sourceRoot) ?? nonEmptyString(raw.workspaceRoot), defaultSourceRoot),
     dswPath: stringValue(raw.dswPath, ''),
     outputRoot: stringValue(raw.outputRoot, ''),
-    defaultConfiguration: stringValue(raw.defaultConfiguration, 'Win32 Debug'),
-    defaultProject: stringValue(raw.defaultProject ?? raw.projectName, ''),
+    defaultConfiguration: stringValue(nonEmptyString(raw.defaultConfiguration), 'Win32 Debug'),
+    defaultProject: stringValue(nonEmptyString(raw.defaultProject) ?? nonEmptyString(raw.projectName), ''),
     autoOpenDossier: booleanValue(raw.autoOpenDossier, true),
     finalizeDossierAfterAnalyze: booleanValue(raw.finalizeDossierAfterAnalyze, true),
     useJsonOutput: booleanValue(raw.useJsonOutput, true),
@@ -38,6 +48,10 @@ export function readAdapterSettingsFromObject(raw: RawSettings, defaultSourceRoo
 
 function stringValue(value: unknown, fallback: string): string {
   return typeof value === 'string' ? value : fallback;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
 function booleanValue(value: unknown, fallback: boolean): boolean {
