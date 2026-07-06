@@ -31,6 +31,12 @@
     "onCommand:unitTestRunner.runBuildProbe",
     "onCommand:unitTestRunner.runTests",
     "onCommand:unitTestRunner.prepareEvidence",
+    "onCommand:unitTestRunner.registerCurrentFunctionInSuite",
+    "onCommand:unitTestRunner.openSuite",
+    "onCommand:unitTestRunner.runSelectedSuiteTests",
+    "onCommand:unitTestRunner.runSuiteByTag",
+    "onCommand:unitTestRunner.runAllSuiteTestsRequireGreen",
+    "onCommand:unitTestRunner.openSuiteRunReport",
     "onCommand:unitTestRunner.openOutputWorkspace",
     "onCommand:unitTestRunner.copyLastCommand",
     "onCommand:unitTestRunner.openLastFunctionDossier",
@@ -101,6 +107,30 @@
         "title": "UnitTestRunner: エビデンスを準備"
       },
       {
+        "command": "unitTestRunner.registerCurrentFunctionInSuite",
+        "title": "UnitTestRunner: 現在関数をスイートに登録"
+      },
+      {
+        "command": "unitTestRunner.openSuite",
+        "title": "UnitTestRunner: スイートを開く"
+      },
+      {
+        "command": "unitTestRunner.runSelectedSuiteTests",
+        "title": "UnitTestRunner: 選択したスイートテストを実行"
+      },
+      {
+        "command": "unitTestRunner.runSuiteByTag",
+        "title": "UnitTestRunner: タグ指定でスイートテストを実行"
+      },
+      {
+        "command": "unitTestRunner.runAllSuiteTestsRequireGreen",
+        "title": "UnitTestRunner: スイート全件GREEN確認"
+      },
+      {
+        "command": "unitTestRunner.openSuiteRunReport",
+        "title": "UnitTestRunner: スイート実行レポートを開く"
+      },
+      {
         "command": "unitTestRunner.openOutputWorkspace",
         "title": "UnitTestRunner: 出力workspaceを開く"
       },
@@ -142,6 +172,11 @@
           "id": "unitTestRunner.workflow",
           "name": "ワークフロー",
           "type": "webview"
+        },
+        {
+          "id": "unitTestRunner.suite",
+          "name": "スイート",
+          "type": "webview"
         }
       ]
     },
@@ -172,6 +207,11 @@
           "type": "string",
           "default": "",
           "description": "関数dossierなどの生成物を書き出す外部出力ルートです。"
+        },
+        "unitTestRunner.suiteManifestPath": {
+          "type": "string",
+          "default": "",
+          "description": "複数関数回帰スイートmanifestのパスです。未設定時は outputRoot/suites/default/suite_manifest.json を使います。"
         },
         "unitTestRunner.defaultConfiguration": {
           "type": "string",

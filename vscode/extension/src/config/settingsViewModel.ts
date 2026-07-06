@@ -6,6 +6,7 @@ export type SettingsFieldId =
   | 'sourceRoot'
   | 'dswPath'
   | 'outputRoot'
+  | 'suiteManifestPath'
   | 'defaultConfiguration'
   | 'defaultProject'
   | 'vcvarsPath'
@@ -112,6 +113,7 @@ function fieldSpecs(raw: RawSettings, settings: ReturnType<typeof readAdapterSet
   const configuredDefaultConfiguration = nonEmptyString(raw.defaultConfiguration) ?? '';
   const configuredDefaultProject = nonEmptyString(raw.defaultProject) ?? nonEmptyString(raw.projectName) ?? '';
   const configuredVcvarsPath = nonEmptyString(raw.vcvarsPath) ?? '';
+  const configuredSuiteManifestPath = nonEmptyString(raw.suiteManifestPath) ?? '';
   return [
     {
       id: 'sourceRoot',
@@ -151,6 +153,22 @@ function fieldSpecs(raw: RawSettings, settings: ReturnType<typeof readAdapterSet
       actions: [
         { id: 'pickOutputRoot', kind: 'pickFolder', label: '出力フォルダを選択', primary: true },
         { id: 'inputOutputRoot', kind: 'inputText', label: 'パスを入力' },
+      ],
+    },
+    {
+      id: 'suiteManifestPath',
+      label: 'スイートmanifest',
+      settingKey: 'unitTestRunner.suiteManifestPath',
+      description: '複数関数回帰スイートのmanifestです。未設定時は出力ルート配下の suites/default を使います。',
+      effectiveValue: settings.suiteManifestPath || (settings.outputRoot ? `${settings.outputRoot}\\suites\\default\\suite_manifest.json` : ''),
+      configuredValue: configuredSuiteManifestPath,
+      defaulted: !configuredSuiteManifestPath,
+      optional: true,
+      advanced: true,
+      actions: [
+        { id: 'pickSuiteManifestPath', kind: 'pickFile', label: 'manifestを選択' },
+        { id: 'inputSuiteManifestPath', kind: 'inputText', label: 'パスを入力' },
+        { id: 'resetSuiteManifestPath', kind: 'reset', label: '既定値に戻す' },
       ],
     },
     {

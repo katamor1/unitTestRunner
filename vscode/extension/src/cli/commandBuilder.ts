@@ -20,6 +20,14 @@ export interface CliInvocation {
   requiresConfirmation: boolean;
 }
 
+export interface SuiteRunSelector {
+  entryIds?: string[];
+  tag?: string;
+  all?: boolean;
+  run: boolean;
+  requireGreen?: boolean;
+}
+
 export function buildAnalyzeFunctionInvocation(settings: AdapterSettings, target: FunctionTarget): CliInvocation {
   const args = jsonPrefix(settings).concat([
     'analyze-function',
@@ -89,6 +97,45 @@ export function buildBuildProbeInvocation(settings: AdapterSettings, workspace: 
 export function buildRunTestsInvocation(settings: AdapterSettings, workspace: string, run: boolean): CliInvocation {
   const args = jsonPrefix(settings).concat(['run-tests', '--workspace', workspace, run ? '--run' : '--dry-run']);
   return invocation(settings, args, run && settings.runTestsRequiresConfirmation);
+}
+
+export function buildSuiteManifestPath(settings: AdapterSettings): string {
+  return settings.suiteManifestPath || path.join(settings.outputRoot, 'suites', 'default', 'suite_manifest.json');
+}
+
+export function buildSuiteRegisterInvocation(settings: AdapterSettings, target: FunctionTarget, tags: string[]): CliInvocation {
+  const args = jsonPrefix(settings).concat([
+    'suite-register',
+    '--suite',
+    buildSuiteManifestPath(settings),
+    '--workspace',
+    target.outputWorkspace,
+    '--tags',
+    tags.join(','),
+    '--source-root',
+    settings.sourceRoot,
+    '--dsw',
+    settings.dswPath,
+  ]);
+  return invocation(settings, args, false);
+}
+
+export function buildSuiteRunInvocation(settings: AdapterSettings, selector: SuiteRunSelector): CliInvocation {
+  const args = jsonPrefix(settings).concat(['suite-run', '--suite', buildSuiteManifestPath(settings)]);
+  if (selector.all) {
+    args.push('--all');
+  } else if (selector.tag) {
+    args.push('--tag', selector.tag);
+  } else {
+    for (const entryId of selector.entryIds ?? []) {
+      args.push('--entry-id', entryId);
+    }
+  }
+  args.push(selector.run ? '--run' : '--dry-run');
+  if (selector.requireGreen) {
+    args.push('--require-green');
+  }
+  return invocation(settings, args, selector.run && settings.runTestsRequiresConfirmation);
 }
 
 export function buildPrepareEvidenceInvocation(settings: AdapterSettings, workspace: string): CliInvocation {

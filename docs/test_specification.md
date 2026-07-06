@@ -58,6 +58,10 @@ py -m unit_test_runner --help
 - `generate-test-design`
 - `reconcile-test-cases`
 - `select-regression-tests`
+- `suite-register`
+- `suite-list`
+- `suite-remove`
+- `suite-run`
 
 がhelpに表示される。
 
@@ -88,6 +92,10 @@ Pop-Location
 | DOS-001 | analyze | `analyze-function ... --out <out>` | `<out>\reports\function_dossier.json` を生成する |
 | DOS-002 | finalize | `analyze-function ... --finalize-dossier` | review workflow fieldsを含むdossierを生成する |
 | DOS-003 | review | `prepare-review --dossier ...` | checklist、next actions、traceabilityを生成する |
+| SUITE-001 | register | `suite-register --suite <suite> --workspace <out>` | 関数workspaceがmanifestへ登録される |
+| SUITE-002 | list | `suite-list --suite <suite> --tag selected` | タグに一致する登録済み関数だけを返す |
+| SUITE-003 | run | `suite-run --suite <suite> --tag selected --dry-run` | suite run report JSON/Markdown/CSVを生成する |
+| SUITE-004 | green | `suite-run --suite <suite> --all --run --require-green` | 非GREENがある場合は終了コード32で失敗する |
 | BLD-001 | dry-run | `build-probe --dossier ... --dry-run` | 実ビルドせずbuild probe計画を生成する |
 | TST-001 | design | `generate-test-design --dossier ...` | test case designを生成する |
 | EXE-001 | dry-run | `run-tests --workspace <out> --dry-run` | 実行せずexecution evidenceを準備する |

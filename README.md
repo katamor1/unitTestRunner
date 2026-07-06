@@ -133,6 +133,8 @@ VS Code上からの操作手順は [VS Code利用手順書](docs/vscode_usage_gu
 
 パネルから開いたレポートは保存検知で次工程へ進みます。編集不要の場合は、パネルの `保存済みとして確定` で次のアクションへ進めます。
 
+複数関数の回帰確認は `スイート` パネルで管理します。各関数workspaceを明示的に `suite_manifest.json` へ登録し、タグまたはチェック選択した関数だけをまとめて実行できます。全件確認が必要な場合は `スイート全件GREEN確認` を明示実行します。未設定時のmanifestは `unitTestRunner.outputRoot/suites/default/suite_manifest.json` です。
+
 通常はパネルから設定します。手動でWorkspace設定を書く場合の代表例は以下です。
 
 ```json
@@ -140,6 +142,7 @@ VS Code上からの操作手順は [VS Code利用手順書](docs/vscode_usage_gu
   "unitTestRunner.sourceRoot": "D:/work/product",
   "unitTestRunner.dswPath": "D:/work/product/Product.dsw",
   "unitTestRunner.outputRoot": "D:/work/unit_test_workspace",
+  "unitTestRunner.suiteManifestPath": "D:/work/unit_test_workspace/suites/default/suite_manifest.json",
   "unitTestRunner.defaultConfiguration": "Win32 Debug",
   "unitTestRunner.defaultProject": "Control"
 }
@@ -165,11 +168,27 @@ VSIXに `bin/win32-x64/unit-test-runner.exe` が同梱されている場合、`u
 - `UnitTestRunner: Run Build Probe`
 - `UnitTestRunner: Run Tests`
 - `UnitTestRunner: Prepare Evidence`
+- `UnitTestRunner: Register Current Function In Suite`
+- `UnitTestRunner: Open Suite`
+- `UnitTestRunner: Run Selected Suite Tests`
+- `UnitTestRunner: Run Suite By Tag`
+- `UnitTestRunner: Run All Suite Tests Require Green`
+- `UnitTestRunner: Open Suite Run Report`
 - `UnitTestRunner: Open Output Workspace`
 - `UnitTestRunner: Copy Last CLI Command`
 - `UnitTestRunner: Open Last Function Dossier`
 
 adapterは既定でJSON出力を使い、`unitTestRunner.finalizeDossierAfterAnalyze` が `true` の場合は解析時に `--finalize-dossier` を渡します。
+
+CLIだけでスイートを扱う場合は以下の形で実行します。
+
+```powershell
+$suite = "$env:TEMP\unitTestRunner-suite\default\suite_manifest.json"
+py -m unit_test_runner --json suite-register --suite $suite --workspace $out --tags regression,selected
+py -m unit_test_runner --json suite-list --suite $suite --tag selected
+py -m unit_test_runner --json suite-run --suite $suite --tag selected --dry-run
+py -m unit_test_runner --json suite-run --suite $suite --all --run --require-green
+```
 
 ## 配布
 

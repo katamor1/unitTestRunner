@@ -5,6 +5,7 @@ export interface AdapterSettings {
   sourceRoot: string;
   dswPath: string;
   outputRoot: string;
+  suiteManifestPath: string;
   defaultConfiguration: string;
   defaultProject?: string;
   vcvarsPath?: string;
@@ -35,6 +36,7 @@ export function readAdapterSettingsFromObject(raw: RawSettings, defaultSourceRoo
     sourceRoot: stringValue(nonEmptyString(raw.sourceRoot) ?? nonEmptyString(raw.workspaceRoot), defaultSourceRoot),
     dswPath: stringValue(raw.dswPath, ''),
     outputRoot: stringValue(raw.outputRoot, ''),
+    suiteManifestPath: stringValue(nonEmptyString(raw.suiteManifestPath), ''),
     defaultConfiguration: stringValue(nonEmptyString(raw.defaultConfiguration), 'Win32 Debug'),
     defaultProject: stringValue(nonEmptyString(raw.defaultProject) ?? nonEmptyString(raw.projectName), ''),
     vcvarsPath: stringValue(nonEmptyString(raw.vcvarsPath), ''),

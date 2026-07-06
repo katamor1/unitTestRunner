@@ -176,4 +176,31 @@ def build_parser() -> argparse.ArgumentParser:
     select_regression.add_argument("--reconciliation", required=True)
     select_regression.add_argument("--out", required=True)
 
+    suite_register = subcommands.add_parser("suite-register", help="Register a function workspace in a regression suite manifest.")
+    suite_register.add_argument("--suite", required=True)
+    suite_register.add_argument("--workspace", required=True)
+    suite_register.add_argument("--tags", default="")
+    suite_register.add_argument("--source-root")
+    suite_register.add_argument("--dsw")
+
+    suite_list = subcommands.add_parser("suite-list", help="List function workspaces registered in a suite manifest.")
+    suite_list.add_argument("--suite", required=True)
+    suite_list.add_argument("--tag")
+
+    suite_remove = subcommands.add_parser("suite-remove", help="Remove a registered function workspace from a suite manifest.")
+    suite_remove.add_argument("--suite", required=True)
+    suite_remove.add_argument("--entry-id", required=True)
+
+    suite_run = subcommands.add_parser("suite-run", help="Run or prepare evidence for registered suite entries.")
+    suite_run.add_argument("--suite", required=True)
+    selector = suite_run.add_mutually_exclusive_group(required=True)
+    selector.add_argument("--entry-id", action="append", dest="entry_ids")
+    selector.add_argument("--tag")
+    selector.add_argument("--all", action="store_true")
+    suite_run.add_argument("--run", action="store_true")
+    suite_run.add_argument("--dry-run", action="store_true")
+    suite_run.add_argument("--fail-fast", action="store_true")
+    suite_run.add_argument("--timeout", type=int, default=60)
+    suite_run.add_argument("--require-green", action="store_true")
+
     return parser

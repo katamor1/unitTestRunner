@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import { describe, it } from 'node:test';
 import * as path from 'path';
 
-import { buildAnalyzeFunctionInvocation, buildBuildProbeInvocation, buildFinalizeDossierInvocation, buildGenerateHarnessSkeletonInvocation, buildGenerateTestDesignInvocation, buildReanalyzeFunctionInvocation, buildRunTestsInvocation } from '../cli/commandBuilder';
+import { buildAnalyzeFunctionInvocation, buildBuildProbeInvocation, buildFinalizeDossierInvocation, buildGenerateHarnessSkeletonInvocation, buildGenerateTestDesignInvocation, buildReanalyzeFunctionInvocation, buildRunTestsInvocation, buildSuiteManifestPath, buildSuiteRegisterInvocation, buildSuiteRunInvocation } from '../cli/commandBuilder';
 import { runCliInvocation } from '../cli/cliRunner';
 import { formatCliFailureMessage, parseCliResult, parseCliResultReportPaths } from '../cli/cliResultParser';
 import { DEFAULT_CLI_PATH, resolveCliPath } from '../config/bundledCli';
@@ -213,6 +213,64 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.equal(runTests.requiresConfirmation, true);
   });
 
+  it('builds suite manifest, register, and run invocations from VS Code settings', () => {
+    const settings = readAdapterSettingsFromObject(
+      {
+        cliPath: 'unit-test-runner',
+        sourceRoot: 'C:\\work\\product',
+        dswPath: 'C:\\work\\product\\Product.dsw',
+        outputRoot: 'D:\\unit-test-output',
+        defaultConfiguration: 'Win32 Debug',
+        defaultProject: 'Control',
+        useJsonOutput: true,
+      },
+      'C:\\work\\product',
+    );
+    const target = {
+      sourcePath: 'C:\\work\\product\\src\\control.c',
+      sourceRelativePath: 'src/control.c',
+      functionName: 'Control_Update',
+      project: 'Control',
+      configuration: 'Win32 Debug',
+      outputWorkspace: 'D:\\unit-test-output\\Control_Update',
+    };
+
+    const suitePath = buildSuiteManifestPath(settings);
+    const register = buildSuiteRegisterInvocation(settings, target, ['selected', 'regression']);
+    const selectedRun = buildSuiteRunInvocation(settings, { entryIds: ['Control_Update-abc123'], run: true });
+    const tagRun = buildSuiteRunInvocation(settings, { tag: 'selected', run: false });
+    const allGreen = buildSuiteRunInvocation(settings, { all: true, run: true, requireGreen: true });
+
+    assert.equal(suitePath, path.join(settings.outputRoot, 'suites', 'default', 'suite_manifest.json'));
+    assert.deepEqual(register.args.slice(0, 4), ['--json', 'suite-register', '--suite', suitePath]);
+    assert.deepEqual(register.args.slice(register.args.indexOf('--workspace'), register.args.indexOf('--workspace') + 2), ['--workspace', target.outputWorkspace]);
+    assert.deepEqual(register.args.slice(register.args.indexOf('--tags'), register.args.indexOf('--tags') + 2), ['--tags', 'selected,regression']);
+    assert.deepEqual(register.args.slice(register.args.indexOf('--source-root'), register.args.indexOf('--source-root') + 2), ['--source-root', settings.sourceRoot]);
+    assert.deepEqual(register.args.slice(register.args.indexOf('--dsw'), register.args.indexOf('--dsw') + 2), ['--dsw', settings.dswPath]);
+    assert.deepEqual(selectedRun.args.slice(selectedRun.args.indexOf('--entry-id'), selectedRun.args.indexOf('--entry-id') + 2), ['--entry-id', 'Control_Update-abc123']);
+    assert.ok(selectedRun.args.includes('--run'));
+    assert.equal(selectedRun.requiresConfirmation, true);
+    assert.deepEqual(tagRun.args.slice(tagRun.args.indexOf('--tag'), tagRun.args.indexOf('--tag') + 2), ['--tag', 'selected']);
+    assert.ok(tagRun.args.includes('--dry-run'));
+    assert.ok(allGreen.args.includes('--all'));
+    assert.ok(allGreen.args.includes('--require-green'));
+  });
+
+  it('uses an explicit suiteManifestPath setting when present', () => {
+    const settings = readAdapterSettingsFromObject(
+      {
+        cliPath: 'unit-test-runner',
+        sourceRoot: 'C:\\work\\product',
+        dswPath: 'C:\\work\\product\\Product.dsw',
+        outputRoot: 'D:\\unit-test-output',
+        suiteManifestPath: 'E:\\suites\\release\\suite_manifest.json',
+      },
+      'C:\\work\\product',
+    );
+
+    assert.equal(buildSuiteManifestPath(settings), 'E:\\suites\\release\\suite_manifest.json');
+  });
+
   it('exposes vcvarsPath as an optional advanced setting for build execution', () => {
     const model = buildSettingsViewModel(
       {
@@ -371,12 +429,19 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
       'unitTestRunner.copyLastCommand',
       'unitTestRunner.openLastFunctionDossier',
       'unitTestRunner.generateHarnessSkeleton',
+      'unitTestRunner.registerCurrentFunctionInSuite',
+      'unitTestRunner.openSuite',
+      'unitTestRunner.runSelectedSuiteTests',
+      'unitTestRunner.runSuiteByTag',
+      'unitTestRunner.runAllSuiteTestsRequireGreen',
+      'unitTestRunner.openSuiteRunReport',
     ]) {
       assert.ok(commands.has(command), command);
       assert.ok(activationEvents.has(`onCommand:${command}`), command);
     }
     assert.equal(commandTitles.get('unitTestRunner.analyzeCurrentFunction'), 'UnitTestRunner: 現在関数を解析');
     assert.equal(commandTitles.get('unitTestRunner.openLastFunctionDossier'), 'UnitTestRunner: 最後の関数dossierを開く');
+    assert.equal(commandTitles.get('unitTestRunner.runAllSuiteTestsRequireGreen'), 'UnitTestRunner: スイート全件GREEN確認');
     assert.equal([...commandTitles.values()].some((title) => title.includes('Analyze Current Function')), false);
     assert.equal([...commandTitles.values()].some((title) => title.includes('Open Last Function Dossier')), false);
   });
@@ -387,6 +452,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     const contextMenus = packageJson.contributes.menus['editor/context'] as Array<{ command: string; when: string }>;
     const activityContainers = packageJson.contributes.viewsContainers.activitybar as Array<{ id: string; icon: string }>;
     const workflowViews = packageJson.contributes.views.unitTestRunner as Array<{ id: string; name: string; type?: string }>;
+    const configuration = packageJson.contributes.configuration.properties as Record<string, unknown>;
 
     assert.ok(activationEvents.has('onView:unitTestRunner.workflow'));
     assert.ok(activationEvents.has('onStartupFinished'));
@@ -394,6 +460,8 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.ok(contextMenus.some((item) => item.command === 'unitTestRunner.analyzeSelectedFunction' && item.when.includes('editorHasSelection')));
     assert.ok(activityContainers.some((item) => item.id === 'unitTestRunner' && item.icon === 'media/unit-test-runner.svg'));
     assert.ok(workflowViews.some((item) => item.id === 'unitTestRunner.workflow' && item.name === 'ワークフロー' && item.type === 'webview'));
+    assert.ok(workflowViews.some((item) => item.id === 'unitTestRunner.suite' && item.name === 'スイート' && item.type === 'webview'));
+    assert.ok(configuration['unitTestRunner.suiteManifestPath']);
   });
 
   it('packages a VS Code extension README for the details view', () => {
