@@ -1,9 +1,10 @@
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 
-import { SettingsAction, SettingsActionKind, SettingsFieldId, SettingsViewModel } from '../config/settingsViewModel';
+import { SettingsActionKind, SettingsFieldId, SettingsViewModel } from '../config/settingsViewModel';
 import { ReportPaths, resolveReportPaths } from '../reports/reportPathResolver';
 import { openReport } from '../reports/reportOpener';
+import { renderSettings } from './settingsPanelRenderer';
 import {
   buildWorkflowStepViews,
   completeWorkflowStep,
@@ -166,12 +167,38 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, setti
       margin-bottom: 10px;
       padding-bottom: 10px;
     }
-    .settings h2,
+    .settings-summary {
+      align-items: center;
+      cursor: pointer;
+      display: flex;
+      gap: 8px;
+      justify-content: space-between;
+      list-style: none;
+      margin-bottom: 8px;
+    }
+    .settings-summary::-webkit-details-marker {
+      display: none;
+    }
+    .settings h2 {
+      font-size: 12px;
+      margin: 0;
+      text-transform: uppercase;
+      color: var(--vscode-descriptionForeground);
+    }
     .optional h2 {
       font-size: 12px;
       margin: 0 0 8px 0;
       text-transform: uppercase;
       color: var(--vscode-descriptionForeground);
+    }
+    .settings-toggle {
+      color: var(--vscode-descriptionForeground);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .settings[open] .settings-collapsed-label,
+    .settings:not([open]) .settings-expanded-label {
+      display: none;
     }
     .settings-ready {
       color: var(--vscode-descriptionForeground);
@@ -359,32 +386,6 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, setti
 </html>`;
 }
 
-function renderSettings(settings: SettingsViewModel): string {
-  const readyLabel = settings.ready ? '設定確認は完了しています。' : '未設定の必須項目があります。';
-  return `<section class="settings">
-  <h2>設定</h2>
-  <p class="settings-ready">${escapeHtml(readyLabel)}</p>
-  ${settings.fields.map(renderSettingField).join('')}
-</section>`;
-}
-
-function renderSettingField(field: SettingsViewModel['fields'][number]): string {
-  const value = field.effectiveValue || '未設定';
-  const configured = field.configuredValue && field.configuredValue !== field.effectiveValue ? `<div class="setting-value">設定値: ${escapeHtml(field.configuredValue)}</div>` : '';
-  const messages = field.messages.map((message) => `<div class="setting-message">${escapeHtml(message)}</div>`).join('');
-  return `<section class="setting-field ${field.state}">
-  <div class="setting-title">
-    <h3>${escapeHtml(field.label)}</h3>
-    <span class="setting-status">${escapeHtml(field.statusLabel)}</span>
-  </div>
-  <p>${escapeHtml(field.description)}</p>
-  <div class="setting-value">${escapeHtml(value)}</div>
-  ${configured}
-  ${messages}
-  <div class="actions">${field.actions.map((action) => renderSettingAction(field.id, action)).join('')}</div>
-</section>`;
-}
-
 function renderStep(step: ReturnType<typeof buildWorkflowStepViews>[number]): string {
   const label = step.status === 'done' ? '完了' : step.status === 'current' ? '現在の推奨' : '未実施';
   return `<section class="step ${step.status}">
@@ -405,11 +406,6 @@ function renderAction(action: WorkflowAction): string {
     action.stepId ? `data-step-id="${escapeAttribute(action.stepId)}"` : '',
   ].filter(Boolean).join(' ');
   return `<button class="${classes}" ${attributes}>${escapeHtml(action.label)}</button>`;
-}
-
-function renderSettingAction(fieldId: SettingsFieldId, action: SettingsAction): string {
-  const classes = action.primary ? 'primary' : '';
-  return `<button class="${classes}" data-setting-kind="${escapeAttribute(action.kind)}" data-field-id="${escapeAttribute(fieldId)}">${escapeHtml(action.label)}</button>`;
 }
 
 function escapeHtml(value: string): string {

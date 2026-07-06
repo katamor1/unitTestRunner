@@ -20,29 +20,29 @@ def write_global_access(out_dir: Path | str, report: GlobalAccessReport) -> dict
 def render_global_access_markdown(payload: dict) -> str:
     function = payload["function"]
     lines = [
-        "# Global Access Report",
+        "# グローバルアクセスレポート",
         "",
-        "## Target",
-        f"- Source: {payload['source']['path']}",
-        f"- Function: {function['name']}",
-        f"- Status: {function['status']}",
+        "## 対象",
+        f"- ソース: {payload['source']['path']}",
+        f"- 関数: {function['name']}",
+        f"- 状態: {function['status']}",
         "",
-        "## File Scope Declarations",
+        "## ファイルスコープ宣言",
         "",
-        "| Name | Scope | Type | Confidence |",
+        "| 名前 | スコープ | 型 | 信頼度 |",
         "|---|---|---|---|",
     ]
     for declaration in payload["file_scope_declarations"]:
         lines.append(f"| {declaration['name']} | {declaration['scope']} | {declaration['type_raw']} | {declaration['confidence']} |")
-    lines.extend(["", "## Global Accesses", "", "| Name | Scope | Access | Evidence | Confidence |", "|---|---|---|---|---|"])
+    lines.extend(["", "## グローバルアクセス", "", "| 名前 | スコープ | アクセス | 根拠 | 信頼度 |", "|---|---|---|---|---|"])
     for access in payload["global_accesses"]:
         lines.append(f"| {access['name']} | {access['scope']} | {access['access_kind']} | `{access['evidence']}` | {access['confidence']} |")
-    lines.extend(["", "## Parameter Side Effects", "", "| Parameter | Access | Evidence | Confidence |", "|---|---|---|---|"])
+    lines.extend(["", "## パラメータ副作用候補", "", "| パラメータ | アクセス | 根拠 | 信頼度 |", "|---|---|---|---|"])
     for effect in payload["side_effect_candidates"]:
         lines.append(f"| {effect['name'] or ''} | {effect['kind']} | `{effect['evidence']}` | {effect['confidence']} |")
-    lines.extend(["", "## Warnings", ""])
+    lines.extend(["", "## 警告", ""])
     if payload["warnings"]:
         lines.extend(f"- {warning['code']}: {warning['message']}" for warning in payload["warnings"])
     else:
-        lines.append("- None")
+        lines.append("- なし")
     return "\n".join(lines) + "\n"

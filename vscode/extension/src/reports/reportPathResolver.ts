@@ -6,6 +6,8 @@ export interface ReportPaths {
   reviewChecklistMd?: string;
   unresolvedItemsMd?: string;
   nextActionsMd?: string;
+  testCaseDesignMd?: string;
+  testCaseDesignJson?: string;
   testCaseDesignCsv?: string;
   buildProbeReportMd?: string;
   testExecutionReportMd?: string;
@@ -23,6 +25,8 @@ export function resolveReportPaths(workspace: string): ReportPaths {
     reviewChecklistMd: path.join(reports, 'review_checklist.md'),
     unresolvedItemsMd: path.join(reports, 'unresolved_items.md'),
     nextActionsMd: path.join(reports, 'next_actions.md'),
+    testCaseDesignMd: path.join(reports, 'test_case_design.md'),
+    testCaseDesignJson: path.join(reports, 'test_case_design.json'),
     testCaseDesignCsv: path.join(reports, 'test_case_design.csv'),
     buildProbeReportMd: path.join(reports, 'build_probe_report.md'),
     testExecutionReportMd: path.join(reports, 'test_execution_report.md'),

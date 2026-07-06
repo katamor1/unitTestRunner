@@ -97,7 +97,7 @@ class HarnessSkeletonGenerationTests(unittest.TestCase):
             self.assertTrue(payload["unresolved_placeholders"])
             self.assertTrue(payload["build_hints"])
             self.assertTrue((Path(temp_dir) / "reports" / "harness_skeleton_report.json").exists())
-            self.assertIn("# Harness Skeleton Report", (Path(temp_dir) / "reports" / "harness_skeleton_report.md").read_text(encoding="utf-8"))
+            self.assertIn("# ハーネスひな形レポート", (Path(temp_dir) / "reports" / "harness_skeleton_report.md").read_text(encoding="utf-8"))
 
     def test_c90_compatibility_check_ignores_strings_and_matches_tokens(self):
         self.assertTrue(is_c90_compatible_text('const char *url = "http://example";\n'))

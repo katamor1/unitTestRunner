@@ -20,6 +20,7 @@
 - [配布用バイナリ作成手順書](docs/distribution_binary_build_guide.md)
 - [VS Code利用手順書](docs/vscode_usage_guide.md)
 - [v0.1スモークサンプル](docs/v0.1_smoke_sample.md)
+- [VC6 DSW/DSPパース実機スモーク](docs/vc6_dsw_dsp_parse_smoke.md)
 
 ## 開発と検証
 
@@ -67,6 +68,14 @@ py -m unit_test_runner analyze-function --workspace $fixture --dsw "$fixture\Pro
 py -m unit_test_runner build-probe --dossier "$out\reports\function_dossier.json" --dry-run
 py -m unit_test_runner generate-test-design --dossier "$out\reports\function_dossier.json"
 ```
+
+DSW/DSPパースだけを実機で確認し、JSON/Markdown成果物を残す場合は、以下のスモーク環境を使います。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_vc6_parse_smoke.ps1
+```
+
+詳細と実プロジェクトへの差し替え例は [VC6 DSW/DSPパース実機スモーク](docs/vc6_dsw_dsp_parse_smoke.md) を参照してください。
 
 レビュー用に確定済みdossierを作る場合は `--finalize-dossier` を付けます。
 

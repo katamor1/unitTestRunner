@@ -63,30 +63,30 @@ def _evidence_file(workspace: Path, relative: Path, kind: str, description: str)
 def render_evidence_package(manifest: EvidenceManifest, report: TestExecutionReport) -> str:
     summary = manifest.summary
     lines = [
-        "# Function Unit Test Evidence Package",
+        "# 関数単体テストエビデンスパッケージ",
         "",
-        "## Target",
-        f"- Function: {manifest.function_name}",
-        f"- Workspace: {manifest.workspace_root.as_posix()}",
-        f"- Build Probe Status: {summary.build_probe_status}",
-        f"- Test Execution Status: {summary.test_execution_status}",
+        "## 対象",
+        f"- 関数: {manifest.function_name}",
+        f"- workspace: {manifest.workspace_root.as_posix()}",
+        f"- ビルドプローブ状態: {summary.build_probe_status}",
+        f"- テスト実行状態: {summary.test_execution_status}",
         "",
-        "## Summary",
-        "| Item | Count |",
+        "## サマリ",
+        "| 項目 | 件数 |",
         "|---|---:|",
-        f"| Total Tests | {summary.total_tests} |",
-        f"| Passed | {summary.passed_tests} |",
-        f"| Failed | {summary.failed_tests} |",
-        f"| Inconclusive | {summary.inconclusive_tests} |",
-        f"| Review Items | {summary.unresolved_review_count} |",
+        f"| テスト総数 | {summary.total_tests} |",
+        f"| 成功 | {summary.passed_tests} |",
+        f"| 失敗 | {summary.failed_tests} |",
+        f"| 判定保留 | {summary.inconclusive_tests} |",
+        f"| レビュー項目 | {summary.unresolved_review_count} |",
         "",
-        "## Evidence Files",
-        "| File | Kind | SHA-256 |",
+        "## エビデンスファイル",
+        "| ファイル | 種別 | SHA-256 |",
         "|---|---|---|",
     ]
     for item in manifest.source_files + manifest.generated_files + manifest.build_reports + manifest.test_reports + manifest.logs:
         lines.append(f"| {item.path.as_posix()} | {item.file_kind} | {item.sha256 or ''} |")
-    lines.extend(["", "## Unresolved Review Items", "| Kind | Description | Suggested Action |", "|---|---|---|"])
+    lines.extend(["", "## 未解決レビュー項目", "| 種別 | 説明 | 推奨アクション |", "|---|---|---|"])
     for item in report.unresolved_review_items:
         lines.append(f"| {item.item_kind} | {item.description} | {item.suggested_action} |")
     return "\n".join(lines) + "\n"

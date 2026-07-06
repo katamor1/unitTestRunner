@@ -99,8 +99,8 @@ class Vc6WorkspaceDiscoveryCliTests(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             markdown = out.read_text(encoding="utf-8")
-            self.assertIn("# DSW Project Discovery Report", markdown)
-            self.assertIn("| Control | Control/Control.dsp | yes |", markdown)
+            self.assertIn("# DSWプロジェクト検出レポート", markdown)
+            self.assertIn("| Control | Control/Control.dsp | はい |", markdown)
             self.assertIn("| Control | Common |", markdown)
 
     def test_discover_projects_human_mode_prints_short_summary(self):

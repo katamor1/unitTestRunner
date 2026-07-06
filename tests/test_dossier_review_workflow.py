@@ -77,8 +77,13 @@ class DossierReviewWorkflowTests(unittest.TestCase):
                 self.assertTrue((reports / name).exists(), name)
 
             markdown = (reports / "function_dossier.md").read_text(encoding="utf-8")
-            self.assertIn("# Function Dossier: Control_Update", markdown)
-            self.assertIn("## Traceability", markdown)
+            self.assertIn("# 関数dossier: Control_Update", markdown)
+            self.assertIn("## トレーサビリティ", markdown)
+            self.assertIn("## 未解決項目", markdown)
+            self.assertIn("## 次のアクション", markdown)
+            self.assertIn("# レビュー確認リスト", (reports / "review_checklist.md").read_text(encoding="utf-8"))
+            self.assertIn("# 未解決項目", (reports / "unresolved_items.md").read_text(encoding="utf-8"))
+            self.assertIn("# 次のアクション", (reports / "next_actions.md").read_text(encoding="utf-8"))
             traceability_csv = (reports / "traceability_matrix.csv").read_text(encoding="utf-8")
             self.assertIn("source_kind,source_id,relation,target_kind,target_id", traceability_csv)
 

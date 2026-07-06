@@ -20,35 +20,35 @@ def write_boundary_equivalence_candidates(out_dir: Path | str, report: BoundaryE
 def render_boundary_equivalence_markdown(payload: dict) -> str:
     function = payload["function"]
     lines = [
-        "# Boundary / Equivalence Candidate Report",
+        "# 境界値・同値クラス候補レポート",
         "",
-        "## Target",
-        f"- Source: {payload['source']['path']}",
-        f"- Function: {function['name']}",
-        f"- Status: {function['status']}",
+        "## 対象",
+        f"- ソース: {payload['source']['path']}",
+        f"- 関数: {function['name']}",
+        f"- 状態: {function['status']}",
         "",
-        "## Input Value Candidates",
+        "## 入力値候補",
         "",
-        "| ID | Target | Value | Kind | Related Coverage | Evidence | Review |",
+        "| ID | 対象 | 値 | 種別 | 関連カバレッジ | 根拠 | レビュー要否 |",
         "|---|---|---|---|---|---|---|",
     ]
     for candidate in payload["input_candidates"]:
         lines.append(
             f"| {candidate['candidate_id']} | {candidate['target_name']} | {candidate['value_expression']} | {candidate['value_kind']} | "
-            f"{', '.join(candidate['related_coverage_ids'])} | `{candidate['evidence']}` | {'yes' if candidate['review_required'] else 'no'} |"
+            f"{', '.join(candidate['related_coverage_ids'])} | `{candidate['evidence']}` | {'はい' if candidate['review_required'] else 'いいえ'} |"
         )
-    lines.extend(["", "## Equivalence Classes", "", "| ID | Target | Class | Representative Values | Coverage | Review |", "|---|---|---|---|---|---|"])
+    lines.extend(["", "## 同値クラス", "", "| ID | 対象 | クラス | 代表値 | カバレッジ | レビュー要否 |", "|---|---|---|---|---|---|"])
     for item in payload["equivalence_classes"]:
-        lines.append(f"| {item['class_id']} | {item['target_name']} | {item['class_name']} | {', '.join(item['representative_values'])} | {', '.join(item['related_coverage_ids'])} | {'yes' if item['review_required'] else 'no'} |")
-    lines.extend(["", "## State Candidates", "", "| ID | Variable | Scope | Value | Setup Hint | Review |", "|---|---|---|---|---|---|"])
+        lines.append(f"| {item['class_id']} | {item['target_name']} | {item['class_name']} | {', '.join(item['representative_values'])} | {', '.join(item['related_coverage_ids'])} | {'はい' if item['review_required'] else 'いいえ'} |")
+    lines.extend(["", "## 状態候補", "", "| ID | 変数 | スコープ | 値 | セットアップヒント | レビュー要否 |", "|---|---|---|---|---|---|"])
     for candidate in payload["state_candidates"]:
-        lines.append(f"| {candidate['candidate_id']} | {candidate['variable_name']} | {candidate['scope']} | {candidate['value_expression']} | {candidate['setup_hint']} | {'yes' if candidate['review_required'] else 'no'} |")
-    lines.extend(["", "## Stub Return Candidates", "", "| ID | Call | Value | Purpose | Coverage | Review |", "|---|---|---|---|---|---|"])
+        lines.append(f"| {candidate['candidate_id']} | {candidate['variable_name']} | {candidate['scope']} | {candidate['value_expression']} | {candidate['setup_hint']} | {'はい' if candidate['review_required'] else 'いいえ'} |")
+    lines.extend(["", "## スタブ戻り値候補", "", "| ID | 呼び出し | 値 | 目的 | カバレッジ | レビュー要否 |", "|---|---|---|---|---|---|"])
     for candidate in payload["stub_return_candidates"]:
-        lines.append(f"| {candidate['candidate_id']} | {candidate['call_name']} | {candidate['value_expression']} | {candidate['purpose']} | {', '.join(candidate['related_coverage_ids'])} | {'yes' if candidate['review_required'] else 'no'} |")
-    lines.extend(["", "## Warnings", ""])
+        lines.append(f"| {candidate['candidate_id']} | {candidate['call_name']} | {candidate['value_expression']} | {candidate['purpose']} | {', '.join(candidate['related_coverage_ids'])} | {'はい' if candidate['review_required'] else 'いいえ'} |")
+    lines.extend(["", "## 警告", ""])
     if payload["warnings"]:
         lines.extend(f"- {warning['code']}: {warning['message']}" for warning in payload["warnings"])
     else:
-        lines.append("- None")
+        lines.append("- なし")
     return "\n".join(lines) + "\n"

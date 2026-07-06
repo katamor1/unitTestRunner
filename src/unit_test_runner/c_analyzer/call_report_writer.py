@@ -20,32 +20,32 @@ def write_call_report(out_dir: Path | str, report: CallReport) -> dict[str, Path
 def render_call_report_markdown(payload: dict) -> str:
     function = payload["function"]
     lines = [
-        "# Call Report",
+        "# 呼び出し解析レポート",
         "",
-        "## Target",
-        f"- Source: {payload['source']['path']}",
-        f"- Function: {function['name']}",
-        f"- Status: {function['status']}",
+        "## 対象",
+        f"- ソース: {payload['source']['path']}",
+        f"- 関数: {function['name']}",
+        f"- 状態: {function['status']}",
         "",
-        "## Calls",
+        "## 呼び出し",
         "",
-        "| ID | Name | Target Kind | Return Usage | Evidence | Confidence |",
+        "| ID | 名前 | 対象種別 | 戻り値の使われ方 | 根拠 | 信頼度 |",
         "|---|---|---|---|---|---|",
     ]
     for call in payload["calls"]:
         lines.append(f"| {call['call_id']} | {call['name']} | {call['target_kind']} | {call['return_usage']['usage_kind']} | `{call['evidence']}` | {call['confidence']} |")
-    lines.extend(["", "## Stub Candidates", "", "| Name | Reason | Return Control | Arg Capture | Side Effect | Tags |", "|---|---|---|---|---|---|"])
+    lines.extend(["", "## スタブ候補", "", "| 名前 | 理由 | 戻り値制御 | 引数記録 | 副作用制御 | タグ |", "|---|---|---|---|---|---|"])
     for candidate in payload["stub_candidates"]:
         lines.append(
-            f"| {candidate['name']} | {candidate['reason']} | {'yes' if candidate['return_value_control_needed'] else 'no'} | "
-            f"{'yes' if candidate['argument_capture_needed'] else 'no'} | {'yes' if candidate['side_effect_control_needed'] else 'no'} | {', '.join(candidate['tags'])} |"
+            f"| {candidate['name']} | {candidate['reason']} | {'はい' if candidate['return_value_control_needed'] else 'いいえ'} | "
+            f"{'はい' if candidate['argument_capture_needed'] else 'いいえ'} | {'はい' if candidate['side_effect_control_needed'] else 'いいえ'} | {', '.join(candidate['tags'])} |"
         )
-    lines.extend(["", "## Side Effect Candidates", "", "| Call | Kind | Evidence | Confidence |", "|---|---|---|---|"])
+    lines.extend(["", "## 副作用候補", "", "| 呼び出し | 種別 | 根拠 | 信頼度 |", "|---|---|---|---|"])
     for candidate in payload["side_effect_candidates"]:
         lines.append(f"| {candidate['call_name']} | {candidate['kind']} | `{candidate['evidence']}` | {candidate['confidence']} |")
-    lines.extend(["", "## Warnings", ""])
+    lines.extend(["", "## 警告", ""])
     if payload["warnings"]:
         lines.extend(f"- {warning['code']}: {warning['message']}" for warning in payload["warnings"])
     else:
-        lines.append("- None")
+        lines.append("- なし")
     return "\n".join(lines) + "\n"

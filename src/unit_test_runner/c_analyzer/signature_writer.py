@@ -20,46 +20,46 @@ def write_function_signature(out_dir: Path | str, signature: FunctionSignature) 
 def render_function_signature_markdown(payload: dict) -> str:
     function = payload["function"]
     lines = [
-        "# Function Signature Report",
+        "# 関数シグネチャレポート",
         "",
-        "## Target",
-        f"- Source: {payload['source']['path']}",
-        f"- Function: {function['name']}",
-        f"- Status: {function['status']}",
-        f"- Style: {function['style']}",
-        f"- Confidence: {function['confidence']}",
+        "## 対象",
+        f"- ソース: {payload['source']['path']}",
+        f"- 関数: {function['name']}",
+        f"- 状態: {function['status']}",
+        f"- 形式: {function['style']}",
+        f"- 信頼度: {function['confidence']}",
         "",
-        "## Signature",
+        "## シグネチャ",
         "",
         "```c",
         function["header_text_raw"],
         "```",
         "",
-        "## Return Type",
+        "## 戻り値型",
         "",
-        "| Item | Value |",
+        "| 項目 | 値 |",
         "|---|---|",
-        f"| Raw | {function['return_type']['raw']} |",
-        f"| Base Type | {function['return_type']['base_type']} |",
-        f"| Pointer Level | {function['return_type']['pointer_level']} |",
-        f"| Qualifiers | {', '.join(function['return_type']['qualifiers']) or 'None'} |",
+        f"| 生表記 | {function['return_type']['raw']} |",
+        f"| 基本型 | {function['return_type']['base_type']} |",
+        f"| ポインタ階層 | {function['return_type']['pointer_level']} |",
+        f"| 修飾子 | {', '.join(function['return_type']['qualifiers']) or 'なし'} |",
         "",
-        "## Parameters",
+        "## パラメータ",
         "",
-        "| Index | Name | Raw Type | Pointer | Array | Direction Hint | Confidence |",
+        "| 番号 | 名前 | 型表記 | ポインタ | 配列 | 入出力推定 | 信頼度 |",
         "|---:|---|---|---:|---|---|---|",
     ]
     for parameter in function["parameters"]:
         type_info = parameter["type"]
         lines.append(
             f"| {parameter['index']} | {parameter['name'] or ''} | {type_info['raw']} | {type_info['pointer_level']} | "
-            f"{'yes' if type_info['is_array'] else 'no'} | {parameter['direction_hint']} | {parameter['confidence']} |"
+            f"{'はい' if type_info['is_array'] else 'いいえ'} | {parameter['direction_hint']} | {parameter['confidence']} |"
         )
     if not function["parameters"]:
-        lines.append("| | None | | | | | |")
-    lines.extend(["", "## Warnings", ""])
+        lines.append("| | なし | | | | | |")
+    lines.extend(["", "## 警告", ""])
     if payload["warnings"]:
         lines.extend(f"- {warning['code']}: {warning['message']}" for warning in payload["warnings"])
     else:
-        lines.append("- None")
+        lines.append("- なし")
     return "\n".join(lines) + "\n"

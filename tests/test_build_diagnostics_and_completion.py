@@ -96,7 +96,7 @@ generated\\tests\\test_Control_Update.c(7) : error C2143: syntax error : missing
             self.assertTrue(any(action["action_kind"] == "generate_stub" for action in payload["completion_actions"]))
             self.assertEqual("not_run", iteration.to_dict()["iterations"][0]["progress"])
             self.assertTrue((workspace / "reports" / "build_completion_plan.json").exists())
-            self.assertIn("# Build Completion Plan", (workspace / "reports" / "build_completion_plan.md").read_text(encoding="utf-8"))
+            self.assertIn("# ビルド補完計画", (workspace / "reports" / "build_completion_plan.md").read_text(encoding="utf-8"))
 
     def test_symbol_normalizer_strips_leading_underscore_and_stdcall_suffix(self):
         self.assertEqual("ReadSensor", normalize_link_symbol("_ReadSensor").function_name_candidate)

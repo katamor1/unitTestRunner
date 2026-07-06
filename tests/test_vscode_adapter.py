@@ -22,13 +22,15 @@ class VscodeAdapterTests(unittest.TestCase):
             for command in manifest["contributes"]["commands"]
         }
         self.assertEqual(
-            "UnitTestRunner: Analyze Selected Function",
+            "UnitTestRunner: 選択関数を解析",
             commands["unitTestRunner.analyzeSelectedFunction"],
         )
         self.assertEqual(
-            "UnitTestRunner: Open Last Function Dossier",
+            "UnitTestRunner: 最後の関数dossierを開く",
             commands["unitTestRunner.openLastFunctionDossier"],
         )
+        self.assertFalse(any("Analyze Current Function" in title for title in commands.values()))
+        self.assertFalse(any("Open Last Function Dossier" in title for title in commands.values()))
 
         properties = manifest["contributes"]["configuration"]["properties"]
         for key in (
@@ -46,6 +48,7 @@ class VscodeAdapterTests(unittest.TestCase):
         extension = (EXTENSION_ROOT / "src" / "extension.ts").read_text(encoding="utf-8")
         runner = (EXTENSION_ROOT / "src" / "cli" / "cliRunner.ts").read_text(encoding="utf-8")
         builder = (EXTENSION_ROOT / "src" / "cli" / "commandBuilder.ts").read_text(encoding="utf-8")
+        opener = (EXTENSION_ROOT / "src" / "reports" / "reportOpener.ts").read_text(encoding="utf-8")
 
         self.assertIn("childProcess.spawn", runner)
         self.assertIn("shell: false", runner)
@@ -53,7 +56,8 @@ class VscodeAdapterTests(unittest.TestCase):
         self.assertIn("--finalize-dossier", builder)
         self.assertIn("unitTestRunner.analyzeSelectedFunction", extension)
         self.assertIn("unitTestRunner.openLastFunctionDossier", extension)
-        self.assertIn("markdown.showPreview", extension)
+        self.assertIn("openMarkdown", extension)
+        self.assertIn("markdown.showPreview", opener)
 
     def test_vscode_task_template_uses_json_and_finalized_review_flow(self):
         template = json.loads((REPO_ROOT / "templates" / "vscode" / "tasks.json").read_text(encoding="utf-8"))

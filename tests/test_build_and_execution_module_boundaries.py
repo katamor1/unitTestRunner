@@ -157,8 +157,8 @@ class BuildCompletionModuleBoundaryTests(unittest.TestCase):
         self.assertEqual("planned", report.status)
         self.assertEqual("not_run", report.iterations[0].progress)
         self.assertEqual(1, report.final_diagnostics_summary.missing_include_count)
-        self.assertIn("# Build Completion Plan", render_build_completion_markdown(plan))
-        self.assertIn("# Build Completion Iteration Report", render_build_completion_iteration_markdown(report))
+        self.assertIn("# ビルド補完計画", render_build_completion_markdown(plan))
+        self.assertIn("# ビルド補完イテレーションレポート", render_build_completion_iteration_markdown(report))
 
 
 class ExecutionEvidenceModuleBoundaryTests(unittest.TestCase):
@@ -248,8 +248,8 @@ class ExecutionEvidenceModuleBoundaryTests(unittest.TestCase):
             self.assertTrue((workspace / "reports" / "test_execution_report.json").exists())
             self.assertEqual("Control_Update", manifest.function_name)
             self.assertEqual("succeeded", manifest.summary.build_probe_status)
-            self.assertIn("# Test Execution Report", render_test_execution_markdown(report))
-            self.assertIn("# Function Unit Test Evidence Package", render_evidence_package_markdown(manifest, report))
+            self.assertIn("# テスト実行レポート", render_test_execution_markdown(report))
+            self.assertIn("# 関数単体テストエビデンスパッケージ", render_evidence_package_markdown(manifest, report))
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 {
   "name": "unit-test-runner-vscode",
   "displayName": "Unit Test Runner",
-  "description": "Thin VS Code adapter for the unit-test-runner CLI.",
+  "description": "unit-test-runner CLIを呼び出す薄いVS Codeアダプターです。",
   "version": "0.1.0",
   "publisher": "local",
   "license": "UNLICENSED",
@@ -41,71 +41,71 @@
     "commands": [
       {
         "command": "unitTestRunner.analyzeCurrentFunction",
-        "title": "UnitTestRunner: Analyze Current Function"
+        "title": "UnitTestRunner: 現在関数を解析"
       },
       {
         "command": "unitTestRunner.analyzeSelectedFunction",
-        "title": "UnitTestRunner: Analyze Selected Function"
+        "title": "UnitTestRunner: 選択関数を解析"
       },
       {
         "command": "unitTestRunner.reanalyzeCurrentFunction",
-        "title": "UnitTestRunner: Reanalyze Current Function"
+        "title": "UnitTestRunner: 現在関数を再解析"
       },
       {
         "command": "unitTestRunner.finalizeDossier",
-        "title": "UnitTestRunner: Finalize Dossier"
+        "title": "UnitTestRunner: dossierを確定"
       },
       {
         "command": "unitTestRunner.openFunctionDossier",
-        "title": "UnitTestRunner: Open Function Dossier"
+        "title": "UnitTestRunner: 関数dossierを開く"
       },
       {
         "command": "unitTestRunner.openReviewChecklist",
-        "title": "UnitTestRunner: Open Review Checklist"
+        "title": "UnitTestRunner: レビュー確認リストを開く"
       },
       {
         "command": "unitTestRunner.openNextActions",
-        "title": "UnitTestRunner: Open Next Actions"
+        "title": "UnitTestRunner: 次のアクションを開く"
       },
       {
         "command": "unitTestRunner.openChangeImpactReport",
-        "title": "UnitTestRunner: Open Change Impact Report"
+        "title": "UnitTestRunner: 変更影響レポートを開く"
       },
       {
         "command": "unitTestRunner.openRegressionSelection",
-        "title": "UnitTestRunner: Open Regression Selection"
+        "title": "UnitTestRunner: 回帰テスト選定を開く"
       },
       {
         "command": "unitTestRunner.generateTestDesign",
-        "title": "UnitTestRunner: Generate Test Design"
+        "title": "UnitTestRunner: テスト設計を生成"
       },
       {
         "command": "unitTestRunner.buildProbeDryRun",
-        "title": "UnitTestRunner: Build Probe Dry Run"
+        "title": "UnitTestRunner: ビルドプローブをdry-run"
       },
       {
         "command": "unitTestRunner.runBuildProbe",
-        "title": "UnitTestRunner: Run Build Probe"
+        "title": "UnitTestRunner: ビルドプローブを実行"
       },
       {
         "command": "unitTestRunner.runTests",
-        "title": "UnitTestRunner: Run Tests"
+        "title": "UnitTestRunner: テストを実行"
       },
       {
         "command": "unitTestRunner.prepareEvidence",
-        "title": "UnitTestRunner: Prepare Evidence"
+        "title": "UnitTestRunner: エビデンスを準備"
       },
       {
         "command": "unitTestRunner.openOutputWorkspace",
-        "title": "UnitTestRunner: Open Output Workspace"
+        "title": "UnitTestRunner: 出力workspaceを開く"
       },
       {
         "command": "unitTestRunner.copyLastCommand",
-        "title": "UnitTestRunner: Copy Last CLI Command"
+        "title": "UnitTestRunner: 最後のCLIコマンドをコピー"
       },
       {
         "command": "unitTestRunner.openLastFunctionDossier",
-        "title": "UnitTestRunner: Open Last Function Dossier"
+        "title": "UnitTestRunner: 最後の関数dossierを開く"
       }
     ],
     "menus": {
@@ -135,7 +135,7 @@
       "unitTestRunner": [
         {
           "id": "unitTestRunner.workflow",
-          "name": "Workflow",
+          "name": "ワークフロー",
           "type": "webview"
         }
       ]
@@ -146,77 +146,77 @@
         "unitTestRunner.cliPath": {
           "type": "string",
           "default": "unit-test-runner",
-          "description": "Optional path to unit-test-runner CLI or executable. The bundled Windows x64 executable is used first when this is empty or left as the default."
+          "description": "unit-test-runner CLIまたは実行ファイルのパスです。空または既定値の場合は、同梱Windows x64実行ファイルを優先します。"
         },
         "unitTestRunner.sourceRoot": {
           "type": "string",
           "default": "",
-          "description": "Production source root. Defaults to the first VS Code workspace folder."
+          "description": "本番ソースのルートフォルダです。未設定時は、VS Codeで開いた先頭workspace folderを使います。"
         },
         "unitTestRunner.workspaceRoot": {
           "type": "string",
           "default": "",
-          "description": "Deprecated alias for unitTestRunner.sourceRoot."
+          "description": "unitTestRunner.sourceRoot の旧設定名です。新規設定では sourceRoot を使ってください。"
         },
         "unitTestRunner.dswPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the VC6 .dsw file."
+          "description": "対象VC6 .dswファイルのパスです。"
         },
         "unitTestRunner.outputRoot": {
           "type": "string",
           "default": "",
-          "description": "Output root for generated function dossiers."
+          "description": "関数dossierなどの生成物を書き出す外部出力ルートです。"
         },
         "unitTestRunner.defaultConfiguration": {
           "type": "string",
           "default": "Win32 Debug",
-          "description": "Default VC6 configuration for analyze-function."
+          "description": "analyze-function に既定で渡すVC6構成名です。"
         },
         "unitTestRunner.defaultProject": {
           "type": "string",
           "default": "",
-          "description": "Optional VC6 project name when a source belongs to multiple projects."
+          "description": "ソースが複数プロジェクトに属する場合に使う既定VC6プロジェクト名です。"
         },
         "unitTestRunner.projectName": {
           "type": "string",
           "default": "",
-          "description": "Deprecated alias for unitTestRunner.defaultProject."
+          "description": "unitTestRunner.defaultProject の旧設定名です。新規設定では defaultProject を使ってください。"
         },
         "unitTestRunner.autoOpenDossier": {
           "type": "boolean",
           "default": true,
-          "description": "Open function_dossier.md after successful analysis."
+          "description": "解析成功後に function_dossier.md を自動で開きます。"
         },
         "unitTestRunner.finalizeDossierAfterAnalyze": {
           "type": "boolean",
           "default": true,
-          "description": "Pass --finalize-dossier to analyze-function."
+          "description": "analyze-function 実行時に --finalize-dossier を渡します。"
         },
         "unitTestRunner.useJsonOutput": {
           "type": "boolean",
           "default": true,
-          "description": "Pass --json to CLI commands."
+          "description": "CLIコマンドに --json を渡し、結果パスを機械可読形式で受け取ります。"
         },
         "unitTestRunner.showOutputChannel": {
           "type": "boolean",
           "default": true,
-          "description": "Show the Unit Test Runner output channel when running commands."
+          "description": "コマンド実行時に Unit Test Runner 出力チャンネルを表示します。"
         },
         "unitTestRunner.runBuildProbeRequiresConfirmation": {
           "type": "boolean",
           "default": true,
-          "description": "Require confirmation before running build probe execution."
+          "description": "ビルドプローブの実行前に確認ダイアログを表示します。"
         },
         "unitTestRunner.runTestsRequiresConfirmation": {
           "type": "boolean",
           "default": true,
-          "description": "Require confirmation before running generated tests."
+          "description": "生成テストの実行前に確認ダイアログを表示します。"
         },
         "unitTestRunner.commandTimeoutSeconds": {
           "type": "number",
           "default": 300,
-          "description": "CLI command timeout in seconds."
+          "description": "CLIコマンドのタイムアウト秒数です。"
         }
       }
     }

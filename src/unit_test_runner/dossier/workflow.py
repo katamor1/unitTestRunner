@@ -30,7 +30,7 @@ from ..execution import prepare_test_execution_evidence
 from ..path_utils import normalize_relative
 from ..test_design import generate_test_design
 from ..test_design.test_case_design_generator import generate_test_case_design, generate_test_case_design_from_payloads
-from ..test_design.test_case_design_writer import write_test_case_design_format, write_test_case_design_report
+from ..test_design.test_case_design_writer import write_test_case_design_format, write_test_case_design_payload_format, write_test_case_design_report
 from ..vc6 import select_project_context
 
 
@@ -77,7 +77,7 @@ def _analysis_phase_rank(phase: str) -> int:
 
 def _markdown_list(items: list[Any], formatter=str) -> str:
     if not items:
-        return "- None\n"
+        return "- なし\n"
     return "".join(f"- {formatter(item)}\n" for item in items)
 
 
@@ -86,64 +86,64 @@ def _write_markdown_reports(out_dir: Path, dossier: dict[str, Any], copied_files
     function = dossier["function"]
     design = dossier["test_design"]
     md = [
-        f"# Function Dossier: {function['name']}",
+        f"# 関数dossier: {function['name']}",
         "",
-        "## Target",
-        f"- Source: `{dossier['target']['source']}`",
-        f"- Function: `{dossier['target']['function']}`",
-        f"- Configuration: `{dossier['target']['configuration']}`",
+        "## 対象",
+        f"- ソース: `{dossier['target']['source']}`",
+        f"- 関数: `{dossier['target']['function']}`",
+        f"- 構成: `{dossier['target']['configuration']}`",
         "",
-        "## Build Context",
-        _markdown_list(dossier["build_context"].get("defines", []), lambda item: f"Define: `{item}`"),
-        _markdown_list(dossier["build_context"].get("include_dirs", []), lambda item: f"Include: `{item}`"),
-        "## Function",
-        f"- Return type: `{function['return_type']}`",
+        "## ビルドコンテキスト",
+        _markdown_list(dossier["build_context"].get("defines", []), lambda item: f"define: `{item}`"),
+        _markdown_list(dossier["build_context"].get("include_dirs", []), lambda item: f"include: `{item}`"),
+        "## 関数",
+        f"- 戻り値型: `{function['return_type']}`",
         _markdown_list(function.get("parameters", []), lambda item: f"`{item['type']} {item['name']}`"),
-        "## Globals",
-        _markdown_list(function.get("globals_read", []), lambda item: f"Read: `{item}`"),
-        _markdown_list(function.get("globals_written", []), lambda item: f"Write: `{item}`"),
-        "## Calls",
-        _markdown_list(function.get("external_calls", []), lambda item: f"`{item['name']}` at line {item['line']}"),
-        "## Branches",
+        "## グローバル",
+        _markdown_list(function.get("globals_read", []), lambda item: f"読み取り: `{item}`"),
+        _markdown_list(function.get("globals_written", []), lambda item: f"書き込み: `{item}`"),
+        "## 呼び出し",
+        _markdown_list(function.get("external_calls", []), lambda item: f"`{item['name']}` {item['line']}行"),
+        "## 分岐",
         _markdown_list(function.get("branches", []), lambda item: f"{item['id']}: `{item['condition']}`"),
-        "## Stub Candidates",
+        "## スタブ候補",
         _markdown_list(design.get("stub_candidates", []), lambda item: f"`{item['name']}`"),
     ]
     (reports / "function_dossier.md").write_text("\n".join(md) + "\n", encoding="utf-8")
     (reports / "project_membership.md").write_text(
-        "# Project Membership\n\n" + _markdown_list(dossier["project_membership"], lambda item: f"{item['project_name']} / {item['configuration']}"),
+        "# プロジェクト所属\n\n" + _markdown_list(dossier["project_membership"], lambda item: f"{item['project_name']} / {item['configuration']}"),
         encoding="utf-8",
     )
     _write_json(reports / "build_context.json", dossier["build_context"])
-    (reports / "source_file_set.md").write_text("# Source File Set\n\n" + _markdown_list(copied_files, lambda item: f"`{item}`"), encoding="utf-8")
+    (reports / "source_file_set.md").write_text("# ソースファイルセット\n\n" + _markdown_list(copied_files, lambda item: f"`{item}`"), encoding="utf-8")
     (reports / "global_access_report.md").write_text(
-        "# Global Access\n\n## Read\n" + _markdown_list(function.get("globals_read", [])) + "\n## Written\n" + _markdown_list(function.get("globals_written", [])),
+        "# グローバルアクセス\n\n## 読み取り\n" + _markdown_list(function.get("globals_read", [])) + "\n## 書き込み\n" + _markdown_list(function.get("globals_written", [])),
         encoding="utf-8",
     )
     (reports / "call_report.md").write_text(
-        "# Calls\n\n" + _markdown_list(function.get("external_calls", []), lambda item: f"`{item['name']}` at line {item['line']}"),
+        "# 呼び出し\n\n" + _markdown_list(function.get("external_calls", []), lambda item: f"`{item['name']}` {item['line']}行"),
         encoding="utf-8",
     )
     (reports / "branch_condition_report.md").write_text(
-        "# Branches and Conditions\n\n" + _markdown_list(function.get("branches", []), lambda item: f"{item['id']}: `{item['condition']}`"),
+        "# 分岐と条件\n\n" + _markdown_list(function.get("branches", []), lambda item: f"{item['id']}: `{item['condition']}`"),
         encoding="utf-8",
     )
     (reports / "coverage_design.md").write_text(
-        "# Coverage Design\n\n"
+        "# カバレッジ設計\n\n"
         + _markdown_list(design.get("branch_coverage_items", []), lambda item: f"{item['id']}: {item['description']}")
         + "\n"
         + _markdown_list(design.get("condition_coverage_items", []), lambda item: item["description"]),
         encoding="utf-8",
     )
     (reports / "boundary_equivalence_candidates.md").write_text(
-        "# Boundary and Equivalence Candidates\n\n## Boundary\n"
+        "# 境界値・同値クラス候補\n\n## 境界値\n"
         + _markdown_list(design.get("boundary_value_candidates", []), lambda item: item["value"])
-        + "\n## Equivalence\n"
+        + "\n## 同値クラス\n"
         + _markdown_list(design.get("equivalence_class_candidates", []), lambda item: item["value"]),
         encoding="utf-8",
     )
     (reports / "stub_candidates.md").write_text(
-        "# Stub Candidates\n\n" + _markdown_list(design.get("stub_candidates", []), lambda item: f"`{item['name']}`"),
+        "# スタブ候補\n\n" + _markdown_list(design.get("stub_candidates", []), lambda item: f"`{item['name']}`"),
         encoding="utf-8",
     )
 
@@ -466,6 +466,10 @@ def generate_build_workspace_from_workspace(
 def generate_test_design_from_dossier(dossier_path: Path | str, output_format: str = "csv", out: Path | str | None = None) -> Path | dict[str, Path]:
     dossier_path = Path(dossier_path)
     dossier = json.loads(dossier_path.read_text(encoding="utf-8"))
+    existing_design = _existing_test_case_design_payload(dossier, dossier_path)
+    if existing_design is not None:
+        target = _test_design_target(dossier_path.parent, output_format, out)
+        return write_test_case_design_payload_format(target, existing_design, output_format)
     report = _generate_test_case_report_from_dossier_payload(dossier, dossier_path)
     target = _test_design_target(dossier_path.parent, output_format, out)
     return write_test_case_design_format(target, report, output_format)
@@ -488,19 +492,68 @@ def generate_test_design_from_reports(
 
 
 def _generate_test_case_report_from_dossier_payload(dossier: dict[str, Any], dossier_path: Path):
-    try:
-        paths = [
-            Path(dossier["function_signature"]["json"]),
-            Path(dossier["global_access"]["json"]),
-            Path(dossier["call_report"]["json"]),
-            Path(dossier["coverage_design"]["json"]),
-            Path(dossier["boundary_equivalence_candidates"]["json"]),
-        ]
-    except KeyError:
+    paths = [
+        _dossier_artifact_path(dossier, dossier_path, "function_signature"),
+        _dossier_artifact_path(dossier, dossier_path, "global_access"),
+        _dossier_artifact_path(dossier, dossier_path, "call_report"),
+        _dossier_artifact_path(dossier, dossier_path, "coverage_design"),
+        _dossier_artifact_path(dossier, dossier_path, "boundary_equivalence_candidates"),
+    ]
+    if any(path is None for path in paths):
         target = dossier_path.with_name("test_case_design.csv")
         write_test_case_design(target, dossier)
         return _legacy_report_from_csv_dossier(dossier, dossier_path)
-    return generate_test_case_design_from_payloads(*[_read_json(path) for path in paths])
+    return generate_test_case_design_from_payloads(*[_read_json(path) for path in paths if path is not None])
+
+
+def _existing_test_case_design_payload(dossier: dict[str, Any], dossier_path: Path) -> dict[str, Any] | None:
+    path = _dossier_artifact_path(dossier, dossier_path, "test_case_design")
+    if path is None or not path.exists():
+        return None
+    try:
+        payload = _read_json(path)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if isinstance(payload.get("test_cases"), list):
+        return payload
+    return None
+
+
+def _dossier_artifact_path(dossier: dict[str, Any], dossier_path: Path, artifact_kind: str) -> Path | None:
+    legacy = dossier.get(artifact_kind)
+    if isinstance(legacy, dict) and isinstance(legacy.get("json"), str):
+        return _resolve_dossier_relative_path(dossier, dossier_path, legacy["json"])
+
+    for artifact in dossier.get("artifact_index", []):
+        if not isinstance(artifact, dict):
+            continue
+        if artifact.get("artifact_kind") != artifact_kind or not artifact.get("exists"):
+            continue
+        artifact_path = artifact.get("path")
+        if isinstance(artifact_path, str):
+            return _resolve_dossier_relative_path(dossier, dossier_path, artifact_path)
+
+    fallback = dossier_path.parent / f"{artifact_kind}.json"
+    if fallback.exists():
+        return fallback
+    return None
+
+
+def _resolve_dossier_relative_path(dossier: dict[str, Any], dossier_path: Path, raw_path: str) -> Path:
+    path = Path(raw_path)
+    if path.is_absolute():
+        return path
+
+    candidates: list[Path] = []
+    workspace_root = dossier.get("workspace_root")
+    if isinstance(workspace_root, str) and workspace_root:
+        candidates.append(Path(workspace_root) / path)
+    candidates.append(dossier_path.parent / path)
+    candidates.append(dossier_path.parent.parent / path)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0] if candidates else path
 
 
 def _legacy_report_from_csv_dossier(dossier: dict[str, Any], dossier_path: Path):

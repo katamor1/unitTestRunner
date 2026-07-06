@@ -220,6 +220,28 @@ class FunctionAnalysisReportTests(unittest.TestCase):
                 if filename.endswith(".json"):
                     json.loads((reports / filename).read_text(encoding="utf-8"))
 
+            japanese_headings = {
+                "function_signature.md": "# 関数シグネチャレポート",
+                "global_access.md": "# グローバルアクセスレポート",
+                "call_report.md": "# 呼び出し解析レポート",
+                "coverage_design.md": "# カバレッジ設計レポート",
+                "boundary_equivalence_candidates.md": "# 境界値・同値クラス候補レポート",
+                "test_case_design.md": "# テストケース設計レポート",
+                "harness_skeleton_report.md": "# ハーネスひな形レポート",
+                "build_workspace_report.md": "# ビルドワークスペースレポート",
+                "build_probe_report.md": "# ビルドプローブレポート",
+                "build_completion_plan.md": "# ビルド補完計画",
+                "build_completion_iteration_report.md": "# ビルド補完イテレーションレポート",
+                "test_execution_report.md": "# テスト実行レポート",
+                "evidence_package.md": "# 関数単体テストエビデンスパッケージ",
+            }
+            for filename, heading in japanese_headings.items():
+                markdown = (reports / filename).read_text(encoding="utf-8")
+                self.assertIn(heading, markdown, filename)
+                self.assertFalse(markdown.startswith("# Function "), filename)
+                self.assertFalse(markdown.startswith("# Test "), filename)
+                self.assertFalse(markdown.startswith("# Build "), filename)
+
             dossier = json.loads((reports / "function_dossier.json").read_text(encoding="utf-8"))
             self.assertIn("function_signature", dossier)
             self.assertIn("global_access", dossier)

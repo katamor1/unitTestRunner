@@ -95,7 +95,7 @@ class CFunctionLocationTests(unittest.TestCase):
 
         self.assertEqual("0.1", payload["schema_version"])
         self.assertEqual("StaticFunction", payload["function"]["name"])
-        self.assertIn("# Function Location Report", markdown)
+        self.assertIn("# 関数位置レポート", markdown)
         self.assertIn("StaticFunction", slice_text)
 
     def test_analyze_function_generates_function_location_artifacts(self):

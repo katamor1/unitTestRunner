@@ -27,7 +27,10 @@ def write_test_case_design_report(out_dir: Path | str, report: TestCaseDesignRep
 
 
 def write_test_case_design_format(target: Path, report: TestCaseDesignReport, output_format: str) -> Path | dict[str, Path]:
-    payload = report.to_dict()
+    return write_test_case_design_payload_format(target, report.to_dict(), output_format)
+
+
+def write_test_case_design_payload_format(target: Path, payload: dict, output_format: str) -> Path | dict[str, Path]:
     if output_format == "all":
         root = target
         root.mkdir(parents=True, exist_ok=True)

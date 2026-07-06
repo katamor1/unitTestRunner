@@ -37,7 +37,7 @@ function reportsFromParsed(parsed: Record<string, unknown>, fallback: ReportPath
   const review = objectValue(data.review);
   const reportSource = optionalObjectValue(parsed.reports) ?? optionalObjectValue(data.reports) ?? optionalObjectValue(review.reports);
   if (!reportSource) {
-    warnings.push('CLI JSON did not include report paths; using conventional report paths.');
+    warnings.push('CLI JSONにレポートパスが含まれていません。既定のパスを使います。');
     return fallback;
   }
   const missing = [
@@ -47,7 +47,7 @@ function reportsFromParsed(parsed: Record<string, unknown>, fallback: ReportPath
     ['next_actions', 'nextActionsMd'],
   ].filter(([jsonKey]) => stringValue(reportSource[jsonKey]) === undefined);
   if (missing.length > 0) {
-    warnings.push(`CLI JSON omitted report paths: ${missing.map(([jsonKey]) => jsonKey).join(', ')}; using conventional paths.`);
+    warnings.push(`CLI JSONにレポートパスが含まれていません: ${missing.map(([jsonKey]) => jsonKey).join(', ')}。既定のパスを使います。`);
   }
   return {
     workspace: fallback.workspace,
@@ -55,6 +55,8 @@ function reportsFromParsed(parsed: Record<string, unknown>, fallback: ReportPath
     reviewChecklistMd: stringValue(reportSource.review_checklist) ?? fallback.reviewChecklistMd,
     unresolvedItemsMd: stringValue(reportSource.unresolved_items) ?? fallback.unresolvedItemsMd,
     nextActionsMd: stringValue(reportSource.next_actions) ?? fallback.nextActionsMd,
+    testCaseDesignMd: stringValue(reportSource.test_case_design_md) ?? fallback.testCaseDesignMd,
+    testCaseDesignJson: stringValue(reportSource.test_case_design_json) ?? fallback.testCaseDesignJson,
     testCaseDesignCsv: stringValue(reportSource.test_case_design_csv) ?? fallback.testCaseDesignCsv,
     buildProbeReportMd: stringValue(reportSource.build_probe_report_md) ?? fallback.buildProbeReportMd,
     testExecutionReportMd: stringValue(reportSource.test_execution_report_md) ?? fallback.testExecutionReportMd,

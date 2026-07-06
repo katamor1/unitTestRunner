@@ -95,7 +95,7 @@ export function deactivate(): void {
 async function analyzeActiveFunction(context: vscode.ExtensionContext, output: vscode.OutputChannel, workflowPanel: WorkflowPanelProvider): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    throw new Error('Open a C source file before running UnitTestRunner.');
+    throw new Error('UnitTestRunnerを実行する前にCソースファイルを開いてください。');
   }
   const settings = readConfig(context);
   showValidation(settings);
@@ -126,7 +126,7 @@ async function analyzeActiveFunction(context: vscode.ExtensionContext, output: v
 async function reanalyzeActiveFunction(context: vscode.ExtensionContext, output: vscode.OutputChannel, workflowPanel: WorkflowPanelProvider): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    throw new Error('Open a C source file before running UnitTestRunner.');
+    throw new Error('UnitTestRunnerを実行する前にCソースファイルを開いてください。');
   }
   const settings = readConfig(context);
   showValidation(settings);
@@ -199,7 +199,7 @@ function showValidation(settings: AdapterSettings): void {
     }
   }
   if (!validation.ok) {
-    throw new Error(`Invalid UnitTestRunner settings: ${validation.warnings.map((warning) => warning.message).join(' ')}`);
+    throw new Error(`UnitTestRunnerの設定が不足しています: ${validation.warnings.map((warning) => warning.message).join(' ')}`);
   }
 }
 
@@ -325,12 +325,12 @@ function defaultUriForField(value: string, fileSelection: boolean): vscode.Uri |
 
 function filePickerFilters(fieldId: SettingsFieldId): Record<string, string[]> {
   if (fieldId === 'dswPath') {
-    return { 'Visual C++ Workspace': ['dsw'], 'All Files': ['*'] };
+    return { 'Visual C++ workspace': ['dsw'], 'すべてのファイル': ['*'] };
   }
   if (fieldId === 'cliPath') {
-    return { Executable: ['exe'], 'All Files': ['*'] };
+    return { '実行ファイル': ['exe'], 'すべてのファイル': ['*'] };
   }
-  return { 'All Files': ['*'] };
+  return { 'すべてのファイル': ['*'] };
 }
 
 function inputPrompt(fieldId: SettingsFieldId): string {
@@ -365,11 +365,11 @@ async function resolveFunctionName(editor: vscode.TextEditor): Promise<string> {
     return resolved;
   }
   const prompt = await vscode.window.showInputBox({
-    prompt: 'Function name to analyze',
-    validateInput: (value) => (/^[A-Za-z_]\w*$/.test(value) ? undefined : 'Enter a C function identifier.'),
+    prompt: '解析する関数名を入力してください。',
+    validateInput: (value) => (/^[A-Za-z_]\w*$/.test(value) ? undefined : 'Cの関数識別子を入力してください。'),
   });
   if (!prompt) {
-    throw new Error('Function analysis cancelled.');
+    throw new Error('関数解析をキャンセルしました。');
   }
   return prompt;
 }
@@ -402,9 +402,9 @@ async function runWorkspaceCommand(context: vscode.ExtensionContext, output: vsc
 
 async function executeInvocation(context: vscode.ExtensionContext, output: vscode.OutputChannel, invocation: CliInvocation, outputWorkspace: string, workflowPanel: WorkflowPanelProvider): Promise<ReportPaths> {
   if (invocation.requiresConfirmation) {
-    const selected = await vscode.window.showWarningMessage('This command may execute generated tools or tests. Continue?', { modal: true }, 'Continue');
-    if (selected !== 'Continue') {
-      throw new Error('UnitTestRunner command cancelled.');
+    const selected = await vscode.window.showWarningMessage('このコマンドは生成されたツールまたはテストを実行する可能性があります。続行しますか？', { modal: true }, '続行');
+    if (selected !== '続行') {
+      throw new Error('UnitTestRunnerコマンドをキャンセルしました。');
     }
   }
   await context.globalState.update(LAST_COMMAND_KEY, invocation.displayCommand);
@@ -421,12 +421,12 @@ async function executeInvocation(context: vscode.ExtensionContext, output: vscod
   output.append(result.stdout);
   output.append(result.stderr);
   if (result.timedOut) {
-    await recordWorkflowError(context, workflowPanel, 'unit-test-runner timed out.');
-    throw new Error('unit-test-runner timed out.');
+    await recordWorkflowError(context, workflowPanel, 'unit-test-runnerがタイムアウトしました。');
+    throw new Error('unit-test-runnerがタイムアウトしました。');
   }
   if (result.exitCode !== 0) {
-    await recordWorkflowError(context, workflowPanel, `unit-test-runner exited with code ${result.exitCode ?? 'unknown'}.`);
-    throw new Error(`unit-test-runner exited with code ${result.exitCode ?? 'unknown'}.`);
+    await recordWorkflowError(context, workflowPanel, `unit-test-runnerが終了コード ${result.exitCode ?? 'unknown'} で終了しました。`);
+    throw new Error(`unit-test-runnerが終了コード ${result.exitCode ?? 'unknown'} で終了しました。`);
   }
   const parsed = parseCliResult(result.stdout, result.stderr, outputWorkspace);
   await context.globalState.update(LAST_WORKSPACE_KEY, parsed.reports.workspace);
@@ -468,9 +468,9 @@ async function lastWorkspace(context: vscode.ExtensionContext): Promise<string> 
   if (workspace) {
     return workspace;
   }
-  const selected = await vscode.window.showInputBox({ prompt: 'Output workspace path' });
+  const selected = await vscode.window.showInputBox({ prompt: '出力workspaceのパスを入力してください。' });
   if (!selected) {
-    throw new Error('Output workspace is required.');
+    throw new Error('出力workspaceの指定が必要です。');
   }
   await context.globalState.update(LAST_WORKSPACE_KEY, selected);
   return selected;
@@ -481,7 +481,7 @@ async function openLastReport(context: vscode.ExtensionContext, key: keyof Repor
   const remembered = key === 'functionDossierMd' ? context.globalState.get<string>(LAST_DOSSIER_KEY) : undefined;
   const reportPath = remembered || (workspace ? resolveReportPaths(workspace)[key] : undefined);
   if (!reportPath) {
-    throw new Error('No output workspace is recorded.');
+    throw new Error('記録済みの出力workspaceがありません。');
   }
   await openReport(reportPath);
 }
@@ -494,7 +494,7 @@ async function openOutputWorkspace(context: vscode.ExtensionContext): Promise<vo
 async function copyLastCommand(context: vscode.ExtensionContext): Promise<void> {
   const command = context.globalState.get<string>(LAST_COMMAND_KEY);
   if (!command) {
-    throw new Error('No UnitTestRunner command is recorded.');
+    throw new Error('記録済みのUnitTestRunnerコマンドがありません。');
   }
   await vscode.env.clipboard.writeText(command);
 }

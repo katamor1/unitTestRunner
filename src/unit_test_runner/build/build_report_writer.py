@@ -31,59 +31,59 @@ def write_build_text(path: Path, text: str) -> None:
 
 def render_workspace_markdown(report: BuildWorkspaceReport) -> str:
     lines = [
-        "# Build Workspace Report",
+        "# ビルドワークスペースレポート",
         "",
-        "## Target",
-        f"- Function: {report.function_name}",
-        f"- Status: {report.status}",
-        f"- Output Root: {report.output_root.as_posix()}",
+        "## 対象",
+        f"- 関数: {report.function_name}",
+        f"- 状態: {report.status}",
+        f"- 出力ルート: {report.output_root.as_posix()}",
         "",
-        "## Compile Units",
-        "| Source | Object | Required |",
+        "## コンパイル単位",
+        "| ソース | オブジェクト | 必須 |",
         "|---|---|---|",
     ]
     for unit in report.compile_units:
-        lines.append(f"| {unit.source_file.as_posix()} | {unit.object_file.as_posix()} | {'yes' if unit.required else 'no'} |")
-    lines.extend(["", "## Include Dirs", "| Path | Source | Exists |", "|---|---|---|"])
+        lines.append(f"| {unit.source_file.as_posix()} | {unit.object_file.as_posix()} | {'はい' if unit.required else 'いいえ'} |")
+    lines.extend(["", "## includeディレクトリ", "| パス | 根拠 | 存在 |", "|---|---|---|"])
     for item in report.include_dirs:
-        lines.append(f"| {item.raw} | {item.source} | {'yes' if item.exists else 'no'} |")
-    lines.extend(["", "## Diagnostics"])
+        lines.append(f"| {item.raw} | {item.source} | {'はい' if item.exists else 'いいえ'} |")
+    lines.extend(["", "## 診断"])
     if report.diagnostics:
         for diagnostic in report.diagnostics:
             lines.append(f"- {diagnostic.code}: {diagnostic.message}")
     else:
-        lines.append("- None")
+        lines.append("- なし")
     return "\n".join(lines) + "\n"
 
 
 def render_probe_markdown(report: BuildProbeReport) -> str:
     lines = [
-        "# Build Probe Report",
+        "# ビルドプローブレポート",
         "",
-        "## Status",
-        f"- Executed: {'yes' if report.executed else 'no'}",
-        f"- Status: {report.status}",
-        f"- Exit Code: {report.exit_code if report.exit_code is not None else ''}",
+        "## 状態",
+        f"- 実行済み: {'はい' if report.executed else 'いいえ'}",
+        f"- 状態: {report.status}",
+        f"- 終了コード: {report.exit_code if report.exit_code is not None else ''}",
         "",
-        "## Missing Includes",
+        "## 不足include",
     ]
     if report.missing_includes:
-        lines.extend(["| Include | Diagnostic |", "|---|---|"])
+        lines.extend(["| include | 診断 |", "|---|---|"])
         for item in report.missing_includes:
             lines.append(f"| {item.include_name} | {item.diagnostic_raw} |")
     else:
-        lines.append("- None")
-    lines.extend(["", "## Unresolved Symbols"])
+        lines.append("- なし")
+    lines.extend(["", "## 未解決シンボル"])
     if report.unresolved_symbols:
-        lines.extend(["| Symbol | Related Call | Stub Candidate |", "|---|---|---|"])
+        lines.extend(["| シンボル | 関連呼び出し | スタブ候補 |", "|---|---|---|"])
         for item in report.unresolved_symbols:
-            lines.append(f"| {item.symbol_name} | {item.related_call_name or ''} | {'yes' if item.stub_candidate else 'no'} |")
+            lines.append(f"| {item.symbol_name} | {item.related_call_name or ''} | {'はい' if item.stub_candidate else 'いいえ'} |")
     else:
-        lines.append("- None")
-    lines.extend(["", "## PCH Issues"])
-    lines.extend([f"- {item.issue_kind}: {item.diagnostic_raw}" for item in report.pch_issues] or ["- None"])
-    lines.extend(["", "## VC6 Compatibility Issues"])
-    lines.extend([f"- {item.issue_kind}: {item.diagnostic_raw}" for item in report.vc6_compatibility_issues] or ["- None"])
+        lines.append("- なし")
+    lines.extend(["", "## PCH課題"])
+    lines.extend([f"- {item.issue_kind}: {item.diagnostic_raw}" for item in report.pch_issues] or ["- なし"])
+    lines.extend(["", "## VC6互換性課題"])
+    lines.extend([f"- {item.issue_kind}: {item.diagnostic_raw}" for item in report.vc6_compatibility_issues] or ["- なし"])
     return "\n".join(lines) + "\n"
 
 

@@ -20,16 +20,16 @@ def write_coverage_design(out_dir: Path | str, report: CoverageDesignReport) -> 
 def render_coverage_design_markdown(payload: dict) -> str:
     function = payload["function"]
     lines = [
-        "# Coverage Design Report",
+        "# カバレッジ設計レポート",
         "",
-        "## Target",
-        f"- Source: {payload['source']['path']}",
-        f"- Function: {function['name']}",
-        f"- Status: {function['status']}",
+        "## 対象",
+        f"- ソース: {payload['source']['path']}",
+        f"- 関数: {function['name']}",
+        f"- 状態: {function['status']}",
         "",
-        "## Branches",
+        "## 分岐",
         "",
-        "| ID | Kind | Condition | Related Variables | Related Calls | Confidence |",
+        "| ID | 種別 | 条件 | 関連変数 | 関連呼び出し | 信頼度 |",
         "|---|---|---|---|---|---|",
     ]
     for branch in payload["branches"]:
@@ -38,24 +38,24 @@ def render_coverage_design_markdown(payload: dict) -> str:
             f"| {branch['branch_id']} | {branch['kind']} | `{condition['raw'] if condition else ''}` | "
             f"{', '.join(condition['related_variables']) if condition else ''} | {', '.join(condition['related_calls']) if condition else ''} | {branch['confidence']} |"
         )
-    lines.extend(["", "## Switches", "", "| ID | Expression | Cases | Default |", "|---|---|---:|---|"])
+    lines.extend(["", "## switch文", "", "| ID | 式 | case数 | default有無 |", "|---|---|---:|---|"])
     for switch in payload["switches"]:
-        lines.append(f"| {switch['switch_id']} | `{switch['expression']['raw']}` | {len(switch['cases'])} | {'yes' if switch['has_default'] else 'no'} |")
-    lines.extend(["", "## Loops", "", "| ID | Kind | Condition | Coverage Hints |", "|---|---|---|---|"])
+        lines.append(f"| {switch['switch_id']} | `{switch['expression']['raw']}` | {len(switch['cases'])} | {'はい' if switch['has_default'] else 'いいえ'} |")
+    lines.extend(["", "## ループ", "", "| ID | 種別 | 条件 | カバレッジヒント |", "|---|---|---|---|"])
     for loop in payload["loops"]:
         lines.append(f"| {loop['loop_id']} | {loop['kind']} | `{loop['condition']['raw'] if loop['condition'] else ''}` | {', '.join(loop['coverage_hints'])} |")
-    lines.extend(["", "## Ternaries", "", "| ID | Condition | True Expression | False Expression |", "|---|---|---|---|"])
+    lines.extend(["", "## 三項演算子", "", "| ID | 条件 | true式 | false式 |", "|---|---|---|---|"])
     for ternary in payload["ternaries"]:
         lines.append(f"| {ternary['ternary_id']} | `{ternary['condition']['raw']}` | `{ternary['true_expression_raw']}` | `{ternary['false_expression_raw']}` |")
-    lines.extend(["", "## Return Paths", "", "| ID | Expression | Kind | Confidence |", "|---|---|---|---|"])
+    lines.extend(["", "## return経路", "", "| ID | 式 | 種別 | 信頼度 |", "|---|---|---|---|"])
     for path in payload["return_paths"]:
         lines.append(f"| {path['return_id']} | `{path['expression_raw'] or ''}` | {path['return_kind']} | {path['confidence']} |")
-    lines.extend(["", "## Coverage Items", "", "| ID | Type | Target | Purpose | Review Required |", "|---|---|---|---|---|"])
+    lines.extend(["", "## カバレッジ項目", "", "| ID | 種別 | 対象 | 目的 | レビュー要否 |", "|---|---|---|---|---|"])
     for item in payload["coverage_items"]:
-        lines.append(f"| {item['coverage_id']} | {item['coverage_type']} | {item['target_id']} | {item['purpose']} | {'yes' if item['review_required'] else 'no'} |")
-    lines.extend(["", "## Warnings", ""])
+        lines.append(f"| {item['coverage_id']} | {item['coverage_type']} | {item['target_id']} | {item['purpose']} | {'はい' if item['review_required'] else 'いいえ'} |")
+    lines.extend(["", "## 警告", ""])
     if payload["warnings"]:
         lines.extend(f"- {warning['code']}: {warning['message']}" for warning in payload["warnings"])
     else:
-        lines.append("- None")
+        lines.append("- なし")
     return "\n".join(lines) + "\n"

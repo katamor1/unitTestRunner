@@ -8,31 +8,31 @@ def render_function_location_markdown(payload: dict[str, Any]) -> str:
     function = payload.get("function", {})
     selected = function.get("selected_candidate")
     lines = [
-        "# Function Location Report",
+        "# 関数位置レポート",
         "",
-        "## Target",
+        "## 対象",
         "",
-        f"- Source: {source.get('path', '')}",
-        f"- Function: {function.get('name', '')}",
-        f"- Status: {function.get('status', '')}",
+        f"- ソース: {source.get('path', '')}",
+        f"- 関数: {function.get('name', '')}",
+        f"- 状態: {function.get('status', '')}",
         "",
     ]
     if selected:
         context = selected.get("conditional_context") or {}
         lines.extend(
             [
-                "## Selected Candidate",
+                "## 選択候補",
                 "",
-                "| Item | Value |",
+                "| 項目 | 値 |",
                 "|---|---|",
-                f"| Kind | {selected.get('kind', '')} |",
-                f"| Confidence | {selected.get('confidence', '')} |",
-                f"| Storage | {selected.get('storage_class_hint') or ''} |",
-                f"| Header Start | line {selected['header_range']['start']['line']}, column {selected['header_range']['start']['column']} |",
-                f"| Body End | line {selected['body_range']['end']['line']}, column {selected['body_range']['end']['column']} |",
-                f"| Active State | {context.get('active_state', '')} |",
+                f"| 種別 | {selected.get('kind', '')} |",
+                f"| 信頼度 | {selected.get('confidence', '')} |",
+                f"| storage | {selected.get('storage_class_hint') or ''} |",
+                f"| ヘッダ開始 | {selected['header_range']['start']['line']}行 {selected['header_range']['start']['column']}列 |",
+                f"| 本体終了 | {selected['body_range']['end']['line']}行 {selected['body_range']['end']['column']}列 |",
+                f"| 有効状態 | {context.get('active_state', '')} |",
                 "",
-                "## Signature Preview",
+                "## シグネチャプレビュー",
                 "",
                 "```c",
                 selected.get("signature_preview", ""),
@@ -40,11 +40,11 @@ def render_function_location_markdown(payload: dict[str, Any]) -> str:
                 "",
             ]
         )
-    lines.extend(["## Warnings", ""])
+    lines.extend(["## 警告", ""])
     warnings = payload.get("warnings", [])
     if warnings:
         for warning in warnings:
             lines.append(f"- `{warning.get('code', '')}`: {warning.get('message', '')}")
     else:
-        lines.append("(none)")
+        lines.append("なし")
     return "\n".join(lines) + "\n"

@@ -149,9 +149,9 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
     purpose: 'review checklist、unresolved items、next actionsを確認します。',
     requiredAction: '未解決項目と次アクションを確認し、必要なら編集して保存します。',
     actions: [
-      { id: 'openReviewChecklist', kind: 'openReport', label: 'checklistを開く', reportKey: 'reviewChecklistMd', stepId: 'reviewWorkflowReports', primary: true },
-      { id: 'openUnresolvedItems', kind: 'openReport', label: 'unresolvedを開く', reportKey: 'unresolvedItemsMd', stepId: 'reviewWorkflowReports' },
-      { id: 'openNextActions', kind: 'openReport', label: 'next actionsを開く', reportKey: 'nextActionsMd', stepId: 'reviewWorkflowReports' },
+      { id: 'openReviewChecklist', kind: 'openReport', label: '確認リストを開く', reportKey: 'reviewChecklistMd', stepId: 'reviewWorkflowReports', primary: true },
+      { id: 'openUnresolvedItems', kind: 'openReport', label: '未解決項目を開く', reportKey: 'unresolvedItemsMd', stepId: 'reviewWorkflowReports' },
+      { id: 'openNextActions', kind: 'openReport', label: '次のアクションを開く', reportKey: 'nextActionsMd', stepId: 'reviewWorkflowReports' },
       { id: 'confirmWorkflowReports', kind: 'confirmStep', label: '保存済みとして確定', stepId: 'reviewWorkflowReports' },
     ],
   },
@@ -171,12 +171,14 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
     requiredAction: 'CSVを開き、期待値やreview_required項目を確認して保存または確定します。',
     actions: [
       { id: 'openTestDesign', kind: 'openReport', label: 'CSVを開く', reportKey: 'testCaseDesignCsv', stepId: 'reviewTestDesign', primary: true },
+      { id: 'openTestDesignMarkdown', kind: 'openReport', label: 'Markdownを開く', reportKey: 'testCaseDesignMd', stepId: 'reviewTestDesign' },
+      { id: 'openTestDesignJson', kind: 'openReport', label: 'JSONを開く', reportKey: 'testCaseDesignJson', stepId: 'reviewTestDesign' },
       { id: 'confirmTestDesign', kind: 'confirmStep', label: '保存済みとして確定', stepId: 'reviewTestDesign' },
     ],
   },
   {
     id: 'buildProbeDryRun',
-    title: '7. build probe dry-run',
+    title: '7. ビルドプローブ dry-run',
     purpose: '実ビルド前に生成workspaceとbuild準備を確認します。',
     requiredAction: 'dry-runでbuild probeを実行します。',
     actions: [
@@ -185,21 +187,21 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
   },
   {
     id: 'reviewBuildProbe',
-    title: '8. build_probe_report.md 確認',
-    purpose: 'build probe結果と未解決のビルド項目を確認します。',
+    title: '8. ビルドプローブレポート確認',
+    purpose: 'ビルドプローブ結果と未解決のビルド項目を確認します。',
     requiredAction: 'レポートを開き、必要なら編集して保存または確定します。',
     actions: [
-      { id: 'openBuildProbe', kind: 'openReport', label: 'build reportを開く', reportKey: 'buildProbeReportMd', stepId: 'reviewBuildProbe', primary: true },
+      { id: 'openBuildProbe', kind: 'openReport', label: 'ビルドレポートを開く', reportKey: 'buildProbeReportMd', stepId: 'reviewBuildProbe', primary: true },
       { id: 'confirmBuildProbe', kind: 'confirmStep', label: '保存済みとして確定', stepId: 'reviewBuildProbe' },
     ],
   },
   {
     id: 'buildProbeRun',
-    title: '9. build probe実行',
+    title: '9. ビルドプローブ実行',
     purpose: '生成されたビルド手順を明示確認のうえ実行します。',
-    requiredAction: '確認ダイアログを承認してbuild probeを実行します。',
+    requiredAction: '確認ダイアログを承認してビルドプローブを実行します。',
     actions: [
-      { id: 'runBuildProbe', kind: 'command', label: 'build probeを実行', commandId: 'unitTestRunner.runBuildProbe', primary: true, danger: true },
+      { id: 'runBuildProbe', kind: 'command', label: 'ビルドプローブを実行', commandId: 'unitTestRunner.runBuildProbe', primary: true, danger: true },
     ],
   },
   {
@@ -226,8 +228,8 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
     purpose: 'test_execution_reportとevidence_packageを確認します。',
     requiredAction: '実行結果とエビデンスを開き、保存または確定します。',
     actions: [
-      { id: 'openTestExecution', kind: 'openReport', label: 'test reportを開く', reportKey: 'testExecutionReportMd', stepId: 'reviewEvidence', primary: true },
-      { id: 'openEvidencePackage', kind: 'openReport', label: 'evidenceを開く', reportKey: 'evidencePackageMd', stepId: 'reviewEvidence' },
+      { id: 'openTestExecution', kind: 'openReport', label: 'テスト実行レポートを開く', reportKey: 'testExecutionReportMd', stepId: 'reviewEvidence', primary: true },
+      { id: 'openEvidencePackage', kind: 'openReport', label: 'エビデンスを開く', reportKey: 'evidencePackageMd', stepId: 'reviewEvidence' },
       { id: 'confirmEvidence', kind: 'confirmStep', label: '保存済みとして確定', stepId: 'reviewEvidence' },
     ],
   },

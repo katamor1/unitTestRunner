@@ -120,7 +120,7 @@ class Vc6DspParserTests(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             markdown = out.read_text(encoding="utf-8")
-            self.assertIn("# Source Membership Report", markdown)
+            self.assertIn("# ソース所属レポート", markdown)
             self.assertIn("| ProductA |", markdown)
 
     def test_discover_projects_with_dsp_details_adds_summary(self):

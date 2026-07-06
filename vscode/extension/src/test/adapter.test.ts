@@ -13,6 +13,7 @@ import { validateSettings } from '../config/validation';
 import { resolveFunctionNameFromText } from '../functionTarget/regexFunctionResolver';
 import { resolveReportPaths } from '../reports/reportPathResolver';
 import { commandRequiresConfirmation } from '../safety/confirmation';
+import { renderSettings } from '../workflow/settingsPanelRenderer';
 import {
   completeAwaitingSaveIfMatches,
   createInitialWorkflowState,
@@ -22,6 +23,7 @@ import {
   markWorkflowCommandFailed,
   markWorkflowCommandSucceeded,
   WorkflowReportAvailability,
+  WORKFLOW_STEP_DEFINITIONS,
   workflowLegacyProjection,
 } from '../workflow/workflowState';
 
@@ -91,7 +93,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.equal(fields.get('sourceRoot')?.effectiveValue, 'C:\\work\\product');
     assert.equal(fields.get('dswPath')?.state, 'missing');
     assert.equal(fields.get('outputRoot')?.state, 'warning');
-    assert.ok(fields.get('outputRoot')?.messages.some((message) => message.includes('production repository pollution')));
+    assert.ok(fields.get('outputRoot')?.messages.some((message) => message.includes('本番リポジトリへ生成物が混入')));
     assert.equal(fields.get('defaultConfiguration')?.state, 'default');
     assert.equal(fields.get('defaultProject')?.state, 'configured');
     assert.ok(fields.get('sourceRoot')?.actions.some((action) => action.kind === 'inputText'));
@@ -99,6 +101,59 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.ok(fields.get('outputRoot')?.actions.some((action) => action.kind === 'inputText'));
     assert.ok(fields.get('cliPath')?.actions.some((action) => action.kind === 'inputText'));
     assert.ok(fields.get('cliPath')?.actions.some((action) => action.kind === 'reset'));
+  });
+
+  it('collapses the settings panel by default only when required workspace settings are ready', () => {
+    const ready = buildSettingsViewModel(
+      {
+        cliPath: 'unit-test-runner',
+        sourceRoot: 'C:\\work\\product',
+        dswPath: 'C:\\work\\product\\Product.dsw',
+        outputRoot: 'D:\\unit-test-output',
+        defaultConfiguration: 'Win32 Debug',
+      },
+      'C:\\work\\product',
+    );
+    const missing = buildSettingsViewModel(
+      {
+        cliPath: 'unit-test-runner',
+        sourceRoot: 'C:\\work\\product',
+        dswPath: '',
+        outputRoot: 'D:\\unit-test-output',
+        defaultConfiguration: 'Win32 Debug',
+      },
+      'C:\\work\\product',
+    );
+    const warning = buildSettingsViewModel(
+      {
+        cliPath: 'unit-test-runner',
+        sourceRoot: 'C:\\work\\product',
+        dswPath: 'C:\\work\\product\\Product.dsw',
+        outputRoot: 'C:\\work\\product\\generated',
+        defaultConfiguration: 'Win32 Debug',
+      },
+      'C:\\work\\product',
+    );
+
+    assert.equal(ready.ready, true);
+    assert.equal(missing.ready, false);
+    assert.equal(warning.ready, true);
+    assert.ok(warning.warnings.length > 0);
+
+    const readyHtml = renderSettings(ready);
+    const missingHtml = renderSettings(missing);
+    const warningHtml = renderSettings(warning);
+
+    assert.match(readyHtml, /<details class="settings">/);
+    assert.doesNotMatch(readyHtml, /<details class="settings" open>/);
+    assert.match(readyHtml, /<summary class="settings-summary">/);
+    assert.match(readyHtml, /設定を表示/);
+    assert.match(readyHtml, /data-setting-kind="pickFile"/);
+
+    assert.match(missingHtml, /<details class="settings" open>/);
+    assert.match(missingHtml, /未設定の必須項目があります。/);
+    assert.match(warningHtml, /<details class="settings" open>/);
+    assert.match(warningHtml, /本番リポジトリへ生成物が混入/);
   });
 
   it('resolves selected and cursor function names without parsing C in VS Code', () => {
@@ -185,6 +240,8 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
         status: 'dossier_finalized',
         reports: {
           function_dossier_md: 'C:\\work\\out\\Control_Update\\reports\\top_level_dossier.md',
+          test_case_design_md: 'C:\\work\\out\\Control_Update\\reports\\top_level_design.md',
+          test_case_design_json: 'C:\\work\\out\\Control_Update\\reports\\top_level_design.json',
           test_case_design_csv: 'C:\\work\\out\\Control_Update\\reports\\top_level_design.csv',
         },
       }),
@@ -210,9 +267,13 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.equal(path.basename(parsed.functionDossierMd ?? ''), 'function_dossier.md');
     assert.equal(path.basename(parsed.reviewChecklistMd ?? ''), 'review_checklist.md');
     assert.equal(path.basename(topLevel.functionDossierMd ?? ''), 'top_level_dossier.md');
+    assert.equal(path.basename(topLevel.testCaseDesignMd ?? ''), 'top_level_design.md');
+    assert.equal(path.basename(topLevel.testCaseDesignJson ?? ''), 'top_level_design.json');
     assert.equal(path.basename(topLevel.testCaseDesignCsv ?? ''), 'top_level_design.csv');
     assert.equal(path.basename(fallback.nextActionsMd ?? ''), 'next_actions.md');
     assert.equal(path.basename(direct.unresolvedItemsMd ?? ''), 'unresolved_items.md');
+    assert.equal(path.basename(direct.testCaseDesignMd ?? ''), 'test_case_design.md');
+    assert.equal(path.basename(direct.testCaseDesignJson ?? ''), 'test_case_design.json');
     assert.equal(path.basename(direct.changeImpactReportMd ?? ''), 'change_impact_report.md');
     assert.equal(path.basename(direct.regressionSelectionCsv ?? ''), 'regression_selection.csv');
     assert.equal(path.basename(directStep19.changeImpactReportMd ?? ''), 'custom_change.md');
@@ -222,7 +283,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
   it('warns when CLI JSON omits report paths and uses conventional paths', () => {
     const parsed = parseCliResult(JSON.stringify({ status: 'ok', data: {} }), '', 'C:\\work\\out\\Control_Update');
 
-    assert.ok(parsed.warnings.some((warning) => warning.includes('report paths')));
+    assert.ok(parsed.warnings.some((warning) => warning.includes('レポートパス')));
     assert.equal(path.basename(parsed.reports.functionDossierMd ?? ''), 'function_dossier.md');
   });
 
@@ -250,6 +311,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
   it('declares command palette activation and copy-last-command contribution', () => {
     const packageJson = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf-8'));
     const commands = new Set(packageJson.contributes.commands.map((item: { command: string }) => item.command));
+    const commandTitles = new Map<string, string>(packageJson.contributes.commands.map((item: { command: string; title: string }) => [item.command, item.title]));
     const activationEvents = new Set(packageJson.activationEvents);
 
     for (const command of [
@@ -266,6 +328,10 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
       assert.ok(commands.has(command), command);
       assert.ok(activationEvents.has(`onCommand:${command}`), command);
     }
+    assert.equal(commandTitles.get('unitTestRunner.analyzeCurrentFunction'), 'UnitTestRunner: 現在関数を解析');
+    assert.equal(commandTitles.get('unitTestRunner.openLastFunctionDossier'), 'UnitTestRunner: 最後の関数dossierを開く');
+    assert.equal([...commandTitles.values()].some((title) => title.includes('Analyze Current Function')), false);
+    assert.equal([...commandTitles.values()].some((title) => title.includes('Open Last Function Dossier')), false);
   });
 
   it('declares editor context menu and workflow view contributions', () => {
@@ -280,7 +346,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.ok(contextMenus.some((item) => item.command === 'unitTestRunner.analyzeCurrentFunction' && item.when.includes('editorLangId == c')));
     assert.ok(contextMenus.some((item) => item.command === 'unitTestRunner.analyzeSelectedFunction' && item.when.includes('editorHasSelection')));
     assert.ok(activityContainers.some((item) => item.id === 'unitTestRunner' && item.icon === 'media/unit-test-runner.svg'));
-    assert.ok(workflowViews.some((item) => item.id === 'unitTestRunner.workflow' && item.name === 'Workflow' && item.type === 'webview'));
+    assert.ok(workflowViews.some((item) => item.id === 'unitTestRunner.workflow' && item.name === 'ワークフロー' && item.type === 'webview'));
   });
 
   it('packages a VS Code extension README for the details view', () => {
@@ -300,6 +366,16 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.equal(deriveCurrentWorkflowStepId(base, availability({ functionDossier: true, testCaseDesign: true })), 'reviewTestDesign');
     assert.equal(deriveCurrentWorkflowStepId(base, availability({ functionDossier: true, testCaseDesign: true, buildProbeReport: true })), 'reviewBuildProbe');
     assert.equal(deriveCurrentWorkflowStepId(base, availability({ functionDossier: true, testCaseDesign: true, buildProbeReport: true, testExecutionReport: true, evidencePackage: true })), 'reviewEvidence');
+  });
+
+  it('exposes markdown and json reports from the test design review step', () => {
+    const reviewStep = WORKFLOW_STEP_DEFINITIONS.find((step) => step.id === 'reviewTestDesign');
+    assert.ok(reviewStep);
+    const actions = new Map(reviewStep.actions.map((action) => [action.label, action]));
+
+    assert.equal(actions.get('CSVを開く')?.reportKey, 'testCaseDesignCsv');
+    assert.equal(actions.get('Markdownを開く')?.reportKey, 'testCaseDesignMd');
+    assert.equal(actions.get('JSONを開く')?.reportKey, 'testCaseDesignJson');
   });
 
   it('completes an awaiting-save workflow step only for the matching file', () => {

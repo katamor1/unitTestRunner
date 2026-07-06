@@ -104,7 +104,7 @@ UTR RUN TC_Control_Update_002
             csv_text = (workspace / "reports" / "test_result.csv").read_text(encoding="utf-8")
             self.assertIn("test_case_id,status,review_required", csv_text)
             package = (workspace / "reports" / "evidence_package.md").read_text(encoding="utf-8")
-            self.assertIn("# Function Unit Test Evidence Package", package)
+            self.assertIn("# 関数単体テストエビデンスパッケージ", package)
 
     def test_cli_run_tests_prepare_evidence_and_analyze_function_connect_execution_evidence(self):
         with tempfile.TemporaryDirectory() as temp_dir:

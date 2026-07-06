@@ -82,7 +82,7 @@ class CSourceReadingTests(unittest.TestCase):
         self.assertEqual("0.1", payload["schema_version"])
         self.assertEqual(str(SOURCE).replace("\\", "/"), payload["source"]["path"])
         self.assertTrue(payload["token_summary"]["identifier_count"] > 0)
-        self.assertIn("# Source Digest Report", markdown)
+        self.assertIn("# ソースダイジェストレポート", markdown)
         self.assertIn("masked_source.c", str(paths["masked_source"]))
 
     def test_analyze_function_generates_source_digest_artifacts(self):

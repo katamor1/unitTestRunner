@@ -6,16 +6,16 @@ from typing import Any
 def render_source_membership_markdown(payload: dict[str, Any]) -> str:
     source = payload.get("source", {})
     lines = [
-        "# Source Membership Report",
+        "# ソース所属レポート",
         "",
-        "## Source",
+        "## ソース",
         "",
-        f"- Input: {source.get('input', '')}",
-        f"- Absolute: {source.get('absolute', '')}",
+        f"- 入力: {source.get('input', '')}",
+        f"- 絶対パス: {source.get('absolute', '')}",
         "",
-        "## Matches",
+        "## 一致プロジェクト",
         "",
-        "| Project | DSP | Configuration Count |",
+        "| プロジェクト | DSP | 構成数 |",
         "|---|---|---:|",
     ]
     matches = payload.get("matches", [])
@@ -23,12 +23,12 @@ def render_source_membership_markdown(payload: dict[str, Any]) -> str:
         for match in matches:
             lines.append(f"| {match.get('project_name', '')} | {match.get('dsp_path', '')} | {len(match.get('configurations', []))} |")
     else:
-        lines.append("| (none) | (none) | 0 |")
-    lines.extend(["", "## Warnings", ""])
+        lines.append("| なし | なし | 0 |")
+    lines.extend(["", "## 警告", ""])
     warnings = payload.get("warnings", [])
     if warnings:
         for warning in warnings:
             lines.append(f"- `{warning.get('code', '')}`: {warning.get('message', '')}")
     else:
-        lines.append("(none)")
+        lines.append("なし")
     return "\n".join(lines) + "\n"

@@ -38,14 +38,14 @@ def write_test_execution_reports(workspace: Path | str, report: TestExecutionRep
 
 
 def render_execution_markdown(report: TestExecutionReport) -> str:
-    lines = ["# Test Execution Report", "", "## Target", f"- Function: {report.function_name}", f"- Status: {report.status}", f"- Executed: {'yes' if report.executed else 'no'}", "", "## Results", "| Test Case | Status | Review Required | Evidence |", "|---|---|---|---|"]
+    lines = ["# テスト実行レポート", "", "## 対象", f"- 関数: {report.function_name}", f"- 状態: {report.status}", f"- 実行済み: {'はい' if report.executed else 'いいえ'}", "", "## 結果", "| テストケース | 状態 | レビュー要否 | エビデンス |", "|---|---|---|---|"]
     for case in report.case_results:
-        lines.append(f"| {case.test_case_id or ''} | {case.status} | {'yes' if case.review_required else 'no'} | {case.evidence} |")
+        lines.append(f"| {case.test_case_id or ''} | {case.status} | {'はい' if case.review_required else 'いいえ'} | {case.evidence} |")
     return "\n".join(lines) + "\n"
 
 
 def render_review_items(items: list[ExecutionReviewItem]) -> str:
-    lines = ["# Unresolved Review Items", "", "| Kind | Test Case | Description | Suggested Action |", "|---|---|---|---|"]
+    lines = ["# 未解決レビュー項目", "", "| 種別 | テストケース | 説明 | 推奨アクション |", "|---|---|---|---|"]
     for item in items:
         lines.append(f"| {item.item_kind} | {item.related_test_case_id or ''} | {item.description} | {item.suggested_action} |")
     return "\n".join(lines) + "\n"

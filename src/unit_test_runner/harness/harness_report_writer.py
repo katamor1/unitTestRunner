@@ -23,48 +23,48 @@ def write_harness_report(output_root: Path, report: HarnessSkeletonReport) -> di
 def render_harness_markdown(report: HarnessSkeletonReport) -> str:
     payload = report.to_dict()
     lines = [
-        "# Harness Skeleton Report",
+        "# ハーネスひな形レポート",
         "",
-        "## Target",
-        f"- Function: {report.function_name}",
-        f"- Status: {report.status}",
-        f"- Output Root: {report.output_root.as_posix()}",
+        "## 対象",
+        f"- 関数: {report.function_name}",
+        f"- 状態: {report.status}",
+        f"- 出力ルート: {report.output_root.as_posix()}",
         "",
-        "## Generated Files",
-        "| File | Kind | Review Required |",
+        "## 生成ファイル",
+        "| ファイル | 種別 | レビュー要否 |",
         "|---|---|---|",
     ]
     for item in payload["generated_files"]:
-        review = "yes" if item["review_required"] else "no"
+        review = "はい" if item["review_required"] else "いいえ"
         lines.append(f"| {item['path']} | {item['file_kind']} | {review} |")
-    lines.extend(["", "## Stub Skeletons", "| Stub | Original Function | Capabilities | Related Calls |", "|---|---|---|---|"])
+    lines.extend(["", "## スタブひな形", "| スタブ | 元関数 | 機能 | 関連呼び出し |", "|---|---|---|---|"])
     for item in payload["stub_skeletons"]:
         lines.append(
             f"| {item['stub_name']} | {item['original_function_name']} | {', '.join(item['capabilities'])} | {', '.join(item['related_call_ids'])} |"
         )
-    lines.extend(["", "## Test Skeletons", "| Test Case | Function | Placeholders |", "|---|---|---|"])
+    lines.extend(["", "## テストひな形", "| テストケース | 関数 | プレースホルダ数 |", "|---|---|---|"])
     for item in payload["test_skeletons"]:
         lines.append(f"| {item['test_case_id']} | {item['generated_function_name']} | {item['placeholder_count']} |")
-    lines.extend(["", "## Unresolved Placeholders"])
+    lines.extend(["", "## 未解決プレースホルダ"])
     if report.unresolved_placeholders:
-        lines.extend(["| Kind | Name | Related Test Case | Reason |", "|---|---|---|---|"])
+        lines.extend(["| 種別 | 名前 | 関連テストケース | 理由 |", "|---|---|---|---|"])
         for item in payload["unresolved_placeholders"]:
             lines.append(f"| {item['placeholder_kind']} | {item['name']} | {item['related_test_case_id'] or ''} | {item['reason']} |")
     else:
-        lines.append("- None")
-    lines.extend(["", "## Build Hints"])
+        lines.append("- なし")
+    lines.extend(["", "## ビルドヒント"])
     if report.build_hints:
-        lines.extend(["| Kind | Message | Severity |", "|---|---|---|"])
+        lines.extend(["| 種別 | メッセージ | 重要度 |", "|---|---|---|"])
         for item in payload["build_hints"]:
             lines.append(f"| {item['hint_kind']} | {item['message']} | {item['severity']} |")
     else:
-        lines.append("- None")
-    lines.extend(["", "## Warnings"])
+        lines.append("- なし")
+    lines.extend(["", "## 警告"])
     if report.warnings:
         for warning in payload["warnings"]:
             lines.append(f"- {warning['code']}: {warning['message']}")
     else:
-        lines.append("- None")
+        lines.append("- なし")
     return "\n".join(lines) + "\n"
 
 

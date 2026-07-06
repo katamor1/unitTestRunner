@@ -4,31 +4,31 @@ from typing import Any
 
 
 def render_dsw_discovery_markdown(payload: dict[str, Any]) -> str:
-    lines = ["# DSW Project Discovery Report", ""]
+    lines = ["# DSWプロジェクト検出レポート", ""]
     workspaces = payload.get("workspaces", [])
     for workspace in workspaces:
         lines.extend(
             [
-                "## Workspace",
+                "## workspace",
                 "",
-                f"- Path: {workspace.get('dsw_path', '')}",
-                f"- Format Version: {workspace.get('format_version') or ''}",
+                f"- パス: {workspace.get('dsw_path', '')}",
+                f"- フォーマットバージョン: {workspace.get('format_version') or ''}",
                 "",
-                "## Projects",
+                "## プロジェクト",
                 "",
-                "| Project | DSP Path | Exists |",
+                "| プロジェクト | DSPパス | 存在 |",
                 "|---|---|---|",
             ]
         )
         for project in workspace.get("projects", []):
-            exists = "yes" if project.get("exists") else "no"
+            exists = "はい" if project.get("exists") else "いいえ"
             lines.append(f"| {project.get('name', '')} | {project.get('dsp_path', '')} | {exists} |")
         lines.extend(
             [
                 "",
-                "## Dependencies",
+                "## 依存関係",
                 "",
-                "| From | To |",
+                "| 参照元 | 参照先 |",
                 "|---|---|",
             ]
         )
@@ -37,14 +37,14 @@ def render_dsw_discovery_markdown(payload: dict[str, Any]) -> str:
             for dependency in dependencies:
                 lines.append(f"| {dependency.get('from_project', '')} | {dependency.get('to_project', '')} |")
         else:
-            lines.append("| (none) | (none) |")
-        lines.extend(["", "## Warnings", ""])
+            lines.append("| なし | なし |")
+        lines.extend(["", "## 警告", ""])
         warnings = workspace.get("warnings", [])
         if warnings:
             for warning in warnings:
-                location = f" line {warning['line_number']}" if "line_number" in warning else ""
+                location = f" {warning['line_number']}行" if "line_number" in warning else ""
                 lines.append(f"- `{warning.get('code', '')}`{location}: {warning.get('message', '')}")
         else:
-            lines.append("(none)")
+            lines.append("なし")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
