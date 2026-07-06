@@ -11,6 +11,7 @@ export type WorkflowStepId =
   | 'reviewWorkflowReports'
   | 'generateTestDesign'
   | 'reviewTestDesign'
+  | 'generateHarnessSkeleton'
   | 'buildProbeDryRun'
   | 'reviewBuildProbe'
   | 'buildProbeRun'
@@ -23,6 +24,7 @@ export type WorkflowCommandKind =
   | 'analyze'
   | 'finalize'
   | 'testDesign'
+  | 'harness'
   | 'buildProbeDryRun'
   | 'buildProbeRun'
   | 'runTests'
@@ -61,6 +63,7 @@ export interface WorkflowReportAvailability {
   unresolvedItems: boolean;
   nextActions: boolean;
   testCaseDesign: boolean;
+  harnessSkeletonReport: boolean;
   buildProbeReport: boolean;
   testExecutionReport: boolean;
   evidencePackage: boolean;
@@ -107,6 +110,7 @@ export const EMPTY_REPORT_AVAILABILITY: WorkflowReportAvailability = {
   unresolvedItems: false,
   nextActions: false,
   testCaseDesign: false,
+  harnessSkeletonReport: false,
   buildProbeReport: false,
   testExecutionReport: false,
   evidencePackage: false,
@@ -167,8 +171,8 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
   {
     id: 'reviewTestDesign',
     title: '6. test_case_design.csv 確認',
-    purpose: '生成されたテストケース設計を確認します。',
-    requiredAction: 'CSVを開き、期待値やreview_required項目を確認して保存または確定します。',
+    purpose: '生成されたテストケース設計を確認します。CSVは一覧確認、Markdownはレビュー、JSONはハーネス生成の入力です。',
+    requiredAction: 'CSV/Markdown/JSONを開き、TBD_EXPECTED_RETURNやreview_required項目を埋めて保存または確定します。',
     actions: [
       { id: 'openTestDesign', kind: 'openReport', label: 'CSVを開く', reportKey: 'testCaseDesignCsv', stepId: 'reviewTestDesign', primary: true },
       { id: 'openTestDesignMarkdown', kind: 'openReport', label: 'Markdownを開く', reportKey: 'testCaseDesignMd', stepId: 'reviewTestDesign' },
@@ -177,17 +181,26 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
     ],
   },
   {
+    id: 'generateHarnessSkeleton',
+    title: '7. ハーネス生成',
+    purpose: 'レビュー済みtest_case_design.jsonを使い、Build Probeの前提になるharness_skeleton_reportを生成します。',
+    requiredAction: 'test_case_design.jsonの期待値とレビュー項目を保存した後に、ハーネス生成を実行します。',
+    actions: [
+      { id: 'generateHarnessSkeleton', kind: 'command', label: 'ハーネスを生成', commandId: 'unitTestRunner.generateHarnessSkeleton', primary: true },
+    ],
+  },
+  {
     id: 'buildProbeDryRun',
-    title: '7. ビルドプローブ dry-run',
-    purpose: '実ビルド前に生成workspaceとbuild準備を確認します。',
-    requiredAction: 'dry-runでbuild probeを実行します。',
+    title: '8. ビルドプローブ dry-run',
+    purpose: 'harness_skeleton_report.jsonを使い、実ビルド前に生成workspaceとbuild準備を確認します。',
+    requiredAction: 'ハーネス生成が完了してから、dry-runでBuild Probeを実行します。',
     actions: [
       { id: 'buildProbeDryRun', kind: 'command', label: 'dry-runを実行', commandId: 'unitTestRunner.buildProbeDryRun', primary: true },
     ],
   },
   {
     id: 'reviewBuildProbe',
-    title: '8. ビルドプローブレポート確認',
+    title: '9. ビルドプローブレポート確認',
     purpose: 'ビルドプローブ結果と未解決のビルド項目を確認します。',
     requiredAction: 'レポートを開き、必要なら編集して保存または確定します。',
     actions: [
@@ -197,7 +210,7 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
   },
   {
     id: 'buildProbeRun',
-    title: '9. ビルドプローブ実行',
+    title: '10. ビルドプローブ実行',
     purpose: '生成されたビルド手順を明示確認のうえ実行します。',
     requiredAction: '確認ダイアログを承認してビルドプローブを実行します。',
     actions: [
@@ -206,7 +219,7 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
   },
   {
     id: 'runTests',
-    title: '10. 生成テスト実行',
+    title: '11. 生成テスト実行',
     purpose: '生成テストを明示確認のうえ実行します。',
     requiredAction: '確認ダイアログを承認してテストを実行します。',
     actions: [
@@ -215,7 +228,7 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
   },
   {
     id: 'prepareEvidence',
-    title: '11. エビデンス準備',
+    title: '12. エビデンス準備',
     purpose: '実行結果とmanifestをレビュー用エビデンスへ整理します。',
     requiredAction: 'エビデンス準備コマンドを実行します。',
     actions: [
@@ -224,7 +237,7 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
   },
   {
     id: 'reviewEvidence',
-    title: '12. 実行結果・エビデンス確認',
+    title: '13. 実行結果・エビデンス確認',
     purpose: 'test_execution_reportとevidence_packageを確認します。',
     requiredAction: '実行結果とエビデンスを開き、保存または確定します。',
     actions: [
@@ -235,7 +248,7 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
   },
   {
     id: 'complete',
-    title: '13. 完了',
+    title: '14. 完了',
     purpose: 'dossier、テスト実行、エビデンス確認が完了しています。',
     requiredAction: '必要に応じて出力workspaceを開くか、次の関数へ進みます。',
     actions: [
@@ -257,6 +270,7 @@ const COMMAND_STEP_MAP: Record<WorkflowCommandKind, WorkflowStepId | undefined> 
   analyze: 'analyze',
   finalize: 'analyze',
   testDesign: 'generateTestDesign',
+  harness: 'generateHarnessSkeleton',
   buildProbeDryRun: 'buildProbeDryRun',
   buildProbeRun: 'buildProbeRun',
   runTests: 'runTests',
@@ -355,6 +369,7 @@ export function reportAvailabilityFromPaths(reports: Partial<ReportPaths> | unde
     unresolvedItems: reportExists(reports, 'unresolvedItemsMd', exists),
     nextActions: reportExists(reports, 'nextActionsMd', exists),
     testCaseDesign: reportExists(reports, 'testCaseDesignCsv', exists),
+    harnessSkeletonReport: reportExists(reports, 'harnessSkeletonReportJson', exists),
     buildProbeReport: reportExists(reports, 'buildProbeReportMd', exists),
     testExecutionReport: reportExists(reports, 'testExecutionReportMd', exists),
     evidencePackage: reportExists(reports, 'evidencePackageMd', exists),
@@ -416,7 +431,16 @@ function effectiveCompletedStepIds(state: WorkflowState, availability: WorkflowR
     completed.add('reviewWorkflowReports');
     completed.add('generateTestDesign');
     completed.add('reviewTestDesign');
+    completed.add('generateHarnessSkeleton');
     completed.add('buildProbeDryRun');
+  }
+  if (availability.harnessSkeletonReport) {
+    completed.add('analyze');
+    completed.add('reviewDossier');
+    completed.add('reviewWorkflowReports');
+    completed.add('generateTestDesign');
+    completed.add('reviewTestDesign');
+    completed.add('generateHarnessSkeleton');
   }
   if (availability.testExecutionReport) {
     completed.add('reviewBuildProbe');

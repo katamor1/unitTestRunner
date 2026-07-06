@@ -263,6 +263,41 @@ generated\\tests\\test.c(7) : fatal error C1083: Cannot open include file: 'stdi
             self.assertEqual("build_workspace_generated", explicit_payload["status"])
             self.assertTrue(Path(explicit_payload["data"]["build_workspace"]["json"]).exists())
 
+    def test_build_probe_workspace_reports_missing_harness_as_input_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            out_dir = Path(temp_dir) / "Control_Update"
+            analyze = run_module(
+                "--json",
+                "analyze-function",
+                "--workspace",
+                str(VC6_FIXTURE_ROOT),
+                "--dsw",
+                str(VC6_FIXTURE_ROOT / "Product.dsw"),
+                "--source",
+                "src/control.c",
+                "--function",
+                "Control_Update",
+                "--configuration",
+                "Win32 Debug",
+                "--project",
+                "Control",
+                "--phase",
+                "design",
+                "--out",
+                str(out_dir),
+            )
+            self.assertEqual(0, analyze.returncode, analyze.stderr)
+            self.assertFalse((out_dir / "reports" / "harness_skeleton_report.json").exists())
+
+            probe = run_module("--json", "build-probe", "--workspace", str(out_dir), "--dry-run")
+
+            self.assertNotEqual(0, probe.returncode)
+            self.assertNotEqual(10, probe.returncode)
+            payload = json.loads(probe.stdout)
+            self.assertEqual("error", payload["status"])
+            self.assertIn("harness_skeleton_report.json", payload["errors"][0])
+            self.assertIn("--phase harness", payload["errors"][0])
+
 
 if __name__ == "__main__":
     unittest.main()

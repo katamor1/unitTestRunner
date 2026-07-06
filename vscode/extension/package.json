@@ -26,6 +26,7 @@
     "onCommand:unitTestRunner.openChangeImpactReport",
     "onCommand:unitTestRunner.openRegressionSelection",
     "onCommand:unitTestRunner.generateTestDesign",
+    "onCommand:unitTestRunner.generateHarnessSkeleton",
     "onCommand:unitTestRunner.buildProbeDryRun",
     "onCommand:unitTestRunner.runBuildProbe",
     "onCommand:unitTestRunner.runTests",
@@ -78,6 +79,10 @@
       {
         "command": "unitTestRunner.generateTestDesign",
         "title": "UnitTestRunner: テスト設計を生成"
+      },
+      {
+        "command": "unitTestRunner.generateHarnessSkeleton",
+        "title": "UnitTestRunner: ハーネスを生成"
       },
       {
         "command": "unitTestRunner.buildProbeDryRun",

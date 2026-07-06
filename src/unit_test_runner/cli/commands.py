@@ -382,6 +382,7 @@ def handle_generate_harness_skeleton(args: argparse.Namespace) -> CLIResult:
 def handle_build_probe(args: argparse.Namespace) -> CLIResult:
     if args.workspace:
         workspace = _existing_dir(args.workspace, "workspace", args.command)
+        _require_build_probe_workspace_reports(workspace, args.command)
         workspace_report, probe_report = generate_build_workspace_from_workspace(
             workspace,
             run_probe=args.run,
@@ -434,6 +435,20 @@ def handle_build_probe(args: argparse.Namespace) -> CLIResult:
         )
 
     raise CLIError("build-probe requires --workspace, --dossier, or explicit report inputs.", EXIT_INPUT_ERROR, args.command)
+
+
+def _require_build_probe_workspace_reports(workspace: Path, command: str) -> None:
+    reports = workspace / "reports"
+    required = [
+        reports / "build_context.json",
+        reports / "source_digest.json",
+        reports / "harness_skeleton_report.json",
+    ]
+    missing = [path.relative_to(workspace).as_posix() for path in required if not path.is_file()]
+    if not missing:
+        return
+    hint = "Run analyze-function with --phase harness or --phase execution before build-probe --workspace."
+    raise CLIError("build-probe --workspace requires generated reports: " + ", ".join(missing) + ". " + hint, EXIT_INPUT_ERROR, command)
 
 
 def _build_probe_result(command: str, workspace: Path, workspace_report, probe_report) -> CLIResult:

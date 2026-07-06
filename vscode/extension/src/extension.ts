@@ -5,6 +5,7 @@ import {
   buildAnalyzeFunctionInvocation,
   buildBuildProbeInvocation,
   buildFinalizeDossierInvocation,
+  buildGenerateHarnessSkeletonInvocation,
   buildGenerateTestDesignInvocation,
   buildPrepareEvidenceInvocation,
   buildReanalyzeFunctionInvocation,
@@ -78,6 +79,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('unitTestRunner.openChangeImpactReport', async () => openLastReport(context, 'changeImpactReportMd')),
     vscode.commands.registerCommand('unitTestRunner.openRegressionSelection', async () => openLastReport(context, 'regressionSelectionCsv')),
     vscode.commands.registerCommand('unitTestRunner.generateTestDesign', async () => runWorkspaceCommand(context, output, 'testDesign', workflowPanel)),
+    vscode.commands.registerCommand('unitTestRunner.generateHarnessSkeleton', async () => runWorkspaceCommand(context, output, 'harness', workflowPanel)),
     vscode.commands.registerCommand('unitTestRunner.buildProbeDryRun', async () => runWorkspaceCommand(context, output, 'buildProbeDryRun', workflowPanel)),
     vscode.commands.registerCommand('unitTestRunner.runBuildProbe', async () => runWorkspaceCommand(context, output, 'buildProbeRun', workflowPanel)),
     vscode.commands.registerCommand('unitTestRunner.runTests', async () => runWorkspaceCommand(context, output, 'runTests', workflowPanel)),
@@ -374,7 +376,7 @@ async function resolveFunctionName(editor: vscode.TextEditor): Promise<string> {
   return prompt;
 }
 
-async function runWorkspaceCommand(context: vscode.ExtensionContext, output: vscode.OutputChannel, kind: 'finalize' | 'testDesign' | 'buildProbeDryRun' | 'buildProbeRun' | 'runTests' | 'evidence', workflowPanel: WorkflowPanelProvider): Promise<void> {
+async function runWorkspaceCommand(context: vscode.ExtensionContext, output: vscode.OutputChannel, kind: 'finalize' | 'testDesign' | 'harness' | 'buildProbeDryRun' | 'buildProbeRun' | 'runTests' | 'evidence', workflowPanel: WorkflowPanelProvider): Promise<void> {
   const settings = readConfig(context);
   showValidation(settings);
   const workspace = await lastWorkspace(context);
@@ -383,6 +385,8 @@ async function runWorkspaceCommand(context: vscode.ExtensionContext, output: vsc
     invocation = buildFinalizeDossierInvocation(settings, workspace);
   } else if (kind === 'testDesign') {
     invocation = buildGenerateTestDesignInvocation(settings, path.join(workspace, 'reports', 'function_dossier.json'));
+  } else if (kind === 'harness') {
+    invocation = buildGenerateHarnessSkeletonInvocation(settings, workspace);
   } else if (kind === 'buildProbeDryRun') {
     invocation = buildBuildProbeInvocation(settings, workspace, false);
   } else if (kind === 'buildProbeRun') {
@@ -433,7 +437,7 @@ async function executeInvocation(context: vscode.ExtensionContext, output: vscod
   return parsed.reports;
 }
 
-function workflowCommandKind(kind: 'finalize' | 'testDesign' | 'buildProbeDryRun' | 'buildProbeRun' | 'runTests' | 'evidence'): WorkflowCommandKind {
+function workflowCommandKind(kind: 'finalize' | 'testDesign' | 'harness' | 'buildProbeDryRun' | 'buildProbeRun' | 'runTests' | 'evidence'): WorkflowCommandKind {
   return kind;
 }
 

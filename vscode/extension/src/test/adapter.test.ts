@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import { describe, it } from 'node:test';
 import * as path from 'path';
 
-import { buildAnalyzeFunctionInvocation, buildFinalizeDossierInvocation, buildGenerateTestDesignInvocation, buildReanalyzeFunctionInvocation, buildRunTestsInvocation } from '../cli/commandBuilder';
+import { buildAnalyzeFunctionInvocation, buildFinalizeDossierInvocation, buildGenerateHarnessSkeletonInvocation, buildGenerateTestDesignInvocation, buildReanalyzeFunctionInvocation, buildRunTestsInvocation } from '../cli/commandBuilder';
 import { runCliInvocation } from '../cli/cliRunner';
 import { parseCliResult, parseCliResultReportPaths } from '../cli/cliResultParser';
 import { DEFAULT_CLI_PATH, resolveCliPath } from '../config/bundledCli';
@@ -192,6 +192,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     const finalize = buildFinalizeDossierInvocation(settings, target.outputWorkspace);
     const runTests = buildRunTestsInvocation(settings, target.outputWorkspace, true);
     const testDesign = buildGenerateTestDesignInvocation(settings, path.join(target.outputWorkspace, 'reports', 'function_dossier.json'));
+    const harness = buildGenerateHarnessSkeletonInvocation(settings, target.outputWorkspace);
 
     assert.equal(analyze.command, settings.cliPath);
     assert.ok(analyze.args.includes('--json'));
@@ -203,6 +204,9 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.ok(analyze.displayCommand.includes('"C:\\unit test workspace\\Control_Update"'));
     assert.deepEqual(finalize.args.slice(0, 3), ['--json', 'finalize-dossier', '--workspace']);
     assert.deepEqual(testDesign.args.slice(0, 3), ['--json', 'generate-test-design', '--dossier']);
+    assert.deepEqual(harness.args.slice(0, 2), ['--json', 'generate-harness-skeleton']);
+    assert.deepEqual(harness.args.slice(harness.args.indexOf('--test-case-design'), harness.args.indexOf('--test-case-design') + 2), ['--test-case-design', path.join(target.outputWorkspace, 'reports', 'test_case_design.json')]);
+    assert.deepEqual(harness.args.slice(harness.args.indexOf('--out'), harness.args.indexOf('--out') + 2), ['--out', target.outputWorkspace]);
     assert.equal(runTests.requiresConfirmation, true);
   });
 
@@ -324,6 +328,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
       'unitTestRunner.openRegressionSelection',
       'unitTestRunner.copyLastCommand',
       'unitTestRunner.openLastFunctionDossier',
+      'unitTestRunner.generateHarnessSkeleton',
     ]) {
       assert.ok(commands.has(command), command);
       assert.ok(activationEvents.has(`onCommand:${command}`), command);
@@ -364,8 +369,27 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.equal(deriveCurrentWorkflowStepId(base, availability()), 'analyze');
     assert.equal(deriveCurrentWorkflowStepId(base, availability({ functionDossier: true })), 'reviewDossier');
     assert.equal(deriveCurrentWorkflowStepId(base, availability({ functionDossier: true, testCaseDesign: true })), 'reviewTestDesign');
-    assert.equal(deriveCurrentWorkflowStepId(base, availability({ functionDossier: true, testCaseDesign: true, buildProbeReport: true })), 'reviewBuildProbe');
+    assert.equal(deriveCurrentWorkflowStepId(
+      { ...base, completedStepIds: ['settings', 'reviewTestDesign'] },
+      availability({ functionDossier: true, testCaseDesign: true }),
+    ), 'generateHarnessSkeleton');
+    assert.equal(deriveCurrentWorkflowStepId(base, availability({ functionDossier: true, testCaseDesign: true, harnessSkeletonReport: true })), 'buildProbeDryRun');
+    assert.equal(deriveCurrentWorkflowStepId(base, availability({ functionDossier: true, testCaseDesign: true, harnessSkeletonReport: true, buildProbeReport: true })), 'reviewBuildProbe');
     assert.equal(deriveCurrentWorkflowStepId(base, availability({ functionDossier: true, testCaseDesign: true, buildProbeReport: true, testExecutionReport: true, evidencePackage: true })), 'reviewEvidence');
+  });
+
+  it('shows harness generation as the required bridge from reviewed design to build probe', () => {
+    const reviewIndex = WORKFLOW_STEP_DEFINITIONS.findIndex((step) => step.id === 'reviewTestDesign');
+    const harnessIndex = WORKFLOW_STEP_DEFINITIONS.findIndex((step) => step.id === 'generateHarnessSkeleton');
+    const probeIndex = WORKFLOW_STEP_DEFINITIONS.findIndex((step) => step.id === 'buildProbeDryRun');
+    const harnessStep = WORKFLOW_STEP_DEFINITIONS[harnessIndex];
+
+    assert.ok(reviewIndex >= 0);
+    assert.ok(harnessIndex > reviewIndex);
+    assert.ok(probeIndex > harnessIndex);
+    assert.match(harnessStep.purpose, /Build Probe/);
+    assert.match(harnessStep.requiredAction, /test_case_design\.json/);
+    assert.equal(harnessStep.actions[0].commandId, 'unitTestRunner.generateHarnessSkeleton');
   });
 
   it('exposes markdown and json reports from the test design review step', () => {

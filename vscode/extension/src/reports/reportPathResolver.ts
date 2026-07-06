@@ -9,6 +9,11 @@ export interface ReportPaths {
   testCaseDesignMd?: string;
   testCaseDesignJson?: string;
   testCaseDesignCsv?: string;
+  functionSignatureJson?: string;
+  globalAccessJson?: string;
+  callReportJson?: string;
+  harnessSkeletonReportJson?: string;
+  harnessSkeletonReportMd?: string;
   buildProbeReportMd?: string;
   testExecutionReportMd?: string;
   evidencePackageMd?: string;
@@ -28,6 +33,11 @@ export function resolveReportPaths(workspace: string): ReportPaths {
     testCaseDesignMd: path.join(reports, 'test_case_design.md'),
     testCaseDesignJson: path.join(reports, 'test_case_design.json'),
     testCaseDesignCsv: path.join(reports, 'test_case_design.csv'),
+    functionSignatureJson: path.join(reports, 'function_signature.json'),
+    globalAccessJson: path.join(reports, 'global_access.json'),
+    callReportJson: path.join(reports, 'call_report.json'),
+    harnessSkeletonReportJson: path.join(reports, 'harness_skeleton_report.json'),
+    harnessSkeletonReportMd: path.join(reports, 'harness_skeleton_report.md'),
     buildProbeReportMd: path.join(reports, 'build_probe_report.md'),
     testExecutionReportMd: path.join(reports, 'test_execution_report.md'),
     evidencePackageMd: path.join(reports, 'evidence_package.md'),

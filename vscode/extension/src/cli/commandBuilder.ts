@@ -96,6 +96,25 @@ export function buildGenerateTestDesignInvocation(settings: AdapterSettings, dos
   return invocation(settings, jsonPrefix(settings).concat(['generate-test-design', '--dossier', dossierPath]), false);
 }
 
+export function buildGenerateHarnessSkeletonInvocation(settings: AdapterSettings, workspace: string): CliInvocation {
+  const reports = path.join(workspace, 'reports');
+  const args = jsonPrefix(settings).concat([
+    'generate-harness-skeleton',
+    '--function-signature',
+    path.join(reports, 'function_signature.json'),
+    '--global-access',
+    path.join(reports, 'global_access.json'),
+    '--call-report',
+    path.join(reports, 'call_report.json'),
+    '--test-case-design',
+    path.join(reports, 'test_case_design.json'),
+    '--out',
+    workspace,
+    '--overwrite',
+  ]);
+  return invocation(settings, args, false);
+}
+
 export function relativeSourcePath(sourcePath: string, sourceRoot: string): string {
   return path.relative(sourceRoot, sourcePath).split(path.sep).join('/');
 }
