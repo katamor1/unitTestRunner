@@ -27,10 +27,10 @@ def generate_harness_skeleton(
     output_root: Path | str,
     overwrite: bool = False,
 ) -> HarnessSkeletonReport:
-    del global_access
     output_root = Path(output_root).resolve()
     policy = HarnessGenerationPolicy(overwrite_existing=overwrite)
     signature = _payload(function_signature)
+    globals_payload = _payload(global_access)
     calls = _payload(call_report)
     test_case_design_payload = _payload(test_case_design)
     function_payload = signature.get("function", {})
@@ -44,7 +44,7 @@ def generate_harness_skeleton(
     _ensure_layout(output_root)
     _write_assert_files(output_root, generated_files, overwrite)
     stubs = _write_stub_files(output_root, calls, test_case_design_payload, generated_files, warnings, overwrite)
-    tests = _write_test_files(output_root, signature, test_case_design_payload, stubs, generated_files, unresolved, warnings, overwrite)
+    tests = _write_test_files(output_root, signature, globals_payload, test_case_design_payload, stubs, generated_files, unresolved, warnings, overwrite)
     _write_target_invocation(output_root, signature, generated_files, warnings, overwrite)
     _write_runner_files(output_root, function_name, tests, generated_files, overwrite)
     build_hints.extend(_build_hints(source_path, stubs, tests))
@@ -475,6 +475,7 @@ def _write_target_invocation(
 def _write_test_files(
     output_root: Path,
     signature: dict[str, Any],
+    globals_payload: dict[str, Any],
     test_case_design: dict[str, Any],
     stubs: list[StubSkeleton],
     generated_files: list[GeneratedFile],
@@ -489,6 +490,7 @@ def _write_test_files(
     return_type = _return_type(function_payload)
     stub_names = [item.original_function_name for item in stubs]
     stub_safe_names = [sanitize_identifier(item.original_function_name) for item in stubs]
+    global_declarations = _extern_global_declarations(globals_payload, test_case_design)
     test_skeletons: list[TestSkeleton] = []
     functions: list[str] = []
     prototypes: list[str] = []
@@ -552,15 +554,20 @@ def _write_test_files(
         '#include "utr_runner.h"',
         '#include "target_invocation.h"',
     ]
+    if _needs_string_compare(test_case_design):
+        include_lines.insert(0, "#include <string.h>")
     for stub_safe in stub_safe_names:
         include_lines.append(f'#include "stub_{stub_safe}.h"')
+    define_lines = ["#define TBD_EXPECTED_RETURN_INT (0)", "#define TBD_VALID_INT_VALUE (0)"]
+    define_lines.extend(_placeholder_defines(test_case_design))
     source = "\n".join(
         [
             "/* generated test skeleton: review required */",
-            "#define TBD_EXPECTED_RETURN_INT (0)",
-            "#define TBD_VALID_INT_VALUE (0)",
+            *define_lines,
             "",
             *include_lines,
+            "",
+            *global_declarations,
             "",
             *functions,
         ]
@@ -628,8 +635,126 @@ def _render_test_function(
         lines.append("    UTR_ASSERT_EQ_INT(TBD_EXPECTED_RETURN_INT, actual_return);")
     for stub_safe in stub_safe_names:
         lines.append(f"    UTR_ASSERT_TRUE(Stub_{stub_safe}_GetCallCount() >= 0);")
+    lines.extend(_expected_observation_assertions(case))
     lines.extend(["}", ""])
     return "\n".join(lines)
+
+
+def _needs_string_compare(test_case_design: dict[str, Any]) -> bool:
+    for case in test_case_design.get("test_cases", []):
+        for observation in case.get("expected_observations", []):
+            if observation.get("observation_kind") == "char_array_string":
+                return True
+    return False
+
+
+def _placeholder_defines(test_case_design: dict[str, Any]) -> list[str]:
+    known = {"TBD_EXPECTED_RETURN_INT", "TBD_VALID_INT_VALUE"}
+    defines: list[str] = []
+    for case in test_case_design.get("test_cases", []):
+        for observation in case.get("expected_observations", []):
+            expression = str(observation.get("expected_expression") or "").strip()
+            if expression in known or not _is_tbd_identifier(expression):
+                continue
+            known.add(expression)
+            if observation.get("observation_kind") == "char_array_string":
+                defines.append(f'#define {expression} ""')
+            else:
+                defines.append(f"#define {expression} (0)")
+    return sorted(defines)
+
+
+def _is_tbd_identifier(value: str) -> bool:
+    return value.startswith("TBD") and re.match(r"^[A-Za-z_]\w*$", value) is not None
+
+
+def _extern_global_declarations(globals_payload: dict[str, Any], test_case_design: dict[str, Any]) -> list[str]:
+    targets = _global_observation_targets(test_case_design)
+    if not targets:
+        return []
+    declarations_by_name = {_optional_identifier(item.get("name")): item for item in globals_payload.get("file_scope_declarations", []) if _optional_identifier(item.get("name"))}
+    access_declarations: dict[str, dict[str, Any]] = {}
+    static_targets: set[str] = set()
+    for access in globals_payload.get("global_accesses", []):
+        name = _optional_identifier(access.get("name"))
+        if not name:
+            continue
+        declaration = access.get("related_declaration") or declarations_by_name.get(name) or {}
+        if _is_static_global(access, declaration):
+            static_targets.add(name)
+            continue
+        if name in targets and name not in access_declarations:
+            access_declarations[name] = declaration
+    lines: list[str] = []
+    for name in sorted(targets):
+        if name in static_targets:
+            continue
+        declaration = access_declarations.get(name) or declarations_by_name.get(name) or {}
+        type_raw = _global_type_raw(declaration)
+        lines.append(f"extern {type_raw} {name};")
+    return lines
+
+
+def _global_observation_targets(test_case_design: dict[str, Any]) -> set[str]:
+    targets: set[str] = set()
+    for case in test_case_design.get("test_cases", []):
+        for observation in case.get("expected_observations", []):
+            if observation.get("observation_kind") != "global_value":
+                continue
+            target = _optional_identifier(observation.get("target_name"))
+            if target:
+                targets.add(target)
+    return targets
+
+
+def _is_static_global(access: dict[str, Any], declaration: dict[str, Any]) -> bool:
+    scope = access.get("scope") or declaration.get("scope")
+    storage_class = declaration.get("storage_class")
+    return scope == "file_static" or storage_class == "static"
+
+
+def _global_type_raw(declaration: dict[str, Any]) -> str:
+    type_raw = str(declaration.get("type_raw") or "int").strip()
+    type_raw = re.sub(r"\b(?:extern|static)\b", "", type_raw).strip()
+    return re.sub(r"\s+", " ", type_raw) or "int"
+
+
+def _expected_observation_assertions(case: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    for observation in case.get("expected_observations", []):
+        kind = observation.get("observation_kind")
+        target = _optional_identifier(observation.get("target_name"))
+        if kind == "global_value" and target:
+            expected = _c_expression(observation.get("expected_expression"), f"TBD_EXPECTED_GLOBAL_{target.upper()}")
+            lines.append(f"    UTR_ASSERT_EQ_INT({expected}, {target});")
+        elif kind == "char_array_string" and target:
+            expected = _c_string_expression(observation.get("expected_expression"), f"TBD_EXPECTED_STRING_{target.upper()}")
+            lines.append(f"    UTR_ASSERT_TRUE(strcmp({target}, {expected}) == 0);")
+    return lines
+
+
+def _optional_identifier(value: Any) -> str:
+    if value is None or str(value).strip() == "":
+        return ""
+    return sanitize_identifier(str(value))
+
+
+def _c_expression(value: Any, placeholder: str) -> str:
+    if value is None:
+        return placeholder
+    text = str(value).strip()
+    return text or placeholder
+
+
+def _c_string_expression(value: Any, placeholder: str) -> str:
+    if value is None:
+        return placeholder
+    text = str(value).strip()
+    if not text:
+        return placeholder
+    if text.startswith('"') or text.startswith("L\"") or text.startswith("TBD_EXPECTED_STRING_"):
+        return text
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def _safe_c_value(value: Any) -> str:

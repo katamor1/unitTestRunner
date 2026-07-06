@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import re
+
 from .test_case_models import ExpectedObservation, TestCaseDesignWarning, UnresolvedTestDesignItem
 
 
-def build_expected_observations(test_case_id: str, coverage_item: dict) -> tuple[list[ExpectedObservation], list[TestCaseDesignWarning], list[UnresolvedTestDesignItem]]:
+def build_expected_observations(
+    test_case_id: str,
+    coverage_item: dict,
+    global_access: dict | None = None,
+    function_signature: dict | None = None,
+) -> tuple[list[ExpectedObservation], list[TestCaseDesignWarning], list[UnresolvedTestDesignItem]]:
     coverage_id = coverage_item.get("coverage_id", "")
     observations = [
         ExpectedObservation(
@@ -25,18 +32,166 @@ def build_expected_observations(test_case_id: str, coverage_item: dict) -> tuple
             note=None,
         ),
     ]
-    warning = TestCaseDesignWarning(
-        "expected_result_not_determined",
-        "Expected return value is a review placeholder.",
-        related_test_case_id=test_case_id,
-        related_coverage_id=coverage_id,
-    )
-    unresolved = UnresolvedTestDesignItem(
-        item_id=f"UNRES_{test_case_id}_RET",
-        item_kind="expected_return_unknown",
-        description="Expected return value must be reviewed from specification.",
-        related_test_case_ids=[test_case_id],
-        reason="Static analysis does not determine final expected result.",
-        suggested_action="Review function specification and source behavior.",
-    )
-    return observations, [warning], [unresolved]
+    warnings = [
+        TestCaseDesignWarning(
+            "expected_result_not_determined",
+            "Expected return value is a review placeholder.",
+            related_test_case_id=test_case_id,
+            related_coverage_id=coverage_id,
+        )
+    ]
+    unresolved = [
+        UnresolvedTestDesignItem(
+            item_id=f"UNRES_{test_case_id}_RET",
+            item_kind="expected_return_unknown",
+            description="Expected return value must be reviewed from specification.",
+            related_test_case_ids=[test_case_id],
+            reason="Static analysis does not determine final expected result.",
+            suggested_action="Review function specification and source behavior.",
+        )
+    ]
+    extra_observations, extra_warnings, extra_unresolved = _side_effect_observations(test_case_id, coverage_id, global_access or {}, function_signature or {})
+    observations.extend(extra_observations)
+    warnings.extend(extra_warnings)
+    unresolved.extend(extra_unresolved)
+    return observations, warnings, unresolved
+
+
+def _side_effect_observations(
+    test_case_id: str,
+    coverage_id: str,
+    global_access: dict,
+    function_signature: dict,
+) -> tuple[list[ExpectedObservation], list[TestCaseDesignWarning], list[UnresolvedTestDesignItem]]:
+    observations: list[ExpectedObservation] = []
+    warnings: list[TestCaseDesignWarning] = []
+    unresolved: list[UnresolvedTestDesignItem] = []
+
+    for access in _updated_accessible_globals(global_access):
+        name = access.get("name")
+        if not name:
+            continue
+        suffix = _placeholder_suffix(name)
+        observations.append(
+            ExpectedObservation(
+                observation_kind="global_value",
+                target_name=name,
+                expected_expression=f"TBD_EXPECTED_GLOBAL_{suffix}",
+                source="global_access",
+                review_required=True,
+                confidence=access.get("confidence", "medium"),
+                note="Expected global value must be reviewed against the function specification.",
+            )
+        )
+        warnings.append(
+            TestCaseDesignWarning(
+                "expected_global_not_determined",
+                f"Expected global value for {name} is a review placeholder.",
+                related_test_case_id=test_case_id,
+                related_coverage_id=coverage_id,
+            )
+        )
+        unresolved.append(
+            UnresolvedTestDesignItem(
+                item_id=f"UNRES_{test_case_id}_GLOBAL_{suffix}",
+                item_kind="expected_global_unknown",
+                description=f"Expected global value for {name} must be reviewed from specification.",
+                related_test_case_ids=[test_case_id],
+                reason="Static analysis detects a global write but does not determine the final expected value.",
+                suggested_action="Review function specification and replace the generated global expected value.",
+            )
+        )
+
+    for parameter in _updated_char_buffers(global_access, function_signature):
+        name = parameter.get("name")
+        if not name:
+            continue
+        suffix = _placeholder_suffix(name)
+        observations.append(
+            ExpectedObservation(
+                observation_kind="char_array_string",
+                target_name=name,
+                expected_expression=f"TBD_EXPECTED_STRING_{suffix}",
+                source="parameter_access",
+                review_required=True,
+                confidence=parameter.get("confidence", "medium"),
+                note="Expected char array string must be reviewed against the function specification.",
+            )
+        )
+        warnings.append(
+            TestCaseDesignWarning(
+                "expected_char_array_string_not_determined",
+                f"Expected string for char array {name} is a review placeholder.",
+                related_test_case_id=test_case_id,
+                related_coverage_id=coverage_id,
+            )
+        )
+        unresolved.append(
+            UnresolvedTestDesignItem(
+                item_id=f"UNRES_{test_case_id}_STRING_{suffix}",
+                item_kind="expected_char_array_string_unknown",
+                description=f"Expected string for char array {name} must be reviewed from specification.",
+                related_test_case_ids=[test_case_id],
+                reason="Static analysis detects a writable char buffer but does not determine the final expected string.",
+                suggested_action="Review function specification and replace the generated string expected value.",
+            )
+        )
+
+    return observations, warnings, unresolved
+
+
+def _updated_accessible_globals(global_access: dict) -> list[dict]:
+    declarations = {item.get("name"): item for item in global_access.get("file_scope_declarations", [])}
+    result: list[dict] = []
+    seen: set[str] = set()
+    for access in global_access.get("global_accesses", []):
+        name = access.get("name")
+        if not name or name in seen:
+            continue
+        if access.get("access_kind") not in {"write", "read_write"}:
+            continue
+        declaration = access.get("related_declaration") or declarations.get(name) or {}
+        if _is_static_file_scope(access, declaration):
+            continue
+        if declaration.get("is_array") or declaration.get("is_struct_like"):
+            continue
+        seen.add(name)
+        result.append(access)
+    return result
+
+
+def _is_static_file_scope(access: dict, declaration: dict) -> bool:
+    scope = access.get("scope") or declaration.get("scope")
+    storage_class = declaration.get("storage_class")
+    return scope == "file_static" or storage_class == "static"
+
+
+def _updated_char_buffers(global_access: dict, function_signature: dict) -> list[dict]:
+    written_parameters = {
+        access.get("parameter_name")
+        for access in global_access.get("parameter_accesses", [])
+        if "write" in str(access.get("access_kind", ""))
+    }
+    result: list[dict] = []
+    for parameter in function_signature.get("function", {}).get("parameters", []):
+        name = parameter.get("name")
+        if not name or name not in written_parameters:
+            continue
+        type_info = parameter.get("type", {})
+        if not _is_char_buffer_type(type_info):
+            continue
+        result.append({"name": name, "confidence": type_info.get("confidence", parameter.get("confidence", "medium"))})
+    return result
+
+
+def _is_char_buffer_type(type_info: dict) -> bool:
+    base_type = str(type_info.get("base_type") or type_info.get("normalized") or type_info.get("raw") or "").strip()
+    compact_base = re.sub(r"\s+", " ", base_type)
+    if compact_base not in {"char", "signed char", "unsigned char"}:
+        return False
+    return bool(type_info.get("is_array") or int(type_info.get("pointer_level") or 0) > 0)
+
+
+def _placeholder_suffix(name: str) -> str:
+    suffix = re.sub(r"\W+", "_", str(name)).strip("_").upper()
+    return suffix or "VALUE"

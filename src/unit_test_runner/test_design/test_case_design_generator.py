@@ -51,7 +51,7 @@ def generate_test_case_design(
         inputs, input_candidate_ids = build_input_assignments(signature_payload, selected, fallback_candidates)
         states, state_warnings, state_candidate_ids = build_state_setups(related_candidates, test_case_id, coverage_id)
         stubs, stub_warnings, stub_candidate_ids = build_stub_setups(related_candidates, call_payload, coverage_item, test_case_id)
-        observations, observation_warnings, unresolved_items = build_expected_observations(test_case_id, coverage_item)
+        observations, observation_warnings, unresolved_items = build_expected_observations(test_case_id, coverage_item, global_payload, signature_payload)
         candidate_links = input_candidate_ids + state_candidate_ids + stub_candidate_ids
         case = TestCaseDesign(
             test_case_id=test_case_id,

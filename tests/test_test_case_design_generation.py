@@ -78,6 +78,22 @@ class TestCaseDesignGenerationTests(unittest.TestCase):
         observations = [observation for case in cases for observation in case["expected_observations"]]
         self.assertTrue(any(observation["observation_kind"] == "return_value" and observation["expected_expression"] == "TBD_EXPECTED_RETURN" for observation in observations))
         self.assertTrue(any(observation["observation_kind"] == "coverage_target" for observation in observations))
+        self.assertTrue(
+            any(
+                observation["observation_kind"] == "global_value"
+                and observation["target_name"] == "g_error"
+                and observation["expected_expression"] == "TBD_EXPECTED_GLOBAL_G_ERROR"
+                for observation in observations
+            )
+        )
+        self.assertTrue(
+            any(
+                observation["observation_kind"] == "char_array_string"
+                and observation["target_name"] == "buffer"
+                and observation["expected_expression"] == "TBD_EXPECTED_STRING_BUFFER"
+                for observation in observations
+            )
+        )
         unresolved_kinds = {item["item_kind"] for item in payload["unresolved_items"]}
         self.assertIn("expected_return_unknown", unresolved_kinds)
 
