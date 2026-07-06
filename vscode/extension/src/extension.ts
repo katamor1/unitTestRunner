@@ -15,7 +15,7 @@ import {
   relativeSourcePath,
 } from './cli/commandBuilder';
 import { CliResult, runCliInvocation } from './cli/cliRunner';
-import { parseCliResult } from './cli/cliResultParser';
+import { formatCliFailureMessage, parseCliResult } from './cli/cliResultParser';
 import { DEFAULT_CLI_PATH, resolveCliPath } from './config/bundledCli';
 import { AdapterSettings, defaultSourceRootFromWorkspaceFolders, RawSettings, readAdapterSettingsFromObject } from './config/settings';
 import { buildSettingsViewModel, SettingsActionKind, SettingsFieldId, SettingsViewModel } from './config/settingsViewModel';
@@ -167,6 +167,7 @@ function readRawConfig(): RawSettings {
     defaultConfiguration: config.get('defaultConfiguration'),
     defaultProject: config.get('defaultProject'),
     projectName: config.get('projectName'),
+    vcvarsPath: config.get('vcvarsPath'),
     autoOpenDossier: config.get('autoOpenDossier'),
     finalizeDossierAfterAnalyze: config.get('finalizeDossierAfterAnalyze'),
     useJsonOutput: config.get('useJsonOutput'),
@@ -303,6 +304,7 @@ function settingKeyForField(fieldId: SettingsFieldId): string {
     outputRoot: 'outputRoot',
     defaultConfiguration: 'defaultConfiguration',
     defaultProject: 'defaultProject',
+    vcvarsPath: 'vcvarsPath',
     cliPath: 'cliPath',
   };
   return keys[fieldId];
@@ -332,6 +334,9 @@ function filePickerFilters(fieldId: SettingsFieldId): Record<string, string[]> {
   if (fieldId === 'cliPath') {
     return { '実行ファイル': ['exe'], 'すべてのファイル': ['*'] };
   }
+  if (fieldId === 'vcvarsPath') {
+    return { 'Batch files': ['bat', 'cmd'], 'すべてのファイル': ['*'] };
+  }
   return { 'すべてのファイル': ['*'] };
 }
 
@@ -350,6 +355,9 @@ function inputPrompt(fieldId: SettingsFieldId): string {
   }
   if (fieldId === 'defaultProject') {
     return '既定プロジェクト名を入力してください。空にすると指定なしになります。';
+  }
+  if (fieldId === 'vcvarsPath') {
+    return 'VC6環境設定バッチの絶対パスを入力してください。例: C:\\Program Files\\Microsoft Visual Studio\\VC98\\Bin\\VCVARS32.BAT';
   }
   if (fieldId === 'cliPath') {
     return '外部CLI exeの絶対パスを入力してください。同梱CLIを使う場合は unit-test-runner または空にします。';
@@ -429,8 +437,9 @@ async function executeInvocation(context: vscode.ExtensionContext, output: vscod
     throw new Error('unit-test-runnerがタイムアウトしました。');
   }
   if (result.exitCode !== 0) {
-    await recordWorkflowError(context, workflowPanel, `unit-test-runnerが終了コード ${result.exitCode ?? 'unknown'} で終了しました。`);
-    throw new Error(`unit-test-runnerが終了コード ${result.exitCode ?? 'unknown'} で終了しました。`);
+    const message = formatCliFailureMessage(result.stdout, result.stderr, result.exitCode);
+    await recordWorkflowError(context, workflowPanel, message);
+    throw new Error(message);
   }
   const parsed = parseCliResult(result.stdout, result.stderr, outputWorkspace);
   await context.globalState.update(LAST_WORKSPACE_KEY, parsed.reports.workspace);

@@ -84,6 +84,12 @@ def render_probe_markdown(report: BuildProbeReport) -> str:
     lines.extend([f"- {item.issue_kind}: {item.diagnostic_raw}" for item in report.pch_issues] or ["- なし"])
     lines.extend(["", "## VC6互換性課題"])
     lines.extend([f"- {item.issue_kind}: {item.diagnostic_raw}" for item in report.vc6_compatibility_issues] or ["- なし"])
+    lines.extend(["", "## 診断"])
+    if report.diagnostics:
+        for diagnostic in report.diagnostics:
+            lines.append(f"- {diagnostic.code}: {diagnostic.message}")
+    else:
+        lines.append("- なし")
     return "\n".join(lines) + "\n"
 
 

@@ -80,6 +80,9 @@ export function buildFinalizeDossierInvocation(settings: AdapterSettings, worksp
 
 export function buildBuildProbeInvocation(settings: AdapterSettings, workspace: string, run: boolean): CliInvocation {
   const args = jsonPrefix(settings).concat(['build-probe', '--workspace', workspace, run ? '--run' : '--dry-run']);
+  if (settings.vcvarsPath) {
+    args.push('--vcvars', settings.vcvarsPath);
+  }
   return invocation(settings, args, run && settings.runBuildProbeRequiresConfirmation);
 }
 

@@ -3,9 +3,9 @@ import * as fs from 'fs';
 import { describe, it } from 'node:test';
 import * as path from 'path';
 
-import { buildAnalyzeFunctionInvocation, buildFinalizeDossierInvocation, buildGenerateHarnessSkeletonInvocation, buildGenerateTestDesignInvocation, buildReanalyzeFunctionInvocation, buildRunTestsInvocation } from '../cli/commandBuilder';
+import { buildAnalyzeFunctionInvocation, buildBuildProbeInvocation, buildFinalizeDossierInvocation, buildGenerateHarnessSkeletonInvocation, buildGenerateTestDesignInvocation, buildReanalyzeFunctionInvocation, buildRunTestsInvocation } from '../cli/commandBuilder';
 import { runCliInvocation } from '../cli/cliRunner';
-import { parseCliResult, parseCliResultReportPaths } from '../cli/cliResultParser';
+import { formatCliFailureMessage, parseCliResult, parseCliResultReportPaths } from '../cli/cliResultParser';
 import { DEFAULT_CLI_PATH, resolveCliPath } from '../config/bundledCli';
 import { defaultSourceRootFromWorkspaceFolders, readAdapterSettingsFromObject } from '../config/settings';
 import { buildSettingsViewModel } from '../config/settingsViewModel';
@@ -174,6 +174,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
         outputRoot: 'C:\\unit test workspace',
         defaultConfiguration: 'Win32 Debug',
         defaultProject: 'Control',
+        vcvarsPath: 'C:\\Program Files\\Microsoft Visual Studio\\VC98\\Bin\\VCVARS32.BAT',
         useJsonOutput: true,
       },
       'C:\\work\\product',
@@ -207,7 +208,30 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.deepEqual(harness.args.slice(0, 2), ['--json', 'generate-harness-skeleton']);
     assert.deepEqual(harness.args.slice(harness.args.indexOf('--test-case-design'), harness.args.indexOf('--test-case-design') + 2), ['--test-case-design', path.join(target.outputWorkspace, 'reports', 'test_case_design.json')]);
     assert.deepEqual(harness.args.slice(harness.args.indexOf('--out'), harness.args.indexOf('--out') + 2), ['--out', target.outputWorkspace]);
+    const buildProbe = buildBuildProbeInvocation(settings, target.outputWorkspace, true);
+    assert.deepEqual(buildProbe.args.slice(buildProbe.args.indexOf('--vcvars'), buildProbe.args.indexOf('--vcvars') + 2), ['--vcvars', settings.vcvarsPath]);
     assert.equal(runTests.requiresConfirmation, true);
+  });
+
+  it('exposes vcvarsPath as an optional advanced setting for build execution', () => {
+    const model = buildSettingsViewModel(
+      {
+        cliPath: 'unit-test-runner',
+        sourceRoot: 'C:\\work\\product',
+        dswPath: 'C:\\work\\product\\Product.dsw',
+        outputRoot: 'D:\\unit-test-output',
+        defaultConfiguration: 'Win32 Debug',
+        vcvarsPath: 'C:\\VC98\\Bin\\VCVARS32.BAT',
+      },
+      'C:\\work\\product',
+    );
+    const field = model.fields.find((item) => item.id === 'vcvarsPath');
+
+    assert.ok(field);
+    assert.equal(field.settingKey, 'unitTestRunner.vcvarsPath');
+    assert.equal(field.state, 'configured');
+    assert.equal(field.advanced, true);
+    assert.ok(field.actions.some((action) => action.kind === 'pickFile'));
   });
 
   it('prefers bundled CLI only when cliPath is default or empty', () => {
@@ -289,6 +313,24 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
 
     assert.ok(parsed.warnings.some((warning) => warning.includes('レポートパス')));
     assert.equal(path.basename(parsed.reports.functionDossierMd ?? ''), 'function_dossier.md');
+  });
+
+  it('formats nonzero CLI JSON with environment diagnostics for panel errors', () => {
+    const message = formatCliFailureMessage(
+      JSON.stringify({
+        status: 'build_probe_environment_missing',
+        exit_code: 30,
+        command: 'build-probe',
+        message: 'Build probe could not run because the VC6 environment is missing.',
+        errors: ['VC6 build tools were not found on PATH.'],
+      }),
+      '',
+      30,
+    );
+
+    assert.match(message, /終了コード 30/);
+    assert.match(message, /VC6 build tools were not found on PATH\./);
+    assert.match(message, /build-probe/);
   });
 
   it('requires confirmation only for explicit build and test execution commands', () => {

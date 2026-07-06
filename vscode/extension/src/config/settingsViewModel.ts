@@ -8,6 +8,7 @@ export type SettingsFieldId =
   | 'outputRoot'
   | 'defaultConfiguration'
   | 'defaultProject'
+  | 'vcvarsPath'
   | 'cliPath';
 
 export type SettingsFieldState = 'configured' | 'default' | 'missing' | 'warning' | 'optional';
@@ -110,6 +111,7 @@ function fieldSpecs(raw: RawSettings, settings: ReturnType<typeof readAdapterSet
   const configuredCliPath = nonEmptyString(raw.cliPath) ?? '';
   const configuredDefaultConfiguration = nonEmptyString(raw.defaultConfiguration) ?? '';
   const configuredDefaultProject = nonEmptyString(raw.defaultProject) ?? nonEmptyString(raw.projectName) ?? '';
+  const configuredVcvarsPath = nonEmptyString(raw.vcvarsPath) ?? '';
   return [
     {
       id: 'sourceRoot',
@@ -176,6 +178,22 @@ function fieldSpecs(raw: RawSettings, settings: ReturnType<typeof readAdapterSet
       actions: [
         { id: 'inputDefaultProject', kind: 'inputText', label: 'プロジェクト名を入力', primary: true },
         { id: 'resetDefaultProject', kind: 'reset', label: 'クリア' },
+      ],
+    },
+    {
+      id: 'vcvarsPath',
+      label: 'VC6 vcvars32.bat',
+      settingKey: 'unitTestRunner.vcvarsPath',
+      description: 'ビルドプローブ実行前に呼び出すVC6環境設定バッチです。nmake/clがPATHに無い場合に指定します。',
+      effectiveValue: settings.vcvarsPath ?? '',
+      configuredValue: configuredVcvarsPath,
+      defaulted: false,
+      optional: true,
+      advanced: true,
+      actions: [
+        { id: 'pickVcvarsPath', kind: 'pickFile', label: 'batを選択', primary: true },
+        { id: 'inputVcvarsPath', kind: 'inputText', label: 'パスを入力' },
+        { id: 'resetVcvarsPath', kind: 'reset', label: 'クリア' },
       ],
     },
     {

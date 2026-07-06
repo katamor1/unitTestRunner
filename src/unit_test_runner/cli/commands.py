@@ -452,30 +452,52 @@ def _require_build_probe_workspace_reports(workspace: Path, command: str) -> Non
 
 
 def _build_probe_result(command: str, workspace: Path, workspace_report, probe_report) -> CLIResult:
+    build_workspace_json = workspace / "reports" / "build_workspace_report.json"
+    build_workspace_md = workspace / "reports" / "build_workspace_report.md"
+    build_probe_json = workspace / "reports" / "build_probe_report.json"
+    build_probe_md = workspace / "reports" / "build_probe_report.md"
     payload = {
         "build_workspace": {
-            "json": str(workspace / "reports" / "build_workspace_report.json"),
-            "markdown": str(workspace / "reports" / "build_workspace_report.md"),
+            "json": str(build_workspace_json),
+            "markdown": str(build_workspace_md),
             "status": workspace_report.status,
         },
         "build_probe": {
-            "json": str(workspace / "reports" / "build_probe_report.json"),
-            "markdown": str(workspace / "reports" / "build_probe_report.md"),
+            "json": str(build_probe_json),
+            "markdown": str(build_probe_md),
             "status": probe_report.status,
             "executed": probe_report.executed,
         },
+        "reports": {
+            "build_workspace_report_json": str(build_workspace_json),
+            "build_workspace_report_md": str(build_workspace_md),
+            "build_probe_report_json": str(build_probe_json),
+            "build_probe_report_md": str(build_probe_md),
+        },
     }
     exit_code = EXIT_OK
+    errors = []
     if probe_report.status == "failed":
         exit_code = EXIT_BUILD_PROBE_FAILED
     elif probe_report.status == "environment_missing":
         exit_code = EXIT_ENVIRONMENT_WARNING
+    if exit_code != EXIT_OK:
+        errors = [diagnostic.message for diagnostic in probe_report.diagnostics if diagnostic.severity == "error"]
+    status = "build_workspace_generated"
+    if probe_report.status == "environment_missing":
+        status = "build_probe_environment_missing"
+    elif probe_report.executed:
+        status = f"build_probe_{probe_report.status}"
+    message = "Build workspace generated."
+    if errors:
+        message = errors[0]
     return CLIResult(
-        status="build_workspace_generated" if not probe_report.executed else f"build_probe_{probe_report.status}",
+        status=status,
         exit_code=exit_code,
         command=command,
-        message="Build workspace generated.",
+        message=message,
         data=payload,
+        errors=errors,
         legacy_payload=payload,
     )
 

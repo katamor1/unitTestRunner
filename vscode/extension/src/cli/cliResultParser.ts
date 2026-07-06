@@ -12,6 +12,26 @@ export function parseCliResultReportPaths(stdout: string, stderr: string, worksp
   return parsed.reports;
 }
 
+export function formatCliFailureMessage(stdout: string, stderr: string, exitCode: number | null): string {
+  const exitText = `unit-test-runnerが終了コード ${exitCode ?? 'unknown'} で終了しました。`;
+  const parsed = parseJsonObject(stdout);
+  if (!parsed) {
+    const detail = stderr.trim();
+    return detail ? `${exitText} ${detail}` : exitText;
+  }
+  const command = stringValue(parsed.command);
+  const details = stringArrayValue(parsed.errors);
+  const message = stringValue(parsed.message);
+  const status = stringValue(parsed.status);
+  const detailParts = [...details];
+  if (message && message !== 'Build workspace generated.' && !detailParts.includes(message)) {
+    detailParts.push(message);
+  }
+  const context = [command, status].filter(Boolean).join(' / ');
+  const suffix = [context, ...detailParts].filter(Boolean).join(': ');
+  return suffix ? `${exitText} ${suffix}` : exitText;
+}
+
 export function parseCliResult(stdout: string, stderr: string, workspace: string): ParsedCliResult {
   const warnings: string[] = [];
   const fallback = resolveReportPaths(workspace);
@@ -82,4 +102,20 @@ function optionalObjectValue(value: unknown): Record<string, unknown> | undefine
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+function stringArrayValue(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
 }

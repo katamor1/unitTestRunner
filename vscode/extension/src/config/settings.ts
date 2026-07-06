@@ -7,6 +7,7 @@ export interface AdapterSettings {
   outputRoot: string;
   defaultConfiguration: string;
   defaultProject?: string;
+  vcvarsPath?: string;
   autoOpenDossier: boolean;
   finalizeDossierAfterAnalyze: boolean;
   useJsonOutput: boolean;
@@ -36,6 +37,7 @@ export function readAdapterSettingsFromObject(raw: RawSettings, defaultSourceRoo
     outputRoot: stringValue(raw.outputRoot, ''),
     defaultConfiguration: stringValue(nonEmptyString(raw.defaultConfiguration), 'Win32 Debug'),
     defaultProject: stringValue(nonEmptyString(raw.defaultProject) ?? nonEmptyString(raw.projectName), ''),
+    vcvarsPath: stringValue(nonEmptyString(raw.vcvarsPath), ''),
     autoOpenDossier: booleanValue(raw.autoOpenDossier, true),
     finalizeDossierAfterAnalyze: booleanValue(raw.finalizeDossierAfterAnalyze, true),
     useJsonOutput: booleanValue(raw.useJsonOutput, true),

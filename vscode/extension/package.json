@@ -183,6 +183,11 @@
           "default": "",
           "description": "ソースが複数プロジェクトに属する場合に使う既定VC6プロジェクト名です。"
         },
+        "unitTestRunner.vcvarsPath": {
+          "type": "string",
+          "default": "",
+          "description": "ビルドプローブ実行前に呼び出すVC6環境設定バッチです。nmake/clがPATHに無い場合は VC98\\Bin\\VCVARS32.BAT などを指定します。"
+        },
         "unitTestRunner.projectName": {
           "type": "string",
           "default": "",
