@@ -33,6 +33,8 @@
     "onCommand:unitTestRunner.prepareEvidence",
     "onCommand:unitTestRunner.registerCurrentFunctionInSuite",
     "onCommand:unitTestRunner.openSuite",
+    "onCommand:unitTestRunner.openSuiteDashboard",
+    "onCommand:unitTestRunner.openSuiteManifest",
     "onCommand:unitTestRunner.runSelectedSuiteTests",
     "onCommand:unitTestRunner.runSuiteByTag",
     "onCommand:unitTestRunner.runAllSuiteTestsRequireGreen",
@@ -113,6 +115,14 @@
       {
         "command": "unitTestRunner.openSuite",
         "title": "UnitTestRunner: スイートを開く"
+      },
+      {
+        "command": "unitTestRunner.openSuiteDashboard",
+        "title": "UnitTestRunner: スイートダッシュボードを開く"
+      },
+      {
+        "command": "unitTestRunner.openSuiteManifest",
+        "title": "UnitTestRunner: スイートmanifestを開く"
       },
       {
         "command": "unitTestRunner.runSelectedSuiteTests",

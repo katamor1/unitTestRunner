@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
 import { describe, it } from 'node:test';
+import * as os from 'os';
 import * as path from 'path';
 
 import { buildAnalyzeFunctionInvocation, buildBuildProbeInvocation, buildFinalizeDossierInvocation, buildGenerateHarnessSkeletonInvocation, buildGenerateTestDesignInvocation, buildReanalyzeFunctionInvocation, buildRunTestsInvocation, buildSuiteManifestPath, buildSuiteRegisterInvocation, buildSuiteRunInvocation } from '../cli/commandBuilder';
@@ -13,6 +14,7 @@ import { validateSettings } from '../config/validation';
 import { resolveFunctionNameFromText } from '../functionTarget/regexFunctionResolver';
 import { resolveReportPaths } from '../reports/reportPathResolver';
 import { commandRequiresConfirmation } from '../safety/confirmation';
+import { readSuiteViewModel } from '../suite/suiteViewModel';
 import { renderSettings } from '../workflow/settingsPanelRenderer';
 import {
   completeAwaitingSaveIfMatches,
@@ -391,6 +393,35 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.match(message, /build-probe/);
   });
 
+  it('formats suite require-green failures with a clear non-green summary', () => {
+    const message = formatCliFailureMessage(
+      JSON.stringify({
+        status: 'suite_run_failed',
+        exit_code: 32,
+        command: 'suite-run',
+        message: 'Suite run completed.',
+        data: {
+          summary: {
+            total: 2,
+            green: 1,
+            not_green: 1,
+            executed: 2,
+            failed: 1,
+          },
+          reports: {
+            suite_run_report_md: 'D:\\out\\suites\\default\\reports\\suite_run_report.md',
+          },
+        },
+      }),
+      '',
+      32,
+    );
+
+    assert.match(message, /全件GREENではありません/);
+    assert.match(message, /GREEN 1 \/ Not GREEN 1 \/ Total 2/);
+    assert.match(message, /suite_run_report\.md/);
+  });
+
   it('requires confirmation only for explicit build and test execution commands', () => {
     assert.equal(commandRequiresConfirmation('build-probe', { run: false, dryRun: true }), false);
     assert.equal(commandRequiresConfirmation('build-probe', { run: true, dryRun: false }), true);
@@ -434,6 +465,8 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
       'unitTestRunner.runSelectedSuiteTests',
       'unitTestRunner.runSuiteByTag',
       'unitTestRunner.runAllSuiteTestsRequireGreen',
+      'unitTestRunner.openSuiteDashboard',
+      'unitTestRunner.openSuiteManifest',
       'unitTestRunner.openSuiteRunReport',
     ]) {
       assert.ok(commands.has(command), command);
@@ -441,6 +474,8 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     }
     assert.equal(commandTitles.get('unitTestRunner.analyzeCurrentFunction'), 'UnitTestRunner: 現在関数を解析');
     assert.equal(commandTitles.get('unitTestRunner.openLastFunctionDossier'), 'UnitTestRunner: 最後の関数dossierを開く');
+    assert.equal(commandTitles.get('unitTestRunner.openSuite'), 'UnitTestRunner: スイートを開く');
+    assert.equal(commandTitles.get('unitTestRunner.openSuiteManifest'), 'UnitTestRunner: スイートmanifestを開く');
     assert.equal(commandTitles.get('unitTestRunner.runAllSuiteTestsRequireGreen'), 'UnitTestRunner: スイート全件GREEN確認');
     assert.equal([...commandTitles.values()].some((title) => title.includes('Analyze Current Function')), false);
     assert.equal([...commandTitles.values()].some((title) => title.includes('Open Last Function Dossier')), false);
@@ -462,6 +497,100 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.ok(workflowViews.some((item) => item.id === 'unitTestRunner.workflow' && item.name === 'ワークフロー' && item.type === 'webview'));
     assert.ok(workflowViews.some((item) => item.id === 'unitTestRunner.suite' && item.name === 'スイート' && item.type === 'webview'));
     assert.ok(configuration['unitTestRunner.suiteManifestPath']);
+  });
+
+  it('combines suite manifest entries with the latest suite run report for dashboard rows', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'utr-suite-view-'));
+    const suitePath = path.join(root, 'suites', 'default', 'suite_manifest.json');
+    const reportPath = path.join(root, 'suites', 'default', 'reports', 'suite_run_report.json');
+    fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+    fs.writeFileSync(
+      suitePath,
+      JSON.stringify({
+        schema_version: '0.1',
+        suite_id: 'default',
+        source_root: 'C:/work/product',
+        dsw_path: 'C:/work/product/Product.dsw',
+        entries: [
+          {
+            entry_id: 'Shared-111111111111',
+            enabled: true,
+            tags: ['selected', 'regression'],
+            function: { name: 'Shared', source: 'shared.c', project: 'App', configuration: 'Win32 Debug' },
+            workspace: 'D:/out/Shared',
+            dossier: 'D:/out/Shared/reports/function_dossier.json',
+            test_execution_report: 'D:/out/Shared/reports/test_execution_report.json',
+            registered_at: '2026-07-07T00:00:00Z',
+          },
+          {
+            entry_id: 'Shared2-222222222222',
+            enabled: true,
+            tags: ['regression'],
+            function: { name: 'Shared2', source: 'shared.c', project: 'App', configuration: 'Win32 Debug' },
+            workspace: 'D:/out/Shared2',
+            dossier: 'D:/out/Shared2/reports/function_dossier.json',
+            test_execution_report: 'D:/out/Shared2/reports/test_execution_report.json',
+            registered_at: '2026-07-07T00:00:00Z',
+          },
+        ],
+      }),
+      'utf-8',
+    );
+    fs.writeFileSync(
+      reportPath,
+      JSON.stringify({
+        schema_version: '0.1',
+        status: 'suite_run_failed',
+        suite_id: 'default',
+        summary: { total: 2, green: 1, not_green: 1, executed: 2, failed: 1 },
+        results: [
+          {
+            entry_id: 'Shared-111111111111',
+            function: 'Shared',
+            workspace: 'D:/out/Shared',
+            execution_status: 'passed',
+            green_status: 'green',
+            executed: true,
+            total_tests: 3,
+            passed_tests: 3,
+            failed_tests: 0,
+            inconclusive_tests: 0,
+            unresolved_review_count: 0,
+            report_path: 'D:/out/Shared/reports/test_execution_report.json',
+          },
+          {
+            entry_id: 'Shared2-222222222222',
+            function: 'Shared2',
+            workspace: 'D:/out/Shared2',
+            execution_status: 'error',
+            green_status: 'not_green',
+            executed: false,
+            total_tests: 0,
+            passed_tests: 0,
+            failed_tests: 0,
+            inconclusive_tests: 0,
+            unresolved_review_count: 1,
+            report_path: 'D:/out/Shared2/reports/test_execution_report.json',
+            error: 'VC6 build tools were not found on PATH.',
+          },
+        ],
+      }),
+      'utf-8',
+    );
+
+    const model = readSuiteViewModel(suitePath, new Set(['Shared2-222222222222']), '直近エラー');
+    const rows = new Map(model.entries.map((entry) => [entry.entryId, entry]));
+
+    assert.equal(model.reportPath, reportPath);
+    assert.deepEqual(model.summary, { total: 2, green: 1, notGreen: 1, executed: 2, failed: 1 });
+    assert.equal(model.lastError, '直近エラー');
+    assert.equal(rows.get('Shared-111111111111')?.greenStatus, 'green');
+    assert.equal(rows.get('Shared-111111111111')?.totalTests, 3);
+    assert.equal(rows.get('Shared2-222222222222')?.selected, true);
+    assert.equal(rows.get('Shared2-222222222222')?.lastRunStatus, 'error');
+    assert.equal(rows.get('Shared2-222222222222')?.greenStatus, 'not_green');
+    assert.equal(rows.get('Shared2-222222222222')?.unresolvedReviewCount, 1);
+    assert.equal(rows.get('Shared2-222222222222')?.error, 'VC6 build tools were not found on PATH.');
   });
 
   it('packages a VS Code extension README for the details view', () => {

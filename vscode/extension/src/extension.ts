@@ -27,6 +27,7 @@ import { validateSettings } from './config/validation';
 import { resolveFunctionNameFromText } from './functionTarget/regexFunctionResolver';
 import { ReportPaths, resolveReportPaths } from './reports/reportPathResolver';
 import { openMarkdown, openReport } from './reports/reportOpener';
+import { SuiteDashboardPanel } from './suite/suiteDashboard';
 import { readSelectedSuiteEntryIds, SuitePanelProvider } from './suite/suitePanel';
 import { WorkflowPanelProvider } from './workflow/workflowPanel';
 import {
@@ -43,6 +44,7 @@ import {
 const LAST_DOSSIER_KEY = 'unitTestRunner.lastFunctionDossierMarkdown';
 const LAST_WORKSPACE_KEY = 'unitTestRunner.lastOutputWorkspace';
 const LAST_COMMAND_KEY = 'unitTestRunner.lastCliCommand';
+const LAST_SUITE_ERROR_KEY = 'unitTestRunner.lastSuiteError';
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Unit Test Runner');
@@ -58,13 +60,18 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
   let suitePanel: SuitePanelProvider;
-  suitePanel = new SuitePanelProvider(context, () => buildSuiteManifestPath(readConfig(context)));
+  let suiteDashboard: SuiteDashboardPanel;
+  const suiteManifestPath = () => buildSuiteManifestPath(readConfig(context));
+  const lastSuiteError = () => context.workspaceState.get<string>(LAST_SUITE_ERROR_KEY);
+  suiteDashboard = new SuiteDashboardPanel(context, suiteManifestPath, lastSuiteError);
+  suitePanel = new SuitePanelProvider(context, suiteManifestPath, lastSuiteError);
   context.subscriptions.push(vscode.window.registerWebviewViewProvider(WorkflowPanelProvider.viewType, workflowPanel));
   context.subscriptions.push(vscode.window.registerWebviewViewProvider(SuitePanelProvider.viewType, suitePanel));
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
     if (event.affectsConfiguration('unitTestRunner')) {
       workflowPanel.refresh();
       suitePanel.refresh();
+      suiteDashboard.refresh();
     }
   }));
   context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(async (document) => {
@@ -93,11 +100,13 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('unitTestRunner.runBuildProbe', async () => runWorkspaceCommand(context, output, 'buildProbeRun', workflowPanel)),
     vscode.commands.registerCommand('unitTestRunner.runTests', async () => runWorkspaceCommand(context, output, 'runTests', workflowPanel)),
     vscode.commands.registerCommand('unitTestRunner.prepareEvidence', async () => runWorkspaceCommand(context, output, 'evidence', workflowPanel)),
-    vscode.commands.registerCommand('unitTestRunner.registerCurrentFunctionInSuite', async () => registerActiveFunctionInSuite(context, output, workflowPanel, suitePanel)),
-    vscode.commands.registerCommand('unitTestRunner.openSuite', async () => openSuiteManifest(context)),
-    vscode.commands.registerCommand('unitTestRunner.runSelectedSuiteTests', async () => runSuiteCommand(context, output, { selected: true, run: true }, suitePanel)),
-    vscode.commands.registerCommand('unitTestRunner.runSuiteByTag', async () => runSuiteByTag(context, output, suitePanel)),
-    vscode.commands.registerCommand('unitTestRunner.runAllSuiteTestsRequireGreen', async () => runSuiteCommand(context, output, { all: true, run: true, requireGreen: true }, suitePanel)),
+    vscode.commands.registerCommand('unitTestRunner.registerCurrentFunctionInSuite', async () => registerActiveFunctionInSuite(context, output, workflowPanel, suitePanel, suiteDashboard)),
+    vscode.commands.registerCommand('unitTestRunner.openSuite', async () => suiteDashboard.open()),
+    vscode.commands.registerCommand('unitTestRunner.openSuiteDashboard', async () => suiteDashboard.open()),
+    vscode.commands.registerCommand('unitTestRunner.openSuiteManifest', async () => openSuiteManifest(context)),
+    vscode.commands.registerCommand('unitTestRunner.runSelectedSuiteTests', async () => runSuiteCommand(context, output, { selected: true, run: true }, suitePanel, suiteDashboard)),
+    vscode.commands.registerCommand('unitTestRunner.runSuiteByTag', async () => runSuiteByTag(context, output, suitePanel, suiteDashboard)),
+    vscode.commands.registerCommand('unitTestRunner.runAllSuiteTestsRequireGreen', async () => runSuiteCommand(context, output, { all: true, run: true, requireGreen: true }, suitePanel, suiteDashboard)),
     vscode.commands.registerCommand('unitTestRunner.openSuiteRunReport', async () => openSuiteRunReport(context)),
     vscode.commands.registerCommand('unitTestRunner.openOutputWorkspace', async () => openOutputWorkspace(context)),
     vscode.commands.registerCommand('unitTestRunner.copyLastCommand', async () => copyLastCommand(context)),
@@ -171,13 +180,17 @@ async function reanalyzeActiveFunction(context: vscode.ExtensionContext, output:
   }
 }
 
-async function registerActiveFunctionInSuite(context: vscode.ExtensionContext, output: vscode.OutputChannel, workflowPanel: WorkflowPanelProvider, suitePanel: SuitePanelProvider): Promise<void> {
+async function registerActiveFunctionInSuite(context: vscode.ExtensionContext, output: vscode.OutputChannel, workflowPanel: WorkflowPanelProvider, suitePanel: SuitePanelProvider, suiteDashboard: SuiteDashboardPanel): Promise<void> {
   const target = await activeFunctionTarget(context);
   const settings = readConfig(context);
   const invocation = buildSuiteRegisterInvocation(settings, target, ['selected', 'regression']);
-  await executeSuiteInvocation(context, output, invocation, suitePanel);
+  const completed = await executeSuiteInvocation(context, output, invocation, suitePanel, suiteDashboard);
+  if (!completed) {
+    return;
+  }
   await context.globalState.update(LAST_WORKSPACE_KEY, target.outputWorkspace);
   workflowPanel.refresh();
+  suiteDashboard.refresh();
   void vscode.window.showInformationMessage('UnitTestRunner: 現在関数をスイートに登録しました。');
 }
 
@@ -208,7 +221,7 @@ interface SuiteCommandOptions {
   requireGreen?: boolean;
 }
 
-async function runSuiteByTag(context: vscode.ExtensionContext, output: vscode.OutputChannel, suitePanel: SuitePanelProvider): Promise<void> {
+async function runSuiteByTag(context: vscode.ExtensionContext, output: vscode.OutputChannel, suitePanel: SuitePanelProvider, suiteDashboard: SuiteDashboardPanel): Promise<void> {
   const tag = await vscode.window.showInputBox({
     prompt: '実行するスイートタグを入力してください。',
     value: 'selected',
@@ -216,10 +229,10 @@ async function runSuiteByTag(context: vscode.ExtensionContext, output: vscode.Ou
   if (!tag) {
     throw new Error('スイートタグの指定が必要です。');
   }
-  await runSuiteCommand(context, output, { tag: tag.trim(), run: true }, suitePanel);
+  await runSuiteCommand(context, output, { tag: tag.trim(), run: true }, suitePanel, suiteDashboard);
 }
 
-async function runSuiteCommand(context: vscode.ExtensionContext, output: vscode.OutputChannel, options: SuiteCommandOptions, suitePanel: SuitePanelProvider): Promise<void> {
+async function runSuiteCommand(context: vscode.ExtensionContext, output: vscode.OutputChannel, options: SuiteCommandOptions, suitePanel: SuitePanelProvider, suiteDashboard: SuiteDashboardPanel): Promise<void> {
   const settings = readConfig(context);
   showValidation(settings);
   const entryIds = options.selected ? readSelectedSuiteEntryIds(context) : undefined;
@@ -233,7 +246,10 @@ async function runSuiteCommand(context: vscode.ExtensionContext, output: vscode.
     run: options.run,
     requireGreen: options.requireGreen,
   });
-  await executeSuiteInvocation(context, output, invocation, suitePanel);
+  await executeSuiteInvocation(context, output, invocation, suitePanel, suiteDashboard);
+  if (options.all && options.requireGreen) {
+    suiteDashboard.open();
+  }
 }
 
 function readRawConfig(): RawSettings {
@@ -538,26 +554,92 @@ async function executeInvocation(context: vscode.ExtensionContext, output: vscod
   return parsed.reports;
 }
 
-async function executeSuiteInvocation(context: vscode.ExtensionContext, output: vscode.OutputChannel, invocation: CliInvocation, suitePanel: SuitePanelProvider): Promise<void> {
+async function executeSuiteInvocation(context: vscode.ExtensionContext, output: vscode.OutputChannel, invocation: CliInvocation, suitePanel: SuitePanelProvider, suiteDashboard: SuiteDashboardPanel): Promise<boolean> {
   if (invocation.requiresConfirmation) {
     const selected = await vscode.window.showWarningMessage('このコマンドは登録済みスイートのテストを実行する可能性があります。続行しますか？', { modal: true }, '続行');
     if (selected !== '続行') {
-      throw new Error('UnitTestRunnerスイートコマンドをキャンセルしました。');
+      return false;
     }
   }
   await context.globalState.update(LAST_COMMAND_KEY, invocation.displayCommand);
   output.show(true);
   output.appendLine(`> ${invocation.displayCommand}`);
-  const result = await runCliInvocation(invocation);
+  let result: CliResult;
+  try {
+    result = await runCliInvocation(invocation);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await recordSuiteError(context, suitePanel, suiteDashboard, message);
+    await showSuiteError(context, `unit-test-runnerを起動できませんでした。${message}`);
+    return false;
+  }
   output.append(result.stdout);
   output.append(result.stderr);
-  suitePanel.refresh();
   if (result.timedOut) {
-    throw new Error('unit-test-runnerがタイムアウトしました。');
+    const message = 'unit-test-runnerがタイムアウトしました。';
+    await recordSuiteError(context, suitePanel, suiteDashboard, message);
+    await showSuiteError(context, message);
+    return false;
   }
   if (result.exitCode !== 0) {
-    throw new Error(formatCliFailureMessage(result.stdout, result.stderr, result.exitCode));
+    const message = formatCliFailureMessage(result.stdout, result.stderr, result.exitCode);
+    await recordSuiteError(context, suitePanel, suiteDashboard, message);
+    await showSuiteError(context, message);
+    return false;
   }
+  await context.workspaceState.update(LAST_SUITE_ERROR_KEY, undefined);
+  suitePanel.refresh();
+  suiteDashboard.refresh();
+  const summary = suiteSummaryFromStdout(result.stdout);
+  if (summary) {
+    void vscode.window.showInformationMessage(`UnitTestRunner: スイート実行完了。GREEN ${summary.green} / Not GREEN ${summary.notGreen} / Total ${summary.total}`);
+  }
+  return true;
+}
+
+async function recordSuiteError(context: vscode.ExtensionContext, suitePanel: SuitePanelProvider, suiteDashboard: SuiteDashboardPanel, message: string): Promise<void> {
+  await context.workspaceState.update(LAST_SUITE_ERROR_KEY, message);
+  suitePanel.refresh();
+  suiteDashboard.refresh();
+}
+
+async function showSuiteError(context: vscode.ExtensionContext, message: string): Promise<void> {
+  const selected = await vscode.window.showErrorMessage(`UnitTestRunner: ${message}`, '実行レポートを開く');
+  if (selected === '実行レポートを開く') {
+    try {
+      await openSuiteRunReport(context);
+    } catch {
+      // The command may have failed before a report was written.
+    }
+  }
+}
+
+function suiteSummaryFromStdout(stdout: string): { total: number; green: number; notGreen: number } | undefined {
+  try {
+    const parsed = JSON.parse(stdout) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return undefined;
+    }
+    const data = (parsed as { data?: unknown }).data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return undefined;
+    }
+    const summary = (data as { summary?: unknown }).summary;
+    if (!summary || typeof summary !== 'object' || Array.isArray(summary)) {
+      return undefined;
+    }
+    return {
+      total: numberFromUnknown((summary as { total?: unknown }).total),
+      green: numberFromUnknown((summary as { green?: unknown }).green),
+      notGreen: numberFromUnknown((summary as { not_green?: unknown }).not_green),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function numberFromUnknown(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 function workflowCommandKind(kind: 'finalize' | 'testDesign' | 'harness' | 'buildProbeDryRun' | 'buildProbeRun' | 'runTests' | 'evidence'): WorkflowCommandKind {

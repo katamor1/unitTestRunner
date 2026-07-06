@@ -19,6 +19,10 @@ export function formatCliFailureMessage(stdout: string, stderr: string, exitCode
     const detail = stderr.trim();
     return detail ? `${exitText} ${detail}` : exitText;
   }
+  const suiteMessage = formatSuiteRunFailure(parsed, exitCode);
+  if (suiteMessage) {
+    return `${exitText} ${suiteMessage}`;
+  }
   const command = stringValue(parsed.command);
   const details = stringArrayValue(parsed.errors);
   const message = stringValue(parsed.message);
@@ -30,6 +34,29 @@ export function formatCliFailureMessage(stdout: string, stderr: string, exitCode
   const context = [command, status].filter(Boolean).join(' / ');
   const suffix = [context, ...detailParts].filter(Boolean).join(': ');
   return suffix ? `${exitText} ${suffix}` : exitText;
+}
+
+function formatSuiteRunFailure(parsed: Record<string, unknown>, exitCode: number | null): string | undefined {
+  const command = stringValue(parsed.command);
+  const status = stringValue(parsed.status);
+  if (command !== 'suite-run' && status !== 'suite_run_failed') {
+    return undefined;
+  }
+  if (exitCode !== 32 && status !== 'suite_run_failed') {
+    return undefined;
+  }
+  const data = objectValue(parsed.data);
+  const summary = objectValue(data.summary);
+  const reports = objectValue(data.reports);
+  const total = numberValue(summary.total);
+  const green = numberValue(summary.green);
+  const notGreen = numberValue(summary.not_green);
+  const reportPath = stringValue(reports.suite_run_report_md);
+  const parts = [`全件GREENではありません。GREEN ${green} / Not GREEN ${notGreen} / Total ${total}`];
+  if (reportPath) {
+    parts.push(`実行レポート: ${reportPath}`);
+  }
+  return parts.join(' ');
 }
 
 export function parseCliResult(stdout: string, stderr: string, workspace: string): ParsedCliResult {
@@ -109,6 +136,10 @@ function stringArrayValue(value: unknown): string[] {
     return [];
   }
   return value.filter((item): item is string => typeof item === 'string');
+}
+
+function numberValue(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 function parseJsonObject(value: string): Record<string, unknown> | undefined {
