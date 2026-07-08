@@ -17,8 +17,8 @@ def build_summaries(payloads: dict[str, dict[str, Any]]) -> dict[str, Any]:
     return {
         "function_summary": _function_summary(signature, payloads),
         "dependency_summary": {
-            "global_read_count": len(global_access.get("reads", global_access.get("globals_read", []))),
-            "global_write_count": len(global_access.get("writes", global_access.get("globals_written", []))),
+            "global_read_count": _global_read_count(global_access),
+            "global_write_count": _global_write_count(global_access),
             "external_call_count": len(call_report.get("calls", [])),
             "stub_candidate_count": len(completion.get("stub_completion_candidates", [])),
         },
@@ -53,6 +53,20 @@ def _function_summary(signature: dict[str, Any], payloads: dict[str, dict[str, A
         "parameter_count": len(parameters) if isinstance(parameters, list) else 0,
         "line_range": f"{location.get('start_line', '')}-{location.get('end_line', '')}" if location else "",
     }
+
+
+def _global_read_count(global_access: dict[str, Any]) -> int:
+    accesses = global_access.get("global_accesses")
+    if isinstance(accesses, list):
+        return sum(1 for item in accesses if item.get("access_kind") in {"read", "read_write", "address_taken"})
+    return len(global_access.get("reads", global_access.get("globals_read", [])))
+
+
+def _global_write_count(global_access: dict[str, Any]) -> int:
+    accesses = global_access.get("global_accesses")
+    if isinstance(accesses, list):
+        return sum(1 for item in accesses if item.get("access_kind") in {"write", "read_write"})
+    return len(global_access.get("writes", global_access.get("globals_written", [])))
 
 
 def _count_coverage_items(payload: dict[str, Any]) -> int:
