@@ -35,13 +35,13 @@ class CLIResult:
         return payload
 
     def to_json(self) -> str:
-        return json.dumps(self.to_dict(), indent=2, ensure_ascii=False) + "\n"
+        return json.dumps(self.to_dict(), indent=2, ensure_ascii=True) + "\n"
 
     def render_human(self) -> str:
         if self.human_output is not None:
             return self.human_output if self.human_output.endswith("\n") else self.human_output + "\n"
         if self.legacy_payload is not None:
-            return json.dumps(self.legacy_payload, indent=2, ensure_ascii=False) + "\n"
+            return json.dumps(self.legacy_payload, indent=2, ensure_ascii=True) + "\n"
         lines = [
             f"Command: {self.command}",
             f"Status: {self.status}",
