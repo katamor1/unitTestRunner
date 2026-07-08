@@ -58,11 +58,12 @@ def _from_test_case_design(payload: dict[str, Any], review_items: list[DossierRe
                     "関数仕様を確認し、TBD の期待値を置き換えてください。",
                 )
             )
+            title = f"期待結果を確認: {test_case_id}" if test_case_id else "期待結果を確認"
             review_items.append(
                 DossierReviewItem(
                     f"REVIEW_EXPECTED_{len(review_items) + 1:03d}",
                     "expected_result_review",
-                    "期待結果を確認",
+                    title,
                     f"テストケース {test_case_id} の期待値・期待観測を確認してください。",
                     ["test_case_design"],
                     [test_case_id] if test_case_id else [],
@@ -73,29 +74,36 @@ def _from_test_case_design(payload: dict[str, Any], review_items: list[DossierRe
 def _from_harness(payload: dict[str, Any], review_items: list[DossierReviewItem], unresolved: list[DossierUnresolvedItem]) -> None:
     for placeholder in payload.get("unresolved_placeholders", []):
         test_case_id = placeholder.get("related_test_case_id")
+        placeholder_name = str(placeholder.get("name") or placeholder.get("placeholder_id") or "未命名プレースホルダ")
         unresolved.append(
             DossierUnresolvedItem(
                 f"UNRESOLVED_PLACEHOLDER_{len(unresolved) + 1:03d}",
                 "harness_skeleton_generation",
                 "harness_placeholder",
-                f"プレースホルダが残っています: {placeholder.get('name')}",
+                f"プレースホルダが残っています: {placeholder_name}",
                 "生成ハーネスには手動補完が必要です。",
                 ["harness_skeleton_report"],
                 [test_case_id] if test_case_id else [],
                 ja_text(placeholder.get("suggested_action", "生成ハーネスのプレースホルダを確認してください。")),
             )
         )
-        review_items.append(DossierReviewItem(f"REVIEW_HARNESS_{len(review_items) + 1:03d}", "stub_behavior_review", "ハーネスのプレースホルダを確認", str(placeholder.get("name")), ["harness_skeleton_report"], [test_case_id] if test_case_id else []))
+        title = f"ハーネスのプレースホルダを確認: {placeholder_name}"
+        description = f"{placeholder_name} を確認してください。"
+        if test_case_id:
+            description = f"テストケース {test_case_id} の {description}"
+        review_items.append(DossierReviewItem(f"REVIEW_HARNESS_{len(review_items) + 1:03d}", "stub_behavior_review", title, description, ["harness_skeleton_report"], [test_case_id] if test_case_id else []))
 
 
 def _from_completion(payload: dict[str, Any], review_items: list[DossierReviewItem], unresolved: list[DossierUnresolvedItem]) -> None:
     for manual in payload.get("manual_action_items", []):
+        manual_kind = ja_label(manual.get("item_kind", "manual_action"))
+        description = ja_text(manual.get("description", "手動でのビルド補完作業が残っています。"))
         unresolved.append(
             DossierUnresolvedItem(
                 f"UNRESOLVED_BUILD_{len(unresolved) + 1:03d}",
                 "build_completion",
                 manual.get("item_kind", "manual_action"),
-                ja_text(manual.get("description", "手動でのビルド補完作業が残っています。")),
+                description,
                 ja_text(manual.get("reason", "ビルド補完は完全には自動化できません。")),
                 ["build_completion_plan"],
                 [],
@@ -103,7 +111,7 @@ def _from_completion(payload: dict[str, Any], review_items: list[DossierReviewIt
                 blocks_readiness=False,
             )
         )
-        review_items.append(DossierReviewItem(f"REVIEW_BUILD_{len(review_items) + 1:03d}", "build_review", "ビルド補完項目を確認", ja_text(manual.get("description", "")), ["build_completion_plan"]))
+        review_items.append(DossierReviewItem(f"REVIEW_BUILD_{len(review_items) + 1:03d}", "build_review", f"ビルド補完項目を確認: {manual_kind}", description, ["build_completion_plan"]))
 
 
 def _from_execution(payload: dict[str, Any], review_items: list[DossierReviewItem], unresolved: list[DossierUnresolvedItem]) -> None:
@@ -122,4 +130,4 @@ def _from_execution(payload: dict[str, Any], review_items: list[DossierReviewIte
                 "プレースホルダを解消するか、レビュー後にテストを再実行してください。",
             )
         )
-        review_items.append(DossierReviewItem(f"REVIEW_EXEC_{len(review_items) + 1:03d}", "execution_review", "実行エビデンスを確認", f"テスト実行状態は「{status_label}」です。", ["test_execution_report"]))
+        review_items.append(DossierReviewItem(f"REVIEW_EXEC_{len(review_items) + 1:03d}", "execution_review", f"実行エビデンスを確認: {status_label}", f"テスト実行状態は「{status_label}」です。", ["test_execution_report"]))
