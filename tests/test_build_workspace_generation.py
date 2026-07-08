@@ -16,6 +16,7 @@ sys.path.insert(0, str(SRC_ROOT))
 
 from unit_test_runner.build.build_workspace_generator import generate_build_workspace
 from unit_test_runner.build.log_parser import parse_build_log
+from unit_test_runner.c_analyzer.source_digest import build_source_digest
 from unit_test_runner.dossier import analyze_function_workflow
 
 
@@ -175,17 +176,7 @@ class BuildWorkspaceGenerationTests(unittest.TestCase):
                 "defines": ["WIN32", "_DEBUG"],
                 "compiler_options": ["/nologo", "/W3", "/MDd", "/Od", "/ZI"],
             }
-            source_digest = {
-                "source": {"path": str(source)},
-                "preprocessor": {
-                    "includes": [
-                        {
-                            "name": "shared2.h",
-                            "resolved_candidates": [str(header)],
-                        }
-                    ]
-                },
-            }
+            source_digest = build_source_digest(source, build_context).to_dict()
             harness_report = {
                 "function": {"name": "Shared"},
                 "source": {"path": str(source)},
@@ -205,6 +196,7 @@ class BuildWorkspaceGenerationTests(unittest.TestCase):
             payload = report.to_dict()
             makefile = (out_dir / "build" / "Makefile").read_text(encoding="cp932")
             compile_commands = (out_dir / "build" / "compile_commands.txt").read_text(encoding="cp932")
+            isolated_source = (out_dir / "extracted" / "shared" / "shared.c").read_text(encoding="cp932")
             self.assertIn("/Gy", payload["compiler_options"])
             self.assertIn("/Gy", compile_commands)
             self.assertIn("/OPT:REF", makefile)
@@ -212,6 +204,9 @@ class BuildWorkspaceGenerationTests(unittest.TestCase):
             self.assertIn("..\\obj\\shared.obj", makefile)
             self.assertIn('/Fo"..\\obj\\shared.obj"', makefile)
             self.assertNotIn('/Fo"obj\\shared.obj"', makefile)
+            self.assertIn("int Shared(void)", isolated_source)
+            self.assertNotIn("int Shared2(void)", isolated_source)
+            self.assertNotIn("g_com->ptr->test", isolated_source)
 
     def test_run_probe_preserves_redirected_build_log_for_diagnostics(self):
         with tempfile.TemporaryDirectory() as temp_dir:
