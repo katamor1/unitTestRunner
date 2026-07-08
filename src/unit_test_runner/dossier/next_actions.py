@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unit_test_runner.reports.japanese import ja_label, ja_text
+
 from .dossier_models import DossierNextAction, DossierUnresolvedItem
 
 
@@ -41,42 +43,42 @@ def _title_for_item(kind: str, item: DossierUnresolvedItem) -> str:
 
 
 def _description_for_item(item: DossierUnresolvedItem) -> str:
-    parts = [item.description]
+    parts = [ja_text(item.description)]
     if item.related_test_cases:
-        parts.append("Related test cases: " + ", ".join(_non_empty(item.related_test_cases)) + ".")
+        parts.append("関連テストケース: " + ", ".join(_non_empty(item.related_test_cases)) + "。")
     if item.related_artifacts:
-        parts.append("Related artifacts: " + ", ".join(_non_empty(item.related_artifacts)) + ".")
+        parts.append("関連成果物: " + ", ".join(ja_label(value) for value in _non_empty(item.related_artifacts)) + "。")
     if item.impact:
-        parts.append("Impact: " + item.impact)
+        parts.append("影響: " + ja_text(item.impact))
     if item.suggested_action:
-        parts.append("Suggested action: " + item.suggested_action)
+        parts.append("推奨対応: " + ja_text(item.suggested_action))
     return " ".join(part for part in parts if part).strip()
 
 
 def _expected_output_for_item(kind: str, item: DossierUnresolvedItem) -> str:
     target = _target_label(item)
     if kind == "review_expected_result":
-        return f"Reviewed expected values recorded for {target}; test_case_design updated if needed."
+        return f"{target} の期待値レビュー結果を記録し、必要に応じてテストケース設計を更新する。"
     if kind == "review_stub_behavior":
-        return f"Harness or stub decision recorded for {target}; generated files updated if needed."
+        return f"{target} のハーネス/スタブ判断を記録し、必要に応じて生成ファイルを更新する。"
     if kind == "resolve_pch_issue":
-        return f"PCH setting decision recorded for {target}; build workspace regenerated if needed."
+        return f"{target} のPCH設定判断を記録し、必要に応じてビルドworkspaceを再生成する。"
     if kind == "add_include_path":
-        return f"Include path decision recorded for {target}; build context or workspace updated if needed."
+        return f"{target} のincludeパス判断を記録し、必要に応じてビルドコンテキストまたはworkspaceを更新する。"
     if kind == "rerun_tests":
-        return f"Execution evidence refreshed for {target}; rerun result recorded."
-    return f"Human review decision recorded for {target}."
+        return f"{target} の実行エビデンスを更新し、再実行結果を記録する。"
+    return f"{target} の人手レビュー判断を記録する。"
 
 
 def _target_label(item: DossierUnresolvedItem) -> str:
     test_cases = _non_empty(item.related_test_cases)
     if test_cases:
-        return "test case " + ", ".join(test_cases)
+        return "テストケース " + ", ".join(test_cases)
     artifacts = _non_empty(item.related_artifacts)
     if artifacts:
-        return "artifact " + ", ".join(artifacts)
+        return "成果物 " + ", ".join(ja_label(value) for value in artifacts)
     if item.source_item:
-        return f"{item.source_item} / {item.item_id}"
+        return f"{ja_label(item.source_item)} / {item.item_id}"
     return item.item_id
 
 
