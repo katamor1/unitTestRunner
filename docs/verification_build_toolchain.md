@@ -28,7 +28,17 @@ py -m unit_test_runner --json build-probe `
   --cc gcc
 ```
 
-`--cc` を省略した場合は、`UNIT_TEST_RUNNER_CC`、`CC`、`cl`、`gcc`、`clang`、`clang-cl`、`cc` の順で利用可能なコンパイラを探します。
+Visual Studio Build Tools / Visual Studio Community の `vcvars32.bat` で `cl` を使う場合は、`--toolchain verification` と `--vcvars` を併用します。
+
+```powershell
+py -m unit_test_runner --json build-probe `
+  --workspace D:\unit-test-output\Control_Update `
+  --run `
+  --toolchain verification `
+  --vcvars "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars32.bat"
+```
+
+`--cc` を省略した場合は、`UNIT_TEST_RUNNER_CC`、`CC`、`cl`、`gcc`、`clang`、`clang-cl`、`cc` の順で利用可能なコンパイラを探します。`--vcvars` を指定した場合は、そのバッチを呼び出したうえで `cl` を使います。
 
 ビルドに成功すると、従来どおり `reports/build_probe_report.json` の状態が `succeeded` になり、`bin/utr_probe.exe` が生成されます。その後のテスト実行は通常と同じです。
 
