@@ -286,7 +286,6 @@
         "unitTestRunner.quickProfile": {
           "type": "string",
           "enum": [
-            "analysis",
             "design",
             "harness",
             "build-dry-run"
