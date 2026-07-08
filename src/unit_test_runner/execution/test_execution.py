@@ -55,7 +55,8 @@ def prepare_test_execution_evidence(
     warnings: list[TestExecutionWarning] = []
     command_result: ExecutionCommandResult | None = None
     parsed_summary = TestResultSummary()
-    case_results = _case_results_from_design(test_case_design)
+    design_case_results = _case_results_from_design(test_case_design)
+    case_results = list(design_case_results)
     status = "not_run"
     executed = False
     if run_tests and not dry_run:
@@ -67,6 +68,23 @@ def prepare_test_execution_evidence(
         else:
             executed = True
             command_result, parsed_summary, case_results, status = run_test_executable(workspace, executable_info, timeout_seconds)
+            if parsed_summary.total == 0 and design_case_results:
+                warnings.append(
+                    TestExecutionWarning(
+                        "runner_output_missing",
+                        "runner出力からテストケース結果を取得できなかったため、テストケース設計から生成済みケースを表示します。logs/test_execution.log を確認してください。",
+                    )
+                )
+                case_results = _case_results_without_runner_output(design_case_results, status)
+                parsed_summary = TestResultSummary(
+                    total=len(case_results),
+                    passed=0,
+                    failed=0,
+                    skipped=0,
+                    inconclusive=len(case_results),
+                    assertion_failures=0,
+                    parser_confidence="low",
+                )
     else:
         (logs / "test_execution.log").write_text("DRY RUN\n" + command.command_line + "\n", encoding="utf-8")
         command_result = ExecutionCommandResult(None, None, None, None, None, None, Path("logs/test_execution.log"), False)
@@ -113,6 +131,27 @@ def _case_results_from_design(test_case_design: dict[str, Any]) -> list[TestCase
                 related_coverage_ids=coverage,
                 review_required=review,
                 evidence="テストは未実行です。" if review else "",
+            )
+        )
+    return results
+
+
+def _case_results_without_runner_output(design_case_results: list[TestCaseExecutionResult], execution_status: str) -> list[TestCaseExecutionResult]:
+    results: list[TestCaseExecutionResult] = []
+    evidence = "runner出力からケース結果を取得できませんでした。logs/test_execution.log を確認してください。"
+    if execution_status == "failed":
+        evidence = "実行バイナリは失敗しましたが、runner出力からケース結果を取得できませんでした。logs/test_execution.log を確認してください。"
+    for case in design_case_results:
+        results.append(
+            TestCaseExecutionResult(
+                test_case_id=case.test_case_id,
+                generated_function_name=case.generated_function_name,
+                status="inconclusive",
+                exit_related=case.exit_related,
+                related_coverage_ids=list(case.related_coverage_ids),
+                review_required=True,
+                evidence=evidence,
+                warnings=[TestExecutionWarning("runner_output_missing", evidence, related_test_case_id=case.test_case_id)],
             )
         )
     return results
