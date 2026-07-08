@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .build.log_parser import parse_build_log as parse_structured_build_log
+from .encoding import decode_bytes_auto, write_generated_c_text
 
 
 def parse_build_log(log_text: str) -> dict[str, Any]:
@@ -51,14 +52,27 @@ def build_probe(dossier_path: Path | str, vc6_bin: Path | str | None = None, dry
     if vcvars:
         command = f"call {_quote(vcvars)} && {command}"
     makefile = build_dir / "Makefile"
-    makefile.write_text(f"# Generated build probe for {function_name}\nprobe:\n\t{command}\n", encoding="utf-8")
+    write_generated_c_text(makefile, f"# Generated build probe for {function_name}\nprobe:\n\t{command}\n")
     log_path = root / "reports" / "build_probe.log"
     if dry_run or (not vc6_bin and not vcvars):
         log_text = f"DRY RUN\n{command}\n"
         log_path.write_text(log_text, encoding="utf-8")
         return {"command": command, "dry_run": True, "diagnostics": parse_build_log(log_text)}
 
-    run_args = ["cmd.exe", "/c", command] if vcvars else command_parts
-    completed = subprocess.run(run_args, cwd=build_dir, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
-    log_path.write_text(completed.stdout, encoding="utf-8")
-    return {"command": command, "dry_run": False, "returncode": completed.returncode, "diagnostics": parse_build_log(completed.stdout)}
+    run_args = [_cmd_exe(), "/c", command] if vcvars else command_parts
+    completed = subprocess.run(run_args, cwd=build_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+    log_text = _decode_process_output(completed.stdout)
+    log_path.write_text(log_text, encoding="utf-8")
+    return {"command": command, "dry_run": False, "returncode": completed.returncode, "diagnostics": parse_build_log(log_text)}
+
+
+def _decode_process_output(output: bytes | str | None) -> str:
+    if output is None:
+        return ""
+    if isinstance(output, str):
+        return output
+    return decode_bytes_auto(output)
+
+
+def _cmd_exe() -> str:
+    return "cmd" + ".exe"
