@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -24,6 +25,8 @@ from .build_models import (
 from .build_report_writer import write_build_reports, write_build_text
 from .log_parser import parse_build_log
 from .verification_toolchain import render_verification_build_info, run_verification_build
+
+_QUOTE_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*"([^"]+)"', re.MULTILINE)
 
 
 def generate_build_workspace(
@@ -69,24 +72,122 @@ def _ensure_layout(output_root: Path) -> None:
 def _copy_target_and_headers(output_root: Path, source_path: Path, source_digest: dict[str, Any], build_context: dict[str, Any], diagnostics: list[BuildDiagnostic]) -> list[WorkspaceFile]:
     copied: list[WorkspaceFile] = []
     workspace_root = Path(build_context.get("workspace_root") or source_path.parent)
+    include_roots = _include_search_roots(workspace_root, build_context)
     target_relative = _relative_or_name(source_path, workspace_root)
     target_workspace = Path("extracted") / target_relative
     _copy_file(source_path, output_root / target_workspace, copied, target_workspace, "target_source", diagnostics)
+    header_queue: list[Path] = []
     for include in source_digest.get("preprocessor", {}).get("includes", []):
         candidates = [Path(item) for item in include.get("resolved_candidates", []) if item]
         existing = next((item for item in candidates if item.exists()), None)
         if existing is None:
             continue
-        include_relative = _relative_or_name(existing, workspace_root)
-        if (include_relative.parts and include_relative.parts[0].lower() == "include") or _is_under_declared_include_dir(include_relative, build_context):
-            destination_relative = Path("extracted") / include_relative
-        else:
-            destination_relative = Path("extracted") / "include" / existing.name
-        _copy_file(existing, output_root / destination_relative, copied, destination_relative, "target_header", diagnostics)
+        _copy_header(existing, output_root, workspace_root, include_roots, copied, diagnostics, header_queue)
+    _copy_transitive_header_includes(output_root, workspace_root, include_roots, copied, diagnostics, header_queue)
     return copied
 
 
+def _copy_header(source: Path, output_root: Path, workspace_root: Path, include_roots: list[Path], copied: list[WorkspaceFile], diagnostics: list[BuildDiagnostic], queue: list[Path] | None = None) -> None:
+    destination_relative = _header_destination_relative(source, workspace_root, include_roots)
+    _copy_file(source, output_root / destination_relative, copied, destination_relative, "target_header", diagnostics)
+    if queue is not None:
+        queue.append(source)
+
+
+def _copy_transitive_header_includes(output_root: Path, workspace_root: Path, include_roots: list[Path], copied: list[WorkspaceFile], diagnostics: list[BuildDiagnostic], header_queue: list[Path]) -> None:
+    scanned: set[Path] = set()
+    while header_queue:
+        current = header_queue.pop(0)
+        try:
+            resolved_current = current.resolve()
+        except OSError:
+            continue
+        if resolved_current in scanned:
+            continue
+        scanned.add(resolved_current)
+        for include_target in _quote_include_targets(current):
+            included = _resolve_quoted_include(current, include_target, include_roots)
+            if included is None:
+                diagnostics.append(BuildDiagnostic("missing_transitive_include", "warning", f"Header include not found while preparing build workspace: {include_target}", current, None, None))
+                continue
+            try:
+                resolved_included = included.resolve()
+            except OSError:
+                resolved_included = included
+            already_copied = any(item.source_path is not None and item.source_path.resolve() == resolved_included for item in copied if item.exists)
+            if not already_copied:
+                _copy_header(included, output_root, workspace_root, include_roots, copied, diagnostics, header_queue)
+            elif resolved_included not in scanned:
+                header_queue.append(included)
+
+
+def _quote_include_targets(path: Path) -> list[str]:
+    try:
+        text = decode_bytes_auto(path.read_bytes())
+    except OSError:
+        return []
+    return [match.group(1).strip() for match in _QUOTE_INCLUDE_RE.finditer(text) if match.group(1).strip()]
+
+
+def _resolve_quoted_include(current: Path, include_target: str, include_roots: list[Path]) -> Path | None:
+    target = Path(include_target)
+    candidates = [target] if target.is_absolute() else [current.parent / target] + [root / target for root in include_roots]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
+def _include_search_roots(workspace_root: Path, build_context: dict[str, Any]) -> list[Path]:
+    roots: list[Path] = []
+    try:
+        roots.append(workspace_root.resolve())
+    except OSError:
+        roots.append(workspace_root)
+    for raw in build_context.get("include_dirs", []):
+        path = _include_dir_path(raw, workspace_root)
+        if path is None:
+            continue
+        try:
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
+        if resolved not in roots:
+            roots.append(resolved)
+    return roots
+
+
+def _include_dir_path(raw: Any, workspace_root: Path) -> Path | None:
+    if isinstance(raw, dict):
+        value = raw.get("absolute") or raw.get("normalized") or raw.get("raw") or raw.get("path")
+    else:
+        value = raw
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or "$" in text:
+        return None
+    path = Path(text.replace("\\", "/"))
+    return path if path.is_absolute() else workspace_root / path
+
+
+def _header_destination_relative(source: Path, workspace_root: Path, include_roots: list[Path]) -> Path:
+    try:
+        return Path("extracted") / source.resolve().relative_to(workspace_root.resolve())
+    except (OSError, ValueError):
+        pass
+    for root in include_roots:
+        try:
+            return Path("extracted") / "include" / source.resolve().relative_to(root.resolve())
+        except (OSError, ValueError):
+            continue
+    return Path("extracted") / "include" / source.name
+
+
 def _copy_file(source: Path, destination: Path, copied: list[WorkspaceFile], relative_destination: Path, kind: str, diagnostics: list[BuildDiagnostic]) -> None:
+    existing = next((item for item in copied if item.workspace_path == relative_destination), None)
+    if existing is not None and destination.exists():
+        return
     if not source.exists():
         diagnostics.append(BuildDiagnostic("missing_source_file", "error", f"Source file is missing: {source}", source, None, None))
         copied.append(WorkspaceFile(relative_destination, kind, source_path=source, copied=False, generated=False, required=True, exists=False))
@@ -273,7 +374,7 @@ def _compile_command(source: Path, object_file: Path, include_dirs: list[BuildPa
 
 def _render_makefile(compile_units: list[CompileUnit], include_dirs: list[BuildPathEntry], defines: list[str], compiler_options: list[str]) -> str:
     objects = " ".join(unit.object_file.as_posix().replace("/", "\\") for unit in compile_units)
-    lines = ["# generated VC6 build probe Makefile", "CC=cl", "LINK=link", f"CFLAGS={' '.join(compiler_options)} {' '.join('/D\"' + item + '\"' for item in defines)} {' '.join(_makefile_include_arg(item) for item in include_dirs)}", f"OBJS={objects}", "", "all: ..\\bin\\utr_probe.exe", "", "..\\bin\\utr_probe.exe: $(OBJS)", "\t$(LINK) /nologo /OUT:$@ $(OBJS)", ""]
+    lines = ["# generated VC6 build probe Makefile", "CC=cl", "LINK=link", f"CFLAGS={' '.join(compiler_options)} {' '.join('/D\"' + item + '\"' for item in defines)} {' '.join(_makefile_include_arg(item) for item in include_dirs)}", f"OBJS={objects}", "", "all: ..\\bin\\utr_probe.exe", "", "..\\bin\\utr_probe.exe: $(OBJS)", "\t$(LINK) /nologo /OPT:REF /OUT:$@ $(OBJS)", ""]
     for unit in compile_units:
         source = unit.source_file.as_posix().replace("/", "\\")
         obj = unit.object_file.as_posix().replace("/", "\\")
@@ -311,7 +412,8 @@ def _relative_or_name(path: Path, root: Path) -> Path:
 def _is_under_declared_include_dir(relative_path: Path, build_context: dict[str, Any]) -> bool:
     normalized = relative_path.as_posix().lower()
     for raw in build_context.get("include_dirs", []):
-        include_dir = str(raw).replace("\\", "/").strip("/").lower()
+        text = str(raw.get("normalized") or raw.get("raw") or raw.get("path") or raw.get("absolute") if isinstance(raw, dict) else raw)
+        include_dir = text.replace("\\", "/").strip("/").lower()
         if include_dir and (normalized == include_dir or normalized.startswith(include_dir + "/")):
             return True
     return False
