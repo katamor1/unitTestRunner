@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from unit_test_runner.reports.japanese import ja_label
+from unit_test_runner.reports.japanese import ja_label, ja_text
 
 from .dossier_models import DossierReviewItem, DossierUnresolvedItem
 
@@ -82,7 +82,7 @@ def _from_harness(payload: dict[str, Any], review_items: list[DossierReviewItem]
                 "生成ハーネスには手動補完が必要です。",
                 ["harness_skeleton_report"],
                 [test_case_id] if test_case_id else [],
-                placeholder.get("suggested_action", "生成ハーネスのプレースホルダを確認してください。"),
+                ja_text(placeholder.get("suggested_action", "生成ハーネスのプレースホルダを確認してください。")),
             )
         )
         review_items.append(DossierReviewItem(f"REVIEW_HARNESS_{len(review_items) + 1:03d}", "stub_behavior_review", "ハーネスのプレースホルダを確認", str(placeholder.get("name")), ["harness_skeleton_report"], [test_case_id] if test_case_id else []))
@@ -95,15 +95,15 @@ def _from_completion(payload: dict[str, Any], review_items: list[DossierReviewIt
                 f"UNRESOLVED_BUILD_{len(unresolved) + 1:03d}",
                 "build_completion",
                 manual.get("item_kind", "manual_action"),
-                manual.get("description", "手動でのビルド補完作業が残っています。"),
-                manual.get("reason", "ビルド補完は完全には自動化できません。"),
+                ja_text(manual.get("description", "手動でのビルド補完作業が残っています。")),
+                ja_text(manual.get("reason", "ビルド補完は完全には自動化できません。")),
                 ["build_completion_plan"],
                 [],
-                manual.get("suggested_action", "ビルド補完計画を確認してください。"),
+                ja_text(manual.get("suggested_action", "ビルド補完計画を確認してください。")),
                 blocks_readiness=False,
             )
         )
-        review_items.append(DossierReviewItem(f"REVIEW_BUILD_{len(review_items) + 1:03d}", "build_review", "ビルド補完項目を確認", manual.get("description", ""), ["build_completion_plan"]))
+        review_items.append(DossierReviewItem(f"REVIEW_BUILD_{len(review_items) + 1:03d}", "build_review", "ビルド補完項目を確認", ja_text(manual.get("description", "")), ["build_completion_plan"]))
 
 
 def _from_execution(payload: dict[str, Any], review_items: list[DossierReviewItem], unresolved: list[DossierUnresolvedItem]) -> None:
