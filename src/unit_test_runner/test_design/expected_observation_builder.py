@@ -20,7 +20,7 @@ def build_expected_observations(
             source="placeholder",
             review_required=True,
             confidence="low",
-            note="Expected return must be reviewed against the function specification.",
+            note="期待戻り値を関数仕様に照らして確認してください。",
         ),
         ExpectedObservation(
             observation_kind="coverage_target",
@@ -35,7 +35,7 @@ def build_expected_observations(
     warnings = [
         TestCaseDesignWarning(
             "expected_result_not_determined",
-            "Expected return value is a review placeholder.",
+            "期待戻り値はレビュー用プレースホルダです。",
             related_test_case_id=test_case_id,
             related_coverage_id=coverage_id,
         )
@@ -44,10 +44,10 @@ def build_expected_observations(
         UnresolvedTestDesignItem(
             item_id=f"UNRES_{test_case_id}_RET",
             item_kind="expected_return_unknown",
-            description="Expected return value must be reviewed from specification.",
+            description="期待戻り値を仕様から確認してください。",
             related_test_case_ids=[test_case_id],
-            reason="Static analysis does not determine final expected result.",
-            suggested_action="Review function specification and source behavior.",
+            reason="静的解析では最終的な期待結果を確定できません。",
+            suggested_action="関数仕様とソース上の挙動を確認してください。",
         )
     ]
     extra_observations, extra_warnings, extra_unresolved = _side_effect_observations(test_case_id, coverage_id, global_access or {}, function_signature or {})
@@ -80,13 +80,13 @@ def _side_effect_observations(
                 source="global_access",
                 review_required=True,
                 confidence=access.get("confidence", "medium"),
-                note="Expected global value must be reviewed against the function specification.",
+                note="期待グローバル値を関数仕様に照らして確認してください。",
             )
         )
         warnings.append(
             TestCaseDesignWarning(
                 "expected_global_not_determined",
-                f"Expected global value for {name} is a review placeholder.",
+                f"{name} の期待グローバル値はレビュー用プレースホルダです。",
                 related_test_case_id=test_case_id,
                 related_coverage_id=coverage_id,
             )
@@ -95,10 +95,10 @@ def _side_effect_observations(
             UnresolvedTestDesignItem(
                 item_id=f"UNRES_{test_case_id}_GLOBAL_{suffix}",
                 item_kind="expected_global_unknown",
-                description=f"Expected global value for {name} must be reviewed from specification.",
+                description=f"{name} の期待グローバル値を仕様から確認してください。",
                 related_test_case_ids=[test_case_id],
-                reason="Static analysis detects a global write but does not determine the final expected value.",
-                suggested_action="Review function specification and replace the generated global expected value.",
+                reason="静的解析ではグローバル書き込みを検出できますが、最終的な期待値は確定できません。",
+                suggested_action="関数仕様を確認し、生成されたグローバル期待値を置き換えてください。",
             )
         )
 
@@ -115,13 +115,13 @@ def _side_effect_observations(
                 source="parameter_access",
                 review_required=True,
                 confidence=parameter.get("confidence", "medium"),
-                note="Expected char array string must be reviewed against the function specification.",
+                note="期待文字列を関数仕様に照らして確認してください。",
             )
         )
         warnings.append(
             TestCaseDesignWarning(
                 "expected_char_array_string_not_determined",
-                f"Expected string for char array {name} is a review placeholder.",
+                f"文字配列 {name} の期待文字列はレビュー用プレースホルダです。",
                 related_test_case_id=test_case_id,
                 related_coverage_id=coverage_id,
             )
@@ -130,10 +130,10 @@ def _side_effect_observations(
             UnresolvedTestDesignItem(
                 item_id=f"UNRES_{test_case_id}_STRING_{suffix}",
                 item_kind="expected_char_array_string_unknown",
-                description=f"Expected string for char array {name} must be reviewed from specification.",
+                description=f"文字配列 {name} の期待文字列を仕様から確認してください。",
                 related_test_case_ids=[test_case_id],
-                reason="Static analysis detects a writable char buffer but does not determine the final expected string.",
-                suggested_action="Review function specification and replace the generated string expected value.",
+                reason="静的解析では書き込み可能な文字バッファを検出できますが、最終的な期待文字列は確定できません。",
+                suggested_action="関数仕様を確認し、生成された文字列期待値を置き換えてください。",
             )
         )
 
