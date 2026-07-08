@@ -28,7 +28,7 @@ export interface SuiteRunSelector {
   requireGreen?: boolean;
 }
 
-export type QuickCheckProfile = 'analysis' | 'design' | 'harness' | 'build-dry-run';
+export type QuickCheckProfile = 'design' | 'harness' | 'build-dry-run';
 
 interface AnalyzeInvocationOptions {
   finalizeDossier: boolean;
@@ -69,13 +69,13 @@ export function buildQuickOutputWorkspace(settings: AdapterSettings, target: Fun
 }
 
 export function normalizeQuickCheckProfile(value: string | undefined): QuickCheckProfile {
-  if (value === 'analysis' || value === 'design' || value === 'harness' || value === 'build-dry-run') {
+  if (value === 'design' || value === 'harness' || value === 'build-dry-run') {
     return value;
   }
   return 'design';
 }
 
-export function quickCheckPhase(profile: QuickCheckProfile): 'analysis' | 'design' | 'harness' | 'build' {
+export function quickCheckPhase(profile: QuickCheckProfile): 'design' | 'harness' | 'build' {
   return profile === 'build-dry-run' ? 'build' : profile;
 }
 
