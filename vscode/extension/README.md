@@ -82,6 +82,7 @@ Quick Check 用の主な設定:
 | Workflowパネルが表示されない | Activity Bar の `Unit Test Runner` を開き、拡張が有効か確認します。 |
 | ビューのデータ提供者が未登録と表示される | VSIX更新直後の再読み込み不足の可能性があります。`Developer: Reload Window` またはVS Code再起動を行います。 |
 | Quick Check summary が開かない | `UnitTestRunner: Open Quick Summary` を実行し、直近workspaceの `reports/quick_summary.md` が生成されているか確認します。 |
+| Quick Check summary が開かない | `UnitTestRunner: Open Quick Summary` を実行し、直近workspaceの `reports/quick_summary.md` が生成されているか確認します。 |
 | 設定確認から進まない | `.dsw` と `outputRoot` が未設定でないか確認します。 |
 | 生成物が本番ツリー内に出る | `outputRoot` / `quickOutputRoot` を `sourceRoot` の外側へ変更します。 |
 | 関数名が解決されない | 関数名を選択して `Analyze Selected Function` または `Quick Check Selected Function` を実行します。 |
