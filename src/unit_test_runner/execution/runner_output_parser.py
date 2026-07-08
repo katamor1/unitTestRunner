@@ -37,17 +37,23 @@ def parse_runner_output(text: str) -> ParsedRunnerOutput:
             current_id = run_id
             cases.setdefault(run_id, TestCaseExecutionResult(run_id, None, "unknown", False, evidence="runner output observed"))
             continue
-        ok_id = _match_case(raw, r"\[\s*OK\s*\]\s*(\S+)")
+        ok_id = _match_case(raw, r"\[\s*OK\s*\]\s*(\S+)") or _match_case(raw, r"UTR OK\s+(\S+)")
         if ok_id:
             cases.setdefault(ok_id, TestCaseExecutionResult(ok_id, None, "unknown", False)).status = "passed"
+            if current_id == ok_id:
+                current_id = None
             continue
-        failed_id = _match_case(raw, r"\[\s*FAILED\s*\]\s*(\S+)")
+        failed_id = _match_case(raw, r"\[\s*FAILED\s*\]\s*(\S+)") or _match_case(raw, r"UTR FAILED\s+(\S+)")
         if failed_id:
             cases.setdefault(failed_id, TestCaseExecutionResult(failed_id, None, "unknown", False)).status = "failed"
+            if current_id == failed_id:
+                current_id = None
             continue
-        skipped_id = _match_case(raw, r"\[\s*SKIPPED\s*\]\s*(\S+)")
+        skipped_id = _match_case(raw, r"\[\s*SKIPPED\s*\]\s*(\S+)") or _match_case(raw, r"UTR SKIPPED\s+(\S+)")
         if skipped_id:
             cases.setdefault(skipped_id, TestCaseExecutionResult(skipped_id, None, "unknown", False)).status = "skipped"
+            if current_id == skipped_id:
+                current_id = None
             continue
         if raw.startswith("UTR ASSERT"):
             assertion_failures += 1
@@ -62,6 +68,7 @@ def parse_runner_output(text: str) -> ParsedRunnerOutput:
             _mark_current_passed_if_unresolved(cases, current_id)
             summary.assertion_failures = assertion_failures
             explicit_summary = summary
+            current_id = None
             continue
         unknown.append(raw)
     _mark_current_passed_if_unresolved(cases, current_id)
