@@ -45,11 +45,27 @@ export function buildAnalyzeFunctionInvocation(settings: AdapterSettings, target
 
 export function buildQuickCheckInvocation(settings: AdapterSettings, target: FunctionTarget): CliInvocation {
   const outputWorkspace = buildQuickOutputWorkspace(settings, target);
-  const args = buildAnalyzeFunctionArgs(settings, target, {
-    finalizeDossier: false,
-    phase: quickCheckPhase(normalizeQuickCheckProfile(settings.quickProfile)),
+  const args = jsonPrefix(settings).concat([
+    'quick-check',
+    '--workspace',
+    settings.sourceRoot,
+    '--dsw',
+    settings.dswPath,
+    '--source',
+    target.sourceRelativePath ?? relativeSourcePath(target.sourcePath, settings.sourceRoot),
+    '--function',
+    target.functionName,
+    '--configuration',
+    target.configuration || settings.defaultConfiguration,
+    '--out',
     outputWorkspace,
-  });
+    '--profile',
+    quickCheckPhase(normalizeQuickCheckProfile(settings.quickProfile)),
+  ]);
+  const project = target.project || settings.defaultProject;
+  if (project) {
+    args.push('--project', project);
+  }
   return invocation(settings, args, false);
 }
 
