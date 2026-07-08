@@ -193,6 +193,10 @@ def build_parser() -> argparse.ArgumentParser:
     suite_remove.add_argument("--suite", required=True)
     suite_remove.add_argument("--entry-id", required=True)
 
+    suite_vc6 = subcommands.add_parser("suite-generate-vc6-debug", help="Generate one VC6 DSP per suite entry and one DSW for the suite.")
+    suite_vc6.add_argument("--suite", required=True)
+    suite_vc6.add_argument("--out", help="Output .dsw path. Defaults to vc6_debug_suite.dsw beside the suite manifest.")
+
     suite_run = subcommands.add_parser("suite-run", help="Run or prepare evidence for registered suite entries.")
     suite_run.add_argument("--suite", required=True)
     selector = suite_run.add_mutually_exclusive_group(required=True)
