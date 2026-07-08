@@ -19,15 +19,15 @@ def write_test_execution_reports(workspace: Path | str, report: TestExecutionRep
         encoding="utf-8",
     )
     with (reports / "test_result.csv").open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["test_case_id", "status", "status_label", "review_required", "coverage_ids", "assertion_failures", "expected", "actual", "evidence", "warnings"])
+        writer = csv.DictWriter(handle, fieldnames=["test_case_id", "status", "review_required", "status_label", "coverage_ids", "assertion_failures", "expected", "actual", "evidence", "warnings"])
         writer.writeheader()
         for case in report.case_results:
             writer.writerow(
                 {
                     "test_case_id": case.test_case_id or "",
                     "status": case.status,
-                    "status_label": ja_label(case.status),
                     "review_required": str(case.review_required).lower(),
+                    "status_label": ja_label(case.status),
                     "coverage_ids": ";".join(case.related_coverage_ids),
                     "assertion_failures": len(case.assertions),
                     "expected": "",
