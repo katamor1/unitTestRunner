@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import traceback
 
@@ -35,6 +36,7 @@ def main(argv: list[str] | None = None) -> int:
         code = exc.code if isinstance(exc.code, int) else EXIT_INPUT_ERROR
         return EXIT_INPUT_ERROR if code != 0 else 0
 
+    _apply_build_probe_environment(args)
     setup_logging(verbose=args.verbose, quiet=args.quiet, log_file=args.log_file, json_mode=args.json)
     logging.info("command started: %s", args.command)
     try:
@@ -68,3 +70,14 @@ def main(argv: list[str] | None = None) -> int:
         else:
             sys.stderr.write(result.render_human())
     return result.exit_code
+
+
+def _apply_build_probe_environment(args) -> None:
+    if getattr(args, "command", None) != "build-probe":
+        return
+    toolchain = getattr(args, "toolchain", None)
+    if toolchain:
+        os.environ["UNIT_TEST_RUNNER_BUILD_TOOLCHAIN"] = toolchain
+    cc = getattr(args, "cc", None)
+    if cc:
+        os.environ["UNIT_TEST_RUNNER_CC"] = cc
