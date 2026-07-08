@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from unit_test_runner.harness.c90_writer import sanitize_identifier
-from unit_test_runner.suite.models import SuiteManifest
 
 
 @dataclass
@@ -53,16 +53,18 @@ def write_vc6_debug_project(workspace: Path | str, build_workspace_report: Any |
     return dsp_path
 
 
-def write_vc6_debug_suite(suite_path: Path | str, manifest: SuiteManifest, out: Path | str | None = None) -> Vc6DebugSuiteResult:
+def write_vc6_debug_suite(suite_path: Path | str, manifest: Any, out: Path | str | None = None) -> Vc6DebugSuiteResult:
     suite_path = Path(suite_path).resolve()
     dsw_path = Path(out).resolve() if out else suite_path.parent / "vc6_debug_suite.dsw"
     projects: list[Vc6DebugProject] = []
     warnings: list[str] = []
     used_names: set[str] = set()
-    for index, entry in enumerate(manifest.entries, start=1):
-        if not entry.enabled:
+    for index, entry in enumerate(getattr(manifest, "entries", []), start=1):
+        if not getattr(entry, "enabled", True):
             continue
-        function_name = entry.function.get("name") or f"Entry_{index}"
+        function_payload = getattr(entry, "function", {})
+        function_name = function_payload.get("name") if isinstance(function_payload, dict) else None
+        function_name = function_name or f"Entry_{index}"
         project_name = _unique_project_name(_safe_project_name(f"UTR_{function_name}"), used_names, index)
         try:
             dsp_path = write_vc6_debug_project(entry.workspace, project_name=project_name)
@@ -279,15 +281,10 @@ def _dsp_source_path(dsp_dir: Path, path: Path) -> str:
 
 def _relative_windows(base: Path, path: Path) -> str:
     try:
-        relative = path.resolve().relative_to(base.resolve())
-    except ValueError:
-        try:
-            relative = Path("..") / path.resolve().relative_to(base.resolve().parent)
-        except ValueError:
-            relative = Path(str(path))
-    except OSError:
-        relative = path
-    return relative.as_posix().replace("/", "\\")
+        relative = os.path.relpath(path.resolve(), base.resolve())
+    except (OSError, ValueError):
+        relative = str(path)
+    return relative.replace("/", "\\")
 
 
 def _quote_if_needed(path: str) -> str:
