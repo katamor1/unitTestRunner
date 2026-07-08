@@ -27,6 +27,7 @@ from .log_parser import parse_build_log
 from .verification_toolchain import render_verification_build_info, run_verification_build
 
 _QUOTE_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*"([^"]+)"', re.MULTILINE)
+_EXTERN_VARIABLE_RE = re.compile(r"(?m)^\s*extern\s+(?P<prefix>[^;\n()]*?)(?P<name>[A-Za-z_]\w*)\s*(?P<array>(?:\[[^\]]*\])*)\s*;")
 
 
 def generate_build_workspace(
@@ -52,6 +53,7 @@ def generate_build_workspace(
     diagnostics: list[BuildDiagnostic] = []
     copied_files = _copy_target_and_headers(output_root, source_path, source_digest, build_context, diagnostics)
     generated_files = _copy_or_verify_generated_files(output_root, harness_report, diagnostics)
+    generated_files.extend(_generate_extern_global_definitions(output_root, copied_files, diagnostics))
     include_dirs = _include_dirs(output_root, build_context)
     defines = _defines(build_context)
     compiler_options = _compiler_options(build_context)
@@ -197,6 +199,79 @@ def _copy_file(source: Path, destination: Path, copied: list[WorkspaceFile], rel
     copied.append(WorkspaceFile(relative_destination, kind, source_path=source, sha256=sha256_file(destination), copied=True, generated=False, required=True, exists=True))
 
 
+def _generate_extern_global_definitions(output_root: Path, copied_files: list[WorkspaceFile], diagnostics: list[BuildDiagnostic]) -> list[WorkspaceFile]:
+    del diagnostics
+    target_sources = [item for item in copied_files if item.file_kind == "target_source" and item.exists]
+    target_source_texts = [_workspace_text(output_root, item.workspace_path) for item in target_sources]
+    definitions: dict[str, tuple[str, Path]] = {}
+    for header in [item for item in copied_files if item.file_kind == "target_header" and item.exists]:
+        header_text = _workspace_text(output_root, header.workspace_path)
+        for prefix, name, array in _extern_variable_declarations(header_text):
+            if name in definitions or _target_source_defines_name(name, target_source_texts):
+                continue
+            declaration = _extern_definition_line(prefix, name, array)
+            if declaration:
+                definitions[name] = (declaration, header.workspace_path)
+    if not definitions:
+        return []
+    relative = Path("generated/stubs/utr_extern_globals.c")
+    lines = [
+        "/* generated extern data placeholders for function-level build probe */",
+        "/* review required: replace with product objects when a real integration build is needed */",
+        "",
+    ]
+    included_headers = []
+    for _name, (_definition, header_path) in sorted(definitions.items()):
+        include_path = _relative_include_from_generated_stubs(header_path)
+        if include_path not in included_headers:
+            included_headers.append(include_path)
+            lines.append(f'#include "{include_path}"')
+    lines.append("")
+    for name, (definition, _header_path) in sorted(definitions.items()):
+        lines.append(f"/* placeholder for unresolved external data symbol: {name} */")
+        lines.append(definition)
+    lines.append("")
+    destination = output_root / relative
+    write_build_text(destination, "\n".join(lines))
+    return [WorkspaceFile(relative, "extern_global_source", sha256=sha256_file(destination), copied=False, generated=True, required=False, exists=True)]
+
+
+def _workspace_text(output_root: Path, workspace_path: Path) -> str:
+    path = output_root / workspace_path
+    try:
+        return decode_bytes_auto(path.read_bytes())
+    except OSError:
+        return ""
+
+
+def _extern_variable_declarations(text: str) -> list[tuple[str, str, str]]:
+    declarations: list[tuple[str, str, str]] = []
+    for match in _EXTERN_VARIABLE_RE.finditer(text):
+        prefix = " ".join(match.group("prefix").strip().split())
+        name = match.group("name").strip()
+        array = match.group("array").replace(" ", "")
+        if not prefix or prefix in {"typedef"} or name in {"void"}:
+            continue
+        declarations.append((prefix, name, array))
+    return declarations
+
+
+def _target_source_defines_name(name: str, target_source_texts: list[str]) -> bool:
+    pattern = re.compile(rf"(?m)^\s*(?!extern\b)[^;\n()]*\b{re.escape(name)}\b\s*(?:\[[^\]]*\])?\s*(?:=|;)")
+    return any(pattern.search(text) for text in target_source_texts)
+
+
+def _extern_definition_line(prefix: str, name: str, array: str) -> str:
+    compact_prefix = prefix.strip()
+    if not compact_prefix or "(" in compact_prefix or ")" in compact_prefix:
+        return ""
+    return f"{compact_prefix} {name}{array} = {{0}};"
+
+
+def _relative_include_from_generated_stubs(header_workspace_path: Path) -> str:
+    return (Path("../..") / header_workspace_path).as_posix()
+
+
 def _copy_or_verify_generated_files(output_root: Path, harness_report: dict[str, Any], diagnostics: list[BuildDiagnostic]) -> list[WorkspaceFile]:
     files: list[WorkspaceFile] = []
     harness_root = Path(harness_report.get("output_root") or output_root)
@@ -263,7 +338,7 @@ def _compiler_options(build_context: dict[str, Any]) -> list[str]:
 
 def _compile_units(output_root: Path, copied_files: list[WorkspaceFile], generated_files: list[WorkspaceFile], include_dirs: list[BuildPathEntry], defines: list[str], compiler_options: list[str]) -> list[CompileUnit]:
     source_files = [item.workspace_path for item in copied_files if item.file_kind == "target_source" and item.exists]
-    source_files.extend(item.workspace_path for item in generated_files if item.exists and item.file_kind in {"assert_source", "runner_source", "stub_source", "test_source", "target_invocation_source"})
+    source_files.extend(item.workspace_path for item in generated_files if item.exists and item.file_kind in {"assert_source", "runner_source", "stub_source", "test_source", "target_invocation_source", "extern_global_source"})
     units: list[CompileUnit] = []
     used_objects: set[str] = set()
     for index, source in enumerate(source_files):
