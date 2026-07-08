@@ -15,7 +15,10 @@ VC6_FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "vc6_project"
 sys.path.insert(0, str(SRC_ROOT))
 
 from unit_test_runner.dossier import analyze_function_workflow
+from unit_test_runner.dossier.dossier_models import DossierNextAction, DossierUnresolvedItem
 from unit_test_runner.dossier.finalizer import finalize_function_dossier, prepare_review_from_dossier
+from unit_test_runner.reports.next_actions_markdown import render_next_actions_markdown
+from unit_test_runner.reports.unresolved_items_markdown import render_unresolved_items_markdown
 
 
 def run_module(*args):
@@ -87,14 +90,46 @@ class DossierReviewWorkflowTests(unittest.TestCase):
             self.assertIn("# レビュー確認リスト", review_markdown)
             self.assertIn("# 未解決項目", unresolved_markdown)
             self.assertIn("# 次のアクション", next_actions_markdown)
-            self.assertIn("期待結果未確認", unresolved_markdown)
-            self.assertIn("生成テストは、期待値レビュー", unresolved_markdown)
-            self.assertIn("期待結果を確認", next_actions_markdown)
-            self.assertIn("仕様レビュー担当", next_actions_markdown)
-            self.assertNotIn("The generated test cannot", markdown + unresolved_markdown)
-            self.assertNotIn("Review function specification", markdown + unresolved_markdown + next_actions_markdown)
             traceability_csv = (reports / "traceability_matrix.csv").read_text(encoding="utf-8")
             self.assertIn("source_kind,source_id,relation,target_kind,target_id", traceability_csv)
+
+    def test_review_report_renderers_localize_user_facing_values(self):
+        unresolved_markdown = render_unresolved_items_markdown(
+            [
+                DossierUnresolvedItem(
+                    "UNRESOLVED_EXPECTED_001",
+                    "test_case_design_generation",
+                    "expected_result_unknown",
+                    "Expected result requires review for TC_Control_Update_001.",
+                    "The generated test cannot be treated as approved until expected values are reviewed.",
+                    ["test_case_design"],
+                    ["TC_Control_Update_001"],
+                    "Review function specification and replace TBD expected values.",
+                )
+            ]
+        )
+        next_actions_markdown = render_next_actions_markdown(
+            [
+                DossierNextAction(
+                    "NEXT_001",
+                    "high",
+                    "review_expected_result",
+                    "Review expected result",
+                    "Review function specification and replace TBD expected values.",
+                    "spec_reviewer",
+                    ["UNRESOLVED_EXPECTED_001"],
+                    "Updated generated workspace artifacts or recorded human review decision.",
+                )
+            ]
+        )
+
+        self.assertIn("期待結果未確認", unresolved_markdown)
+        self.assertIn("生成テストは、期待値レビュー", unresolved_markdown)
+        self.assertIn("関数仕様を確認し、TBD の期待値を置き換えてください。", unresolved_markdown)
+        self.assertIn("期待結果を確認", next_actions_markdown)
+        self.assertIn("仕様レビュー担当", next_actions_markdown)
+        self.assertNotIn("The generated test cannot", unresolved_markdown)
+        self.assertNotIn("Review function specification", unresolved_markdown + next_actions_markdown)
 
     def test_finalize_handles_mvp1_partial_and_blocked_missing_required(self):
         with tempfile.TemporaryDirectory() as temp_dir:
