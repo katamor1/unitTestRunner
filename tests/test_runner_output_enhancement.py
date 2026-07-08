@@ -39,7 +39,18 @@ UTR SUMMARY total=2 passed=1 failed=1 skipped=0 inconclusive=0
             path = enhance_runner_output(
                 workspace,
                 "Shared3",
-                [TestSkeleton("TC_Shared3_001", "Test_TC_Shared3_001", 0, [], [])],
+                [
+                    TestSkeleton(
+                        "TC_Shared3_001",
+                        "Shared3",
+                        Path("generated/tests/test_Shared3.c"),
+                        "Test_TC_Shared3_001",
+                        [],
+                        [],
+                        0,
+                        True,
+                    )
+                ],
             )
 
             text = path.read_text(encoding="cp932")
