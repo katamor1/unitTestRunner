@@ -6,12 +6,16 @@ interface SuiteDashboardMessage {
   kind: 'register' | 'runSelected' | 'runTag' | 'runAllGreen' | 'openManifest' | 'openReport' | 'toggleEntry';
   entryId?: string;
   checked?: boolean;
+  label?: string;
 }
+
+type SuiteDashboardCommandKind = Exclude<SuiteDashboardMessage['kind'], 'toggleEntry'>;
 
 export class SuiteDashboardPanel {
   static readonly viewType = 'unitTestRunner.suiteDashboard';
 
   private panel?: vscode.WebviewPanel;
+  private runningLabel?: string;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -46,47 +50,59 @@ export class SuiteDashboardPanel {
     }
     const selected = new Set(this.context.workspaceState.get<string[]>(SUITE_SELECTION_KEY) ?? []);
     const model = readSuiteViewModel(this.suiteManifestPath(), selected, this.lastError());
-    this.panel.webview.html = renderDashboardHtml(this.panel.webview, model);
+    this.panel.webview.html = renderDashboardHtml(this.panel.webview, model, this.runningLabel);
   }
 
   private async handleMessage(message: SuiteDashboardMessage): Promise<void> {
-    try {
-      if (message.kind === 'toggleEntry') {
-        if (!message.entryId) {
-          return;
-        }
-        const selected = new Set(this.context.workspaceState.get<string[]>(SUITE_SELECTION_KEY) ?? []);
-        if (message.checked) {
-          selected.add(message.entryId);
-        } else {
-          selected.delete(message.entryId);
-        }
-        await this.context.workspaceState.update(SUITE_SELECTION_KEY, Array.from(selected));
-        this.refresh();
+    if (message.kind === 'toggleEntry') {
+      if (this.runningLabel) {
         return;
       }
-      const commandMap = {
-        register: 'unitTestRunner.registerCurrentFunctionInSuite',
-        runSelected: 'unitTestRunner.runSelectedSuiteTests',
-        runTag: 'unitTestRunner.runSuiteByTag',
-        runAllGreen: 'unitTestRunner.runAllSuiteTestsRequireGreen',
-        openManifest: 'unitTestRunner.openSuiteManifest',
-        openReport: 'unitTestRunner.openSuiteRunReport',
-      };
-      await vscode.commands.executeCommand(commandMap[message.kind]);
+      if (!message.entryId) {
+        return;
+      }
+      const selected = new Set(this.context.workspaceState.get<string[]>(SUITE_SELECTION_KEY) ?? []);
+      if (message.checked) {
+        selected.add(message.entryId);
+      } else {
+        selected.delete(message.entryId);
+      }
+      await this.context.workspaceState.update(SUITE_SELECTION_KEY, Array.from(selected));
+      this.refresh();
+      return;
+    }
+    if (this.runningLabel) {
+      void vscode.window.showInformationMessage(`UnitTestRunner: ${this.runningLabel}を実行中です。完了するまでお待ちください。`);
+      return;
+    }
+    const commandMap: Record<SuiteDashboardCommandKind, string> = {
+      register: 'unitTestRunner.registerCurrentFunctionInSuite',
+      runSelected: 'unitTestRunner.runSelectedSuiteTests',
+      runTag: 'unitTestRunner.runSuiteByTag',
+      runAllGreen: 'unitTestRunner.runAllSuiteTestsRequireGreen',
+      openManifest: 'unitTestRunner.openSuiteManifest',
+      openReport: 'unitTestRunner.openSuiteRunReport',
+    };
+    const commandId = commandMap[message.kind as SuiteDashboardCommandKind];
+    this.runningLabel = message.label || suiteDashboardActionLabel(message.kind);
+    this.refresh();
+    try {
+      await vscode.commands.executeCommand(commandId);
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       void vscode.window.showErrorMessage(`UnitTestRunner: ${messageText}`);
     } finally {
+      this.runningLabel = undefined;
       this.refresh();
     }
   }
 }
 
-function renderDashboardHtml(webview: vscode.Webview, model: SuiteViewModel): string {
+function renderDashboardHtml(webview: vscode.Webview, model: SuiteViewModel, runningLabel?: string): string {
   const nonce = createNonce();
   const reportState = model.reportExists ? escapeHtml(model.lastRunStatus) : '実行結果なし';
   const error = model.lastError ? `<div class="error">直近エラー: ${escapeHtml(model.lastError)}</div>` : '';
+  const running = runningLabel ? `<div class="busy" role="status">実行中: ${escapeHtml(runningLabel)}<br><span>処理が完了するまでボタンと選択は無効です。</span></div>` : '';
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -157,6 +173,10 @@ function renderDashboardHtml(webview: vscode.Webview, model: SuiteViewModel): st
     button.danger {
       border-color: var(--vscode-inputValidation-warningBorder);
     }
+    button:disabled, input:disabled {
+      cursor: wait;
+      opacity: 0.65;
+    }
     .error {
       border: 1px solid var(--vscode-inputValidation-errorBorder);
       background: var(--vscode-inputValidation-errorBackground);
@@ -164,6 +184,19 @@ function renderDashboardHtml(webview: vscode.Webview, model: SuiteViewModel): st
       margin: 10px 0;
       padding: 8px;
       overflow-wrap: anywhere;
+    }
+    .busy {
+      border: 1px solid var(--vscode-focusBorder);
+      background: var(--vscode-editorWidget-background);
+      color: var(--vscode-foreground);
+      font-weight: 700;
+      margin: 10px 0;
+      padding: 8px;
+      overflow-wrap: anywhere;
+    }
+    .busy span {
+      color: var(--vscode-descriptionForeground);
+      font-weight: 400;
     }
     .table-wrap {
       overflow: auto;
@@ -217,6 +250,7 @@ function renderDashboardHtml(webview: vscode.Webview, model: SuiteViewModel): st
     <div class="path">${escapeHtml(model.suitePath || 'suite manifest未設定')}</div>
     <div class="muted">直近レポート: ${escapeHtml(model.reportPath)} / ${reportState}</div>
     ${error}
+    ${running}
     <div class="summary">
       ${renderMetric('Total', model.summary.total)}
       ${renderMetric('GREEN', model.summary.green)}
@@ -238,8 +272,26 @@ function renderDashboardHtml(webview: vscode.Webview, model: SuiteViewModel): st
   </main>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
+    const initialRunningLabel = ${JSON.stringify(runningLabel ?? '')};
+    function disableControls(activeButton, label) {
+      const runningText = label || '処理';
+      document.querySelectorAll('button, input').forEach((control) => {
+        control.disabled = true;
+        control.setAttribute('aria-disabled', 'true');
+      });
+      if (activeButton) {
+        activeButton.textContent = '実行中: ' + runningText;
+      }
+    }
+    if (initialRunningLabel) {
+      disableControls(null, initialRunningLabel);
+    }
     document.querySelectorAll('button[data-kind]').forEach((button) => {
-      button.addEventListener('click', () => vscode.postMessage({ kind: button.dataset.kind }));
+      button.addEventListener('click', () => {
+        const label = button.textContent || '処理';
+        disableControls(button, label);
+        vscode.postMessage({ kind: button.dataset.kind, label });
+      });
     });
     document.querySelectorAll('input[data-entry-id]').forEach((input) => {
       input.addEventListener('change', () => vscode.postMessage({ kind: 'toggleEntry', entryId: input.dataset.entryId, checked: input.checked }));
@@ -291,6 +343,19 @@ function renderRow(entry: SuiteEntryView): string {
 
 function renderMetric(label: string, value: number): string {
   return `<div class="metric"><span>${escapeHtml(label)}</span><strong>${value}</strong></div>`;
+}
+
+function suiteDashboardActionLabel(kind: SuiteDashboardMessage['kind']): string {
+  const labels: Record<SuiteDashboardMessage['kind'], string> = {
+    register: '現在関数を登録',
+    runSelected: '選択を実行',
+    runTag: 'タグ指定で実行',
+    runAllGreen: '全件GREEN確認',
+    openManifest: 'manifestを開く',
+    openReport: '実行レポートを開く',
+    toggleEntry: '選択を更新',
+  };
+  return labels[kind];
 }
 
 function escapeHtml(value: string): string {
