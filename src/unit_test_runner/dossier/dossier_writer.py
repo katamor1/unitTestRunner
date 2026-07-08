@@ -32,7 +32,7 @@ def write_dossier_reports(workspace: Path | str, dossier: FunctionDossier, out: 
     write_dossier_traceability_csv(paths["traceability_matrix"], dossier.traceability)
     paths["review_checklist"].write_text(render_review_checklist_markdown(dossier.review_items), encoding="utf-8")
     paths["unresolved_items"].write_text(render_unresolved_items_markdown(dossier.unresolved_items), encoding="utf-8")
-    paths["next_actions"].write_text(render_next_actions_markdown(dossier.next_actions), encoding="utf-8")
+    paths["next_actions"].write_text(render_next_actions_markdown(dossier.next_actions, dossier.unresolved_items, dossier.artifact_index, dossier.function_name), encoding="utf-8")
     return paths
 
 
@@ -51,8 +51,9 @@ def write_review_files_from_payload(dossier_payload: dict, out: Path | str) -> d
     unresolved_items = [DossierUnresolvedItem(**item) for item in dossier_payload.get("unresolved_items", [])]
     next_actions = [DossierNextAction(**item) for item in dossier_payload.get("next_actions", [])]
     traceability = [TraceabilityLink(**item) for item in dossier_payload.get("traceability", [])]
+    function_name = dossier_payload.get("function", {}).get("name") or dossier_payload.get("target", {}).get("function")
     paths["review_checklist"].write_text(render_review_checklist_markdown(review_items), encoding="utf-8")
     paths["unresolved_items"].write_text(render_unresolved_items_markdown(unresolved_items), encoding="utf-8")
-    paths["next_actions"].write_text(render_next_actions_markdown(next_actions), encoding="utf-8")
+    paths["next_actions"].write_text(render_next_actions_markdown(next_actions, unresolved_items, dossier_payload.get("artifact_index", []), function_name), encoding="utf-8")
     write_dossier_traceability_csv(paths["traceability_matrix"], traceability)
     return paths
