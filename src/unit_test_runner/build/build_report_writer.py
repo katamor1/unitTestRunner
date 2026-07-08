@@ -5,8 +5,9 @@ from pathlib import Path
 
 from unit_test_runner.harness.c90_writer import sha256_file, write_c_file
 from unit_test_runner.reports.japanese import ja_label, md_cell, md_label_cell
+from unit_test_runner.vc6.debug_workspace_writer import write_vc6_debug_project
 
-from .build_models import BuildProbeReport, BuildWorkspaceReport, WorkspaceFile
+from .build_models import BuildDiagnostic, BuildProbeReport, BuildWorkspaceReport, WorkspaceFile
 
 
 def write_build_reports(output_root: Path, workspace: BuildWorkspaceReport, probe: BuildProbeReport) -> dict[str, Path]:
@@ -16,6 +17,7 @@ def write_build_reports(output_root: Path, workspace: BuildWorkspaceReport, prob
     workspace_md = reports_dir / "build_workspace_report.md"
     probe_json = reports_dir / "build_probe_report.json"
     probe_md = reports_dir / "build_probe_report.md"
+    _write_debug_dsp(output_root, workspace)
     workspace_json.write_text(json.dumps(workspace.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     workspace_md.write_text(render_workspace_markdown(workspace), encoding="utf-8")
     probe_json.write_text(json.dumps(probe.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -92,6 +94,15 @@ def render_probe_markdown(report: BuildProbeReport) -> str:
     else:
         lines.append("- なし")
     return "\n".join(lines) + "\n"
+
+
+def _write_debug_dsp(output_root: Path, report: BuildWorkspaceReport) -> None:
+    try:
+        dsp_path = write_vc6_debug_project(output_root, report)
+    except Exception as exc:  # pragma: no cover - defensive report generation path
+        report.diagnostics.append(BuildDiagnostic("vc6_debug_dsp_generation_failed", "warning", f"VC6 debug DSP generation failed: {exc}", None, None, None))
+        return
+    _record_build_file(output_root, report, dsp_path, "vc6_debug_dsp")
 
 
 def _record_build_file(output_root: Path, report: BuildWorkspaceReport, path: Path, kind: str) -> None:
