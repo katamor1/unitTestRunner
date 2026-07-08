@@ -72,6 +72,23 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--overwrite-test-case-design", action="store_true")
     analyze.add_argument("--include-low-confidence-matches", action="store_true")
 
+    quick = subcommands.add_parser("quick-check", help="Run a lightweight iterative function check without dossier finalization.")
+    quick.add_argument("--workspace")
+    quick.add_argument("--dsw", required=True)
+    quick.add_argument("--source", required=True)
+    quick.add_argument("--function", required=True)
+    quick.add_argument("--configuration", default="Win32 Debug")
+    quick.add_argument("--out", required=True)
+    quick.add_argument("--project")
+    quick.add_argument("--profile", dest="phase", choices=["design", "harness", "build"], default="design", help="Quick check depth. build means build workspace dry-run, not generated test execution.")
+    quick.set_defaults(
+        command="analyze-function",
+        finalize_dossier=False,
+        reuse_existing_tests=False,
+        apply_safe_completions=False,
+        run_tests=False,
+    )
+
     reanalyze = subcommands.add_parser("reanalyze-function", help="Reanalyze a function and reconcile existing test design assets.")
     reanalyze.add_argument("--workspace")
     reanalyze.add_argument("--dsw", required=True)
