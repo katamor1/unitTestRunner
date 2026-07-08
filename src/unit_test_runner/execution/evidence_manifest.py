@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from unit_test_runner.harness.c90_writer import sha256_file
+from unit_test_runner.reports.japanese import ja_label, md_cell, md_label_cell
 
 from .execution_models import EvidenceFile, EvidenceManifest, EvidenceSummary, TestExecutionReport
 
@@ -35,16 +36,16 @@ def build_evidence_manifest(
         if str(item.get("path", "")).startswith("generated/")
     ]
     build_reports = [
-        _evidence_file(workspace, Path("reports/build_workspace_report.json"), "build_report", "Build workspace report"),
-        _evidence_file(workspace, Path("reports/build_probe_report.json"), "build_report", "Build probe report"),
-        _evidence_file(workspace, Path("reports/build_completion_iteration_report.json"), "completion_report", "Build completion iteration report"),
+        _evidence_file(workspace, Path("reports/build_workspace_report.json"), "build_report", "ビルドworkspaceレポート"),
+        _evidence_file(workspace, Path("reports/build_probe_report.json"), "build_report", "ビルドプローブレポート"),
+        _evidence_file(workspace, Path("reports/build_completion_iteration_report.json"), "completion_report", "ビルド補完イテレーションレポート"),
     ]
     test_reports = [
-        _evidence_file(workspace, Path("reports/test_execution_report.json"), "execution_report", "Test execution report"),
-        _evidence_file(workspace, Path("reports/test_result.json"), "test_result_json", "Test result JSON"),
-        _evidence_file(workspace, Path("reports/test_result.csv"), "test_result_csv", "Test result CSV"),
+        _evidence_file(workspace, Path("reports/test_execution_report.json"), "execution_report", "テスト実行レポート"),
+        _evidence_file(workspace, Path("reports/test_result.json"), "test_result_json", "テスト結果JSON"),
+        _evidence_file(workspace, Path("reports/test_result.csv"), "test_result_csv", "テスト結果CSV"),
     ]
-    logs = [_evidence_file(workspace, Path("logs/test_execution.log"), "test_log", "Test execution log")]
+    logs = [_evidence_file(workspace, Path("logs/test_execution.log"), "test_log", "テスト実行ログ")]
     return EvidenceManifest(report.function_name, workspace, datetime.now(timezone.utc).isoformat(), source_files, generated_files, build_reports, test_reports, logs, report.unresolved_review_items, summary)
 
 
@@ -68,8 +69,8 @@ def render_evidence_package(manifest: EvidenceManifest, report: TestExecutionRep
         "## 対象",
         f"- 関数: {manifest.function_name}",
         f"- workspace: {manifest.workspace_root.as_posix()}",
-        f"- ビルドプローブ状態: {summary.build_probe_status}",
-        f"- テスト実行状態: {summary.test_execution_status}",
+        f"- ビルドプローブ状態: {ja_label(summary.build_probe_status)}",
+        f"- テスト実行状態: {ja_label(summary.test_execution_status)}",
         "",
         "## サマリ",
         "| 項目 | 件数 |",
@@ -85,10 +86,10 @@ def render_evidence_package(manifest: EvidenceManifest, report: TestExecutionRep
         "|---|---|---|",
     ]
     for item in manifest.source_files + manifest.generated_files + manifest.build_reports + manifest.test_reports + manifest.logs:
-        lines.append(f"| {item.path.as_posix()} | {item.file_kind} | {item.sha256 or ''} |")
+        lines.append(f"| {item.path.as_posix()} | {md_label_cell(item.file_kind)} | {item.sha256 or ''} |")
     lines.extend(["", "## 未解決レビュー項目", "| 種別 | 説明 | 推奨アクション |", "|---|---|---|"])
     for item in report.unresolved_review_items:
-        lines.append(f"| {item.item_kind} | {item.description} | {item.suggested_action} |")
+        lines.append(f"| {md_label_cell(item.item_kind)} | {md_cell(item.description)} | {md_cell(item.suggested_action)} |")
     return "\n".join(lines) + "\n"
 
 

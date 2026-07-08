@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import traceback
+from typing import TextIO
 
 from .commands import dispatch
 from .errors import CLIError
@@ -27,10 +28,10 @@ def main(argv: list[str] | None = None) -> int:
             errors=[exc.message],
         )
         if "--json" in raw_argv:
-            sys.stdout.write(result.to_json())
+            _write_stream(sys.stdout, result.to_json())
         else:
-            sys.stderr.write(exc.usage)
-            sys.stderr.write(f"{parser.prog if exc.command == 'unknown' else parser.prog + ' ' + exc.command}: error: {exc.message}\n")
+            _write_stream(sys.stderr, exc.usage)
+            _write_stream(sys.stderr, f"{parser.prog if exc.command == 'unknown' else parser.prog + ' ' + exc.command}: error: {exc.message}\n")
         return EXIT_INPUT_ERROR
     except SystemExit as exc:
         code = exc.code if isinstance(exc.code, int) else EXIT_INPUT_ERROR
@@ -63,12 +64,12 @@ def main(argv: list[str] | None = None) -> int:
 
     logging.info("command finished: %s status=%s exit_code=%s", result.command, result.status, result.exit_code)
     if args.json:
-        sys.stdout.write(result.to_json())
+        _write_stream(sys.stdout, result.to_json())
     else:
         if result.exit_code == 0:
-            sys.stdout.write(result.render_human())
+            _write_stream(sys.stdout, result.render_human())
         else:
-            sys.stderr.write(result.render_human())
+            _write_stream(sys.stderr, result.render_human())
     return result.exit_code
 
 
@@ -81,3 +82,17 @@ def _apply_build_probe_environment(args) -> None:
     cc = getattr(args, "cc", None)
     if cc:
         os.environ["UNIT_TEST_RUNNER_CC"] = cc
+
+
+def _write_stream(stream: TextIO, text: str) -> None:
+    try:
+        stream.write(text)
+        return
+    except UnicodeEncodeError:
+        buffer = getattr(stream, "buffer", None)
+        encoding = stream.encoding or "utf-8"
+        if buffer is None:
+            stream.write(text.encode(encoding, errors="replace").decode(encoding, errors="replace"))
+            return
+        buffer.write(text.encode(encoding, errors="backslashreplace"))
+        buffer.flush()

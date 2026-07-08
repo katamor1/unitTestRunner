@@ -8,17 +8,30 @@ GENERATED_C_ENCODING = "cp932"
 GENERATED_C_NEWLINE = "\r\n"
 
 
-def read_text_with_encoding(path: Path | str) -> tuple[str, str, bool]:
-    data = Path(path).read_bytes()
+def decode_bytes_with_encoding(
+    data: bytes,
+    encodings: tuple[str, ...] = READ_ENCODINGS,
+    errors: str = "strict",
+) -> tuple[str, str, bool]:
     last_error: UnicodeDecodeError | None = None
-    for index, encoding in enumerate(READ_ENCODINGS):
+    for index, encoding in enumerate(encodings):
         try:
             return data.decode(encoding), encoding, index > 0
         except UnicodeDecodeError as exc:
             last_error = exc
-    if last_error:
+    if errors == "strict" and last_error:
         raise last_error
-    return "", READ_ENCODINGS[0], False
+    fallback = encodings[-1] if encodings else "utf-8"
+    return data.decode(fallback, errors=errors), fallback, True
+
+
+def decode_bytes_auto(data: bytes, errors: str = "replace") -> str:
+    text, _, _ = decode_bytes_with_encoding(data, errors=errors)
+    return text
+
+
+def read_text_with_encoding(path: Path | str) -> tuple[str, str, bool]:
+    return decode_bytes_with_encoding(Path(path).read_bytes())
 
 
 def read_text_auto(path: Path | str) -> str:

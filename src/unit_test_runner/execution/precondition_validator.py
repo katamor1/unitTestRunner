@@ -14,14 +14,14 @@ def validate_execution_preconditions(
     review_items: list[ExecutionReviewItem] = []
     status = build_probe_report.get("function", {}).get("status", "unknown")
     if policy.require_successful_build_probe and status != "succeeded":
-        warnings.append(TestExecutionWarning("build_probe_not_successful", "Build probe is not successful; test execution is blocked."))
+        warnings.append(TestExecutionWarning("build_probe_not_successful", "ビルドプローブが成功していないため、テスト実行をブロックします。"))
         review_items.append(
             ExecutionReviewItem(
                 "REVIEW_BUILD_001",
                 "build_not_successful",
                 None,
-                "Build probe did not succeed before test execution.",
-                "Resolve build probe diagnostics before running generated tests.",
+                "テスト実行前のビルドプローブが成功していません。",
+                "生成テストを実行する前に、ビルドプローブ診断を解消してください。",
                 "error",
             )
         )
@@ -33,8 +33,8 @@ def validate_execution_preconditions(
                 "REVIEW_EXECUTABLE_001",
                 "executable_not_found",
                 None,
-                "Test executable was not found.",
-                "Run build-probe successfully or pass --executable to a generated runner binary.",
+                "テスト実行ファイルが見つかりません。",
+                "build-probe を成功させるか、--executable で生成済みランナーを指定してください。",
                 "error",
             )
         )

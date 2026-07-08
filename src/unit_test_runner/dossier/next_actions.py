@@ -16,7 +16,7 @@ def build_next_actions(unresolved_items: list[DossierUnresolvedItem]) -> list[Do
                 description=item.suggested_action,
                 owner_role=_owner_for_kind(kind),
                 related_unresolved_items=[item.item_id],
-                expected_output="Updated generated workspace artifacts or recorded human review decision.",
+                expected_output="生成workspace成果物の更新、または人手レビュー判断の記録。",
             )
         )
     return actions
@@ -38,13 +38,13 @@ def _action_kind(item_kind: str) -> str:
 
 def _title_for_kind(kind: str) -> str:
     return {
-        "review_expected_result": "Review expected result",
-        "review_stub_behavior": "Review stub or harness behavior",
-        "resolve_pch_issue": "Resolve PCH issue",
-        "add_include_path": "Review include path",
-        "rerun_tests": "Rerun or review generated tests",
-        "approve_dossier": "Review dossier",
-    }.get(kind, "Review dossier")
+        "review_expected_result": "期待結果を確認",
+        "review_stub_behavior": "スタブまたはハーネスの挙動を確認",
+        "resolve_pch_issue": "PCH課題を解消",
+        "add_include_path": "includeパスを確認",
+        "rerun_tests": "生成テストを再実行またはレビュー",
+        "approve_dossier": "dossierをレビュー",
+    }.get(kind, "dossierをレビュー")
 
 
 def _owner_for_kind(kind: str) -> str:

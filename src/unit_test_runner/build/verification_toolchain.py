@@ -7,6 +7,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from unit_test_runner.encoding import decode_bytes_auto
+
 from .build_models import BuildDiagnostic, BuildPathEntry, CompileUnit
 
 
@@ -216,7 +218,6 @@ def _run_command(command: list[str], cwd: Path, timeout_seconds: int, env_setup:
             completed = subprocess.run(
                 ["cmd.exe", "/c", command_line],
                 cwd=cwd,
-                text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 timeout=timeout_seconds,
@@ -226,18 +227,22 @@ def _run_command(command: list[str], cwd: Path, timeout_seconds: int, env_setup:
             completed = subprocess.run(
                 command,
                 cwd=cwd,
-                text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 timeout=timeout_seconds,
                 check=False,
             )
-        return completed.returncode, completed.stdout
+        return completed.returncode, _decode_process_output(completed.stdout)
     except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout or ""
-        if isinstance(stdout, bytes):
-            stdout = stdout.decode("utf-8", errors="replace")
-        return 124, stdout + f"\nCommand timed out after {timeout_seconds} seconds.\n"
+        return 124, _decode_process_output(exc.stdout) + f"\nCommand timed out after {timeout_seconds} seconds.\n"
+
+
+def _decode_process_output(output: bytes | str | None) -> str:
+    if output is None:
+        return ""
+    if isinstance(output, str):
+        return output
+    return decode_bytes_auto(output)
 
 
 def _command_text(command: list[str]) -> str:
