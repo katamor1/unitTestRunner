@@ -51,7 +51,7 @@ def generate_build_workspace(
     source_path = Path(source_digest.get("source", {}).get("path") or harness_report.get("source", {}).get("path") or "")
     function_name = harness_report.get("function", {}).get("name") or "unknown_function"
     diagnostics: list[BuildDiagnostic] = []
-    copied_files = _copy_target_and_headers(output_root, source_path, source_digest, build_context, diagnostics)
+    copied_files = _copy_target_and_headers(output_root, source_path, source_digest, build_context, function_name, diagnostics)
     generated_files = _copy_or_verify_generated_files(output_root, harness_report, diagnostics)
     generated_files.extend(_generate_extern_global_definitions(output_root, copied_files, diagnostics))
     include_dirs = _include_dirs(output_root, build_context)
@@ -71,13 +71,20 @@ def _ensure_layout(output_root: Path) -> None:
         (output_root / relative).mkdir(parents=True, exist_ok=True)
 
 
-def _copy_target_and_headers(output_root: Path, source_path: Path, source_digest: dict[str, Any], build_context: dict[str, Any], diagnostics: list[BuildDiagnostic]) -> list[WorkspaceFile]:
+def _copy_target_and_headers(
+    output_root: Path,
+    source_path: Path,
+    source_digest: dict[str, Any],
+    build_context: dict[str, Any],
+    function_name: str,
+    diagnostics: list[BuildDiagnostic],
+) -> list[WorkspaceFile]:
     copied: list[WorkspaceFile] = []
     workspace_root = Path(build_context.get("workspace_root") or source_path.parent)
     include_roots = _include_search_roots(workspace_root, build_context)
     target_relative = _relative_or_name(source_path, workspace_root)
     target_workspace = Path("extracted") / target_relative
-    _copy_file(source_path, output_root / target_workspace, copied, target_workspace, "target_source", diagnostics)
+    _copy_target_source(source_path, output_root / target_workspace, copied, target_workspace, source_digest, function_name, diagnostics)
     header_queue: list[Path] = []
     for include in source_digest.get("preprocessor", {}).get("includes", []):
         candidates = [Path(item) for item in include.get("resolved_candidates", []) if item]
@@ -87,6 +94,177 @@ def _copy_target_and_headers(output_root: Path, source_path: Path, source_digest
         _copy_header(existing, output_root, workspace_root, include_roots, copied, diagnostics, header_queue)
     _copy_transitive_header_includes(output_root, workspace_root, include_roots, copied, diagnostics, header_queue)
     return copied
+
+
+def _copy_target_source(
+    source: Path,
+    destination: Path,
+    copied: list[WorkspaceFile],
+    relative_destination: Path,
+    source_digest: dict[str, Any],
+    function_name: str,
+    diagnostics: list[BuildDiagnostic],
+) -> None:
+    isolated = _function_level_source_text(source, source_digest, function_name)
+    if isolated is None:
+        _copy_file(source, destination, copied, relative_destination, "target_source", diagnostics)
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(isolated, encoding="cp932", errors="replace")
+    copied.append(WorkspaceFile(relative_destination, "target_source", source_path=source, sha256=sha256_file(destination), copied=True, generated=False, required=True, exists=True))
+
+
+def _function_level_source_text(source: Path, source_digest: dict[str, Any], function_name: str) -> str | None:
+    if not source.exists():
+        return None
+    tokens = _source_tokens(source_digest)
+    definitions = _function_definitions_from_tokens(tokens)
+    if not definitions or not any(item["name"] == function_name for item in definitions):
+        return None
+    keep = _reachable_function_names(function_name, definitions, tokens)
+    if all(item["name"] in keep for item in definitions):
+        return None
+    try:
+        text = decode_bytes_auto(source.read_bytes())
+    except OSError:
+        return None
+    return _remove_unkept_functions(text, definitions, keep)
+
+
+def _source_tokens(source_digest: dict[str, Any]) -> list[dict[str, Any]]:
+    tokens: list[dict[str, Any]] = []
+    for token in source_digest.get("tokens", []):
+        if not all(key in token for key in ("kind", "value", "start_offset", "end_offset")):
+            continue
+        tokens.append(token)
+    return sorted(tokens, key=lambda item: int(item.get("start_offset", 0)))
+
+
+def _function_definitions_from_tokens(tokens: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    depths = _brace_depths(tokens)
+    definitions: list[dict[str, Any]] = []
+    index = 0
+    while index < len(tokens) - 2:
+        token = tokens[index]
+        if token.get("kind") != "identifier" or depths[index] != 0:
+            index += 1
+            continue
+        if _token_value(tokens, index + 1) != "(":
+            index += 1
+            continue
+        close_paren = _matching_token(tokens, index + 1, "(", ")")
+        next_index = close_paren + 1 if close_paren != -1 else -1
+        if next_index == -1 or next_index >= len(tokens) or _token_value(tokens, next_index) != "{" or depths[next_index] != 0:
+            index += 1
+            continue
+        close_brace = _matching_token(tokens, next_index, "{", "}")
+        if close_brace == -1:
+            index += 1
+            continue
+        start_index = _definition_start_index(tokens, depths, index)
+        definitions.append(
+            {
+                "name": str(token.get("value")),
+                "start": int(tokens[start_index].get("start_offset", 0)),
+                "end": int(tokens[close_brace].get("end_offset", 0)),
+                "body_start": int(tokens[next_index].get("end_offset", 0)),
+                "body_end": int(tokens[close_brace].get("start_offset", 0)),
+            }
+        )
+        index = close_brace + 1
+    return definitions
+
+
+def _brace_depths(tokens: list[dict[str, Any]]) -> list[int]:
+    depths: list[int] = []
+    depth = 0
+    for token in tokens:
+        value = token.get("value")
+        depths.append(depth)
+        if value == "{":
+            depth += 1
+        elif value == "}":
+            depth = max(0, depth - 1)
+    return depths
+
+
+def _matching_token(tokens: list[dict[str, Any]], start_index: int, open_value: str, close_value: str) -> int:
+    depth = 0
+    for index in range(start_index, len(tokens)):
+        value = _token_value(tokens, index)
+        if value == open_value:
+            depth += 1
+        elif value == close_value:
+            depth -= 1
+            if depth == 0:
+                return index
+    return -1
+
+
+def _definition_start_index(tokens: list[dict[str, Any]], depths: list[int], name_index: int) -> int:
+    for index in range(name_index - 1, -1, -1):
+        value = _token_value(tokens, index)
+        if value == ";" and depths[index] == 0:
+            return index + 1
+        if value == "}" and depths[index] <= 1:
+            return index + 1
+    return 0
+
+
+def _reachable_function_names(function_name: str, definitions: list[dict[str, Any]], tokens: list[dict[str, Any]]) -> set[str]:
+    definitions_by_name = {item["name"]: item for item in definitions}
+    keep: set[str] = set()
+    pending = [function_name]
+    while pending:
+        name = pending.pop()
+        if name in keep:
+            continue
+        keep.add(name)
+        definition = definitions_by_name.get(name)
+        if not definition:
+            continue
+        for called in _called_defined_functions(definition, tokens, set(definitions_by_name)):
+            if called not in keep:
+                pending.append(called)
+    return keep
+
+
+def _called_defined_functions(definition: dict[str, Any], tokens: list[dict[str, Any]], known_names: set[str]) -> set[str]:
+    calls: set[str] = set()
+    body_start = int(definition["body_start"])
+    body_end = int(definition["body_end"])
+    for index, token in enumerate(tokens[:-1]):
+        start = int(token.get("start_offset", 0))
+        if start < body_start or start >= body_end:
+            continue
+        name = str(token.get("value"))
+        if token.get("kind") == "identifier" and name in known_names and _token_value(tokens, index + 1) == "(":
+            calls.add(name)
+    return calls
+
+
+def _remove_unkept_functions(text: str, definitions: list[dict[str, Any]], keep: set[str]) -> str:
+    result = text
+    for definition in sorted(definitions, key=lambda item: int(item["start"]), reverse=True):
+        if definition["name"] in keep:
+            continue
+        start = int(definition["start"])
+        end = int(definition["end"])
+        removed = result[start:end]
+        result = result[:start] + _removed_function_replacement(definition["name"], removed) + result[end:]
+    return result
+
+
+def _removed_function_replacement(name: str, removed_text: str) -> str:
+    newline_count = removed_text.count("\n")
+    comment = f"/* unit-test-runner build probe: unused peer function {name} removed for function-level linking. */"
+    return comment + ("\n" * max(1, newline_count))
+
+
+def _token_value(tokens: list[dict[str, Any]], index: int) -> str | None:
+    if index < 0 or index >= len(tokens):
+        return None
+    return str(tokens[index].get("value"))
 
 
 def _copy_header(source: Path, output_root: Path, workspace_root: Path, include_roots: list[Path], copied: list[WorkspaceFile], diagnostics: list[BuildDiagnostic], queue: list[Path] | None = None) -> None:
