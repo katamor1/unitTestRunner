@@ -43,7 +43,7 @@ def render_function_dossier_markdown(dossier: FunctionDossier) -> str:
     ]
     for item in dossier.unresolved_items:
         lines.append(f"| {_markdown_cell(item.item_id)} | {_markdown_cell(item.item_kind)} | {_markdown_cell(item.impact)} | {_markdown_cell(item.suggested_action)} |")
-    lines.extend(["", "## 次のアクション", "| ID | 優先度 | アクション | 対応対象・理由 | 担当ロール |", "|---|---|---|---|---|"])
+    lines.extend(["", "## 次のアクション", "操作・参照ファイルへのリンク付き一覧は [next_actions.md](next_actions.md) を参照してください。", "", "| ID | 優先度 | アクション | 対応対象・理由 | 担当ロール |", "|---|---|---|---|---|"])
     for action in dossier.next_actions:
         related = ", ".join(action.related_unresolved_items) if action.related_unresolved_items else "-"
         detail = action.description or related
