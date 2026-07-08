@@ -48,25 +48,25 @@ void Utr_RunAllTests(void)
     for (index = 0; index < utr_test_count; index++) {{
         if (utr_tests[index].func != 0) {{
             before = Utr_GetFailureCount();
-            printf("UTR RUN %s\n", utr_tests[index].name);
+            printf("UTR RUN %s\\n", utr_tests[index].name);
             fflush(stdout);
             utr_tests[index].func();
             after = Utr_GetFailureCount();
             if (after == before) {{
                 passed++;
-                printf("UTR OK %s\n", utr_tests[index].name);
+                printf("UTR OK %s\\n", utr_tests[index].name);
             }} else {{
                 failed++;
-                printf("UTR FAILED %s\n", utr_tests[index].name);
+                printf("UTR FAILED %s\\n", utr_tests[index].name);
             }}
             fflush(stdout);
         }} else {{
             skipped++;
-            printf("UTR SKIPPED %s\n", utr_tests[index].name);
+            printf("UTR SKIPPED %s\\n", utr_tests[index].name);
             fflush(stdout);
         }}
     }}
-    printf("UTR SUMMARY total=%d passed=%d failed=%d skipped=%d inconclusive=%d\n", passed + failed + skipped + inconclusive, passed, failed, skipped, inconclusive);
+    printf("UTR SUMMARY total=%d passed=%d failed=%d skipped=%d inconclusive=%d\\n", passed + failed + skipped + inconclusive, passed, failed, skipped, inconclusive);
     fflush(stdout);
 }}
 
