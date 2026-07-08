@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from unit_test_runner.execution import prepare_test_execution_evidence
+from unit_test_runner.vc6.debug_workspace_writer import write_vc6_debug_suite
 
 from .models import SuiteEntry, SuiteManifest, SuiteRunEntryResult, SuiteRunPolicy, SuiteRunReport
 from .report_writer import write_suite_run_report
@@ -61,13 +62,16 @@ def register_workspace(
     manifest.entries = [existing for existing in manifest.entries if existing.entry_id != entry.entry_id]
     manifest.entries.append(entry)
     save_suite_manifest(suite_path, manifest)
+    _refresh_vc6_debug_suite(suite_path, manifest)
     return manifest
 
 
 def remove_entry(suite_path: Path | str, entry_id: str) -> SuiteManifest:
+    suite_path = Path(suite_path).resolve()
     manifest = load_suite_manifest(suite_path)
     manifest.entries = [entry for entry in manifest.entries if entry.entry_id != entry_id]
     save_suite_manifest(suite_path, manifest)
+    _refresh_vc6_debug_suite(suite_path, manifest)
     return manifest
 
 
@@ -89,6 +93,7 @@ def run_suite(
     suite_path = Path(suite_path).resolve()
     policy = policy or SuiteRunPolicy()
     manifest = load_suite_manifest(suite_path)
+    _refresh_vc6_debug_suite(suite_path, manifest)
     selected = _select_entries(manifest.entries, entry_ids=entry_ids, tag=tag, all_entries=all_entries)
     results: list[SuiteRunEntryResult] = []
     for entry in selected:
@@ -251,3 +256,11 @@ def _existing_file(path: Path | str, label: str) -> Path:
 
 def _suite_id_from_path(suite_path: Path) -> str:
     return suite_path.parent.name or "default"
+
+
+def _refresh_vc6_debug_suite(suite_path: Path, manifest: SuiteManifest) -> None:
+    try:
+        write_vc6_debug_suite(suite_path, manifest)
+    except Exception:
+        # The suite manifest must remain usable even when an entry has not reached the build phase yet.
+        return
