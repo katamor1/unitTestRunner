@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -9,13 +10,19 @@ from .c90_writer import sanitize_identifier, write_c_file
 _FUNCTION_RE_TEMPLATE = r"void\s+{name}\s*\(\s*void\s*\)\s*\{{(?P<body>.*?)^\}}"
 _LVALUE_RE = re.compile(r"^[A-Za-z_]\w*(?:\s*(?:->|\.)\s*[A-Za-z_]\w*|\s*\[[A-Za-z0-9_+\-*/% ()]+\])*$")
 _FORBIDDEN_FRAGMENT_RE = re.compile(r"[{}#;\n\r]")
+_POINTER_CHAIN_RE = re.compile(r"\b(?P<root>[A-Za-z_]\w*)\s*->\s*(?P<field>[A-Za-z_]\w*)\s*->")
+_EXTERN_POINTER_RE_TEMPLATE = r"(?m)^\s*extern\s+(?P<type>[^;\n()]*?)\s*\*\s*{name}\s*;"
+_TYPEDEF_STRUCT_RE = re.compile(r"typedef\s+struct\s+(?:[A-Za-z_]\w*)?\s*\{(?P<body>.*?)\}\s*(?P<alias>[A-Za-z_]\w*)\s*;", re.DOTALL)
+_FIELD_RE = re.compile(r"(?P<type>[A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*)\s*(?P<pointer>\*+)?\s*(?P<name>[A-Za-z_]\w*)\s*(?:\[[^\]]+\])?$")
 
 
 def reflect_state_setups(output_root: Path | str, test_case_design: Any, function_name: str | None = None) -> list[Path]:
     """Reflect test_cases[].state_setups[] into generated/tests/test_<Function>.c.
 
     This is intentionally conservative: unsafe lvalues/statements are emitted as review
-    comments instead of executable C statements.
+    comments instead of executable C statements.  If state_setups does not already
+    contain pointer fixture setup for expressions such as g_com->ptr->member, a
+    simple fixture is inferred from copied target headers when possible.
     """
     output_root = Path(output_root).resolve()
     payload = _payload(test_case_design)
@@ -24,6 +31,10 @@ def reflect_state_setups(output_root: Path | str, test_case_design: Any, functio
     if not test_source.exists():
         return []
     cases = payload.get("test_cases", [])
+    inferred = _infer_pointer_fixture_state_setups(output_root, payload, function_name)
+    if inferred:
+        _append_inferred_state_setups(cases, inferred)
+        _write_back_test_case_design(output_root, payload)
     if not any(case.get("state_setups") for case in cases):
         return []
     text = test_source.read_text(encoding="cp932", errors="replace")
@@ -40,6 +51,164 @@ def _payload(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     raise TypeError(f"Unsupported test case design type: {type(value)!r}")
+
+
+def _write_back_test_case_design(output_root: Path, payload: dict[str, Any]) -> None:
+    path = output_root / "reports" / "test_case_design.json"
+    if not path.exists():
+        return
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _append_inferred_state_setups(cases: list[dict[str, Any]], inferred: list[dict[str, Any]]) -> None:
+    for case in cases:
+        setups = case.setdefault("state_setups", [])
+        existing = {str(setup.get("variable_name")) for setup in setups if isinstance(setup, dict)}
+        for setup in inferred:
+            if setup.get("variable_name") not in existing:
+                setups.append(dict(setup))
+
+
+def _infer_pointer_fixture_state_setups(output_root: Path, payload: dict[str, Any], function_name: str) -> list[dict[str, Any]]:
+    target_source = _target_source_text(output_root, payload)
+    if not target_source:
+        return []
+    chains = _pointer_chains_for_function(target_source, function_name)
+    if not chains:
+        return []
+    headers = _workspace_headers(output_root)
+    if not headers:
+        return []
+    declarations = _extern_pointer_declarations(headers)
+    structs = _typedef_structs(headers)
+    result: list[dict[str, Any]] = []
+    for root, field in sorted(chains):
+        declaration = declarations.get(root)
+        if declaration is None:
+            continue
+        root_type, header_path = declaration
+        field_info = structs.get(root_type, {}).get(field)
+        if field_info is None or not field_info.get("pointer"):
+            continue
+        pointee_type = str(field_info["type"])
+        root_fixture = f"fixture_{sanitize_identifier(root)}"
+        field_fixture = f"fixture_{sanitize_identifier(root)}_{sanitize_identifier(field)}"
+        result.append(
+            {
+                "variable_name": root,
+                "scope": "extern",
+                "value_expression": f"&{root_fixture}",
+                "setup_method_hint": "fixture_pointer",
+                "source_candidate_id": None,
+                "review_required": True,
+                "confidence": "medium",
+                "fixture_includes": [_relative_include_from_generated_tests(output_root, header_path)],
+                "fixture_declarations": [f"static {pointee_type} {field_fixture}", f"static {root_type} {root_fixture}"],
+                "setup_statements": [f"{root_fixture}.{field} = &{field_fixture}"],
+                "inferred_from": f"{root}->{field}->...",
+            }
+        )
+    return result
+
+
+def _target_source_text(output_root: Path, payload: dict[str, Any]) -> str:
+    source_path = Path(payload.get("source", {}).get("path") or "")
+    candidates: list[Path] = []
+    if source_path.as_posix():
+        if source_path.is_absolute():
+            candidates.append(output_root / "extracted" / source_path.name)
+        else:
+            candidates.append(output_root / "extracted" / source_path)
+            candidates.append(output_root / "extracted" / source_path.name)
+    candidates.extend((output_root / "extracted").rglob("*.c"))
+    for candidate in candidates:
+        if candidate.is_file():
+            try:
+                return candidate.read_text(encoding="cp932", errors="replace")
+            except OSError:
+                continue
+    return ""
+
+
+def _pointer_chains_for_function(source_text: str, function_name: str) -> set[tuple[str, str]]:
+    body = _function_body(source_text, function_name) or source_text
+    return {(match.group("root"), match.group("field")) for match in _POINTER_CHAIN_RE.finditer(body)}
+
+
+def _function_body(source_text: str, function_name: str) -> str:
+    match = re.search(rf"\b{re.escape(function_name)}\s*\([^)]*\)\s*\{{", source_text)
+    if not match:
+        return ""
+    start = match.end()
+    depth = 1
+    index = start
+    while index < len(source_text):
+        char = source_text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source_text[start:index]
+        index += 1
+    return ""
+
+
+def _workspace_headers(output_root: Path) -> dict[Path, str]:
+    headers: dict[Path, str] = {}
+    for header in (output_root / "extracted").rglob("*.h"):
+        try:
+            headers[header] = header.read_text(encoding="cp932", errors="replace")
+        except OSError:
+            continue
+    return headers
+
+
+def _extern_pointer_declarations(headers: dict[Path, str]) -> dict[str, tuple[str, Path]]:
+    names: dict[str, tuple[str, Path]] = {}
+    candidate_names = set(re.findall(r"\b[A-Za-z_]\w*\b", "\n".join(headers.values())))
+    for name in candidate_names:
+        pattern = re.compile(_EXTERN_POINTER_RE_TEMPLATE.format(name=re.escape(name)))
+        for path, text in headers.items():
+            match = pattern.search(text)
+            if match:
+                root_type = " ".join(match.group("type").strip().split())
+                if root_type:
+                    names[name] = (root_type, path)
+                break
+    return names
+
+
+def _typedef_structs(headers: dict[Path, str]) -> dict[str, dict[str, dict[str, Any]]]:
+    structs: dict[str, dict[str, dict[str, Any]]] = {}
+    for text in headers.values():
+        for match in _TYPEDEF_STRUCT_RE.finditer(text):
+            alias = match.group("alias")
+            fields: dict[str, dict[str, Any]] = {}
+            for raw_field in match.group("body").split(";"):
+                field = _parse_field(raw_field)
+                if field:
+                    fields[field["name"]] = field
+            structs[alias] = fields
+    return structs
+
+
+def _parse_field(raw_field: str) -> dict[str, Any] | None:
+    text = " ".join(raw_field.strip().split())
+    if not text:
+        return None
+    match = _FIELD_RE.match(text.replace(" *", "*").replace("* ", "*")) or _FIELD_RE.match(text)
+    if not match:
+        return None
+    return {"type": match.group("type").strip(), "name": match.group("name"), "pointer": bool(match.group("pointer"))}
+
+
+def _relative_include_from_generated_tests(output_root: Path, header_path: Path) -> str:
+    try:
+        relative = header_path.resolve().relative_to(output_root.resolve())
+        return (Path("../..") / relative).as_posix()
+    except (OSError, ValueError):
+        return header_path.as_posix()
 
 
 def _ensure_fixture_includes(text: str, cases: list[dict[str, Any]]) -> str:
