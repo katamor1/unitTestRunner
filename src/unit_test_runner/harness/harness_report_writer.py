@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
-from unit_test_runner.reports.japanese import ja_label, md_cell, md_label_cell
+from unit_test_runner.reports.japanese import ja_label, ja_text, md_cell, md_label_cell
 
 from .c90_writer import sha256_file
 from .harness_models import GeneratedFile, HarnessSkeletonReport
@@ -14,16 +15,17 @@ def write_harness_report(output_root: Path, report: HarnessSkeletonReport) -> di
     reports_dir.mkdir(parents=True, exist_ok=True)
     json_path = reports_dir / "harness_skeleton_report.json"
     markdown_path = reports_dir / "harness_skeleton_report.md"
-    json_path.write_text(json.dumps(report.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    payload = _localized_report_payload(report)
+    json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     markdown_path.write_text(render_harness_markdown(report), encoding="utf-8")
     _record_report_file(output_root, report, json_path, "report")
     _record_report_file(output_root, report, markdown_path, "report")
-    json_path.write_text(json.dumps(report.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    json_path.write_text(json.dumps(_localized_report_payload(report), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return {"json": json_path, "markdown": markdown_path}
 
 
 def render_harness_markdown(report: HarnessSkeletonReport) -> str:
-    payload = report.to_dict()
+    payload = _localized_report_payload(report)
     lines = [
         "# ハーネスひな形レポート",
         "",
@@ -69,6 +71,21 @@ def render_harness_markdown(report: HarnessSkeletonReport) -> str:
     else:
         lines.append("- なし")
     return "\n".join(lines) + "\n"
+
+
+def _localized_report_payload(report: HarnessSkeletonReport) -> dict[str, Any]:
+    payload = report.to_dict()
+    for item in payload.get("unresolved_placeholders", []):
+        item["placeholder_kind"] = ja_label(item.get("placeholder_kind"))
+        item["reason"] = ja_text(item.get("reason"))
+        item["suggested_action"] = ja_text(item.get("suggested_action"))
+    for item in payload.get("warnings", []):
+        item["message"] = ja_text(item.get("message"))
+    for item in payload.get("build_hints", []):
+        item["hint_kind"] = ja_label(item.get("hint_kind"))
+        item["message"] = ja_text(item.get("message"))
+        item["severity"] = ja_label(item.get("severity"))
+    return payload
 
 
 def _record_report_file(output_root: Path, report: HarnessSkeletonReport, path: Path, kind: str) -> None:
