@@ -41,7 +41,7 @@ describe('UnitTestRunner quick check adapter core', () => {
     assert.equal(quickCheckPhase('build-dry-run'), 'build');
   });
 
-  it('builds quick check analyze invocation without dossier finalization', () => {
+  it('builds quick check invocation without dossier finalization', () => {
     const settings = readAdapterSettingsFromObject(
       {
         cliPath: 'C:\\Program Files\\Unit Test Runner\\unit-test-runner.exe',
@@ -67,12 +67,14 @@ describe('UnitTestRunner quick check adapter core', () => {
 
     const quickWorkspace = buildQuickOutputWorkspace(settings, target);
     const quick = buildQuickCheckInvocation(settings, target);
-    const phaseIndex = quick.args.indexOf('--phase');
+    const profileIndex = quick.args.indexOf('--profile');
 
     assert.ok(quickWorkspace.includes('_quick'));
     assert.ok(quickWorkspace.includes('src_control_Control_Update'));
+    assert.ok(quick.args.includes('quick-check'));
     assert.equal(quick.args.includes('--finalize-dossier'), false);
-    assert.deepEqual(quick.args.slice(phaseIndex, phaseIndex + 2), ['--phase', 'harness']);
+    assert.equal(quick.args.includes('--phase'), false);
+    assert.deepEqual(quick.args.slice(profileIndex, profileIndex + 2), ['--profile', 'harness']);
     assert.deepEqual(quick.args.slice(quick.args.indexOf('--out'), quick.args.indexOf('--out') + 2), ['--out', quickWorkspace]);
     assert.equal(quick.requiresConfirmation, false);
   });
@@ -101,6 +103,7 @@ describe('UnitTestRunner quick check adapter core', () => {
 
     const fullGate = buildFullGateAnalyzeInvocation(settings, target);
 
+    assert.ok(fullGate.args.includes('analyze-function'));
     assert.ok(fullGate.args.includes('--finalize-dossier'));
     assert.equal(fullGate.args.includes('--phase'), false);
     assert.deepEqual(fullGate.args.slice(fullGate.args.indexOf('--out'), fullGate.args.indexOf('--out') + 2), ['--out', target.outputWorkspace]);
@@ -115,7 +118,7 @@ describe('UnitTestRunner quick check adapter core', () => {
     const parsed = parseCliResult(
       JSON.stringify({
         status: 'analysis_completed',
-        command: 'analyze-function',
+        command: 'quick-check',
         data: {
           reports: {
             quick_summary_md: 'D:/quick/reports/quick_summary.md',
