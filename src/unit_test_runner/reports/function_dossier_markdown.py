@@ -36,12 +36,21 @@ def render_function_dossier_markdown(dossier: FunctionDossier) -> str:
         "`traceability_matrix.csv` を参照してください。",
         "",
         "## 未解決項目",
-        "| 項目 | 影響 | 推奨アクション |",
-        "|---|---|---|",
+        "| ID | 項目 | 影響 | 推奨アクション |",
+        "|---|---|---|---|",
     ]
     for item in dossier.unresolved_items:
-        lines.append(f"| {item.item_kind} | {item.impact} | {item.suggested_action} |")
-    lines.extend(["", "## 次のアクション", "| 優先度 | アクション | 担当ロール |", "|---|---|---|"])
+        lines.append(f"| {_markdown_cell(item.item_id)} | {_markdown_cell(item.item_kind)} | {_markdown_cell(item.impact)} | {_markdown_cell(item.suggested_action)} |")
+    lines.extend(["", "## 次のアクション", "| ID | 優先度 | アクション | 対応対象・理由 | 担当ロール |", "|---|---|---|---|---|"])
     for action in dossier.next_actions:
-        lines.append(f"| {action.priority} | {action.title} | {action.owner_role} |")
+        related = ", ".join(action.related_unresolved_items) if action.related_unresolved_items else "-"
+        detail = action.description or related
+        if related != "-" and related not in detail:
+            detail = f"{related}: {detail}"
+        lines.append(f"| {_markdown_cell(action.action_id)} | {_markdown_cell(action.priority)} | {_markdown_cell(action.title)} | {_markdown_cell(detail)} | {_markdown_cell(action.owner_role)} |")
     return "\n".join(lines) + "\n"
+
+
+def _markdown_cell(value: str) -> str:
+    text = str(value or "-").replace("\n", "<br>")
+    return text.replace("|", "\\|")
