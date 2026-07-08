@@ -105,7 +105,17 @@ class DossierReviewWorkflowTests(unittest.TestCase):
                     ["test_case_design"],
                     ["TC_Control_Update_001"],
                     "Review function specification and replace TBD expected values.",
-                )
+                ),
+                DossierUnresolvedItem(
+                    "UNRESOLVED_EXPECTED_002",
+                    "test_case_design_generation",
+                    "expected_result_unknown",
+                    "Expected return value must be reviewed from specification.",
+                    "Expected return value must be reviewed from specification.",
+                    ["test_case_design"],
+                    ["TC_Control_Update_002"],
+                    "Review generated test case and replace TBD expected values.",
+                ),
             ]
         )
         next_actions_markdown = render_next_actions_markdown(
@@ -119,17 +129,32 @@ class DossierReviewWorkflowTests(unittest.TestCase):
                     "spec_reviewer",
                     ["UNRESOLVED_EXPECTED_001"],
                     "Updated generated workspace artifacts or recorded human review decision.",
-                )
+                ),
+                DossierNextAction(
+                    "NEXT_002",
+                    "high",
+                    "review_expected_result",
+                    "Review function specification and source behavior.",
+                    "Review function specification and source behavior.",
+                    "spec_reviewer",
+                    ["UNRESOLVED_EXPECTED_002"],
+                    "Review function specification and source behavior.",
+                ),
             ]
         )
 
         self.assertIn("期待結果未確認", unresolved_markdown)
         self.assertIn("生成テストは、期待値レビュー", unresolved_markdown)
         self.assertIn("関数仕様を確認し、TBD の期待値を置き換えてください。", unresolved_markdown)
+        self.assertIn("期待戻り値を仕様から確認してください。", unresolved_markdown)
+        self.assertIn("生成テストケースを確認し、TBD の期待値を置き換えてください。", unresolved_markdown)
         self.assertIn("期待結果を確認", next_actions_markdown)
         self.assertIn("仕様レビュー担当", next_actions_markdown)
+        self.assertIn("関数仕様とソース上の挙動を確認してください。", next_actions_markdown)
         self.assertNotIn("The generated test cannot", unresolved_markdown)
         self.assertNotIn("Review function specification", unresolved_markdown + next_actions_markdown)
+        self.assertNotIn("Expected return value must", unresolved_markdown)
+        self.assertNotIn("Review generated test case", unresolved_markdown)
 
     def test_finalize_handles_mvp1_partial_and_blocked_missing_required(self):
         with tempfile.TemporaryDirectory() as temp_dir:
