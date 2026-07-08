@@ -34,7 +34,7 @@ Quick Check 用の主な設定:
 }
 ```
 
-`quickProfile` は `analysis`、`design`、`harness`、`build-dry-run` から選べます。`build-dry-run` は build workspace / build probe dry-run までで、生成テストの実行は行いません。
+`quickProfile` は `design`、`harness`、`build-dry-run` から選べます。`build-dry-run` は build workspace / build probe dry-run までで、生成テストの実行は行いません。
 
 ## 関数解析
 
