@@ -25,12 +25,14 @@ interface WorkflowActionMessage {
   commandId?: string;
   reportKey?: keyof ReportPaths;
   stepId?: WorkflowStepId;
+  label?: string;
 }
 
 interface SettingsActionMessage {
   type: 'settingsAction';
   kind: SettingsActionKind;
   fieldId: SettingsFieldId;
+  label?: string;
 }
 
 type WorkflowMessage = WorkflowActionMessage | SettingsActionMessage;
@@ -39,6 +41,7 @@ export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
   static readonly viewType = 'unitTestRunner.workflow';
 
   private view?: vscode.WebviewView;
+  private runningLabel?: string;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -66,10 +69,16 @@ export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
     const availability = reportAvailabilityFromPaths(reports, fs.existsSync);
     const steps = buildWorkflowStepViews(state, availability);
     const settings = this.settingsViewModel();
-    webview.html = renderWorkflowHtml(webview, state, settings, steps, OPTIONAL_WORKFLOW_ACTIONS);
+    webview.html = renderWorkflowHtml(webview, state, settings, steps, OPTIONAL_WORKFLOW_ACTIONS, this.runningLabel);
   }
 
   private async handleMessage(message: WorkflowMessage): Promise<void> {
+    if (this.runningLabel) {
+      void vscode.window.showInformationMessage(`UnitTestRunner: ${this.runningLabel}を実行中です。完了するまでお待ちください。`);
+      return;
+    }
+    this.runningLabel = message.label || fallbackWorkflowActionLabel(message);
+    this.refresh();
     try {
       if (message.type === 'settingsAction') {
         await this.handleSettingsAction(message.fieldId, message.kind);
@@ -90,6 +99,7 @@ export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
       const messageText = error instanceof Error ? error.message : String(error);
       void vscode.window.showErrorMessage(`UnitTestRunner: ${messageText}`);
     } finally {
+      this.runningLabel = undefined;
       this.refresh();
     }
   }
@@ -136,12 +146,13 @@ export function resolveWorkflowReports(state: WorkflowState): Partial<ReportPath
   };
 }
 
-function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, settings: SettingsViewModel, steps: ReturnType<typeof buildWorkflowStepViews>, optionalActions: WorkflowAction[]): string {
+function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, settings: SettingsViewModel, steps: ReturnType<typeof buildWorkflowStepViews>, optionalActions: WorkflowAction[], runningLabel?: string): string {
   const nonce = createNonce();
   const functionName = state.functionName || '対象関数未選択';
   const workspace = state.outputWorkspace || state.reports?.workspace || '出力workspace未選択';
   const awaiting = state.awaitingSave ? `<div class="notice">保存待ち: ${escapeHtml(state.awaitingSave.filePath)}</div>` : '';
   const error = state.lastError ? `<div class="error">直近エラー: ${escapeHtml(state.lastError)}</div>` : '';
+  const running = runningLabel ? `<div class="busy" role="status">実行中: ${escapeHtml(runningLabel)}<br><span>大きいプロジェクトでは時間がかかります。完了までボタンは無効です。</span></div>` : '';
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -255,7 +266,7 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, setti
       color: var(--vscode-descriptionForeground);
       overflow-wrap: anywhere;
     }
-    .notice, .error {
+    .notice, .error, .busy {
       border: 1px solid var(--vscode-inputValidation-warningBorder);
       background: var(--vscode-inputValidation-warningBackground);
       color: var(--vscode-inputValidation-warningForeground);
@@ -266,6 +277,16 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, setti
       border-color: var(--vscode-inputValidation-errorBorder);
       background: var(--vscode-inputValidation-errorBackground);
       color: var(--vscode-inputValidation-errorForeground);
+    }
+    .busy {
+      border-color: var(--vscode-focusBorder);
+      background: var(--vscode-editorWidget-background);
+      color: var(--vscode-foreground);
+      font-weight: 700;
+    }
+    .busy span {
+      color: var(--vscode-descriptionForeground);
+      font-weight: 400;
     }
     .step {
       border-left: 3px solid var(--vscode-editorGroup-border);
@@ -329,6 +350,10 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, setti
     button:hover {
       background: var(--vscode-button-secondaryHoverBackground);
     }
+    button:disabled {
+      cursor: wait;
+      opacity: 0.65;
+    }
     button.primary {
       background: var(--vscode-button-background);
       color: var(--vscode-button-foreground);
@@ -354,6 +379,7 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, setti
   </div>
   ${awaiting}
   ${error}
+  ${running}
   ${steps.map(renderStep).join('')}
   <div class="optional">
     <h2>任意操作</h2>
@@ -361,23 +387,43 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, setti
   </div>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
+    const initialRunningLabel = ${JSON.stringify(runningLabel ?? '')};
+    function disableButtons(activeButton, label) {
+      const runningText = label || '処理';
+      document.querySelectorAll('button').forEach((button) => {
+        button.disabled = true;
+        button.setAttribute('aria-disabled', 'true');
+      });
+      if (activeButton) {
+        activeButton.textContent = '実行中: ' + runningText;
+      }
+    }
+    if (initialRunningLabel) {
+      disableButtons(null, initialRunningLabel);
+    }
     document.querySelectorAll('button[data-kind]').forEach((button) => {
       button.addEventListener('click', () => {
+        const label = button.dataset.label || button.textContent || '処理';
+        disableButtons(button, label);
         vscode.postMessage({
           type: 'workflowAction',
           kind: button.dataset.kind,
           commandId: button.dataset.commandId,
           reportKey: button.dataset.reportKey,
-          stepId: button.dataset.stepId
+          stepId: button.dataset.stepId,
+          label
         });
       });
     });
     document.querySelectorAll('button[data-setting-kind]').forEach((button) => {
       button.addEventListener('click', () => {
+        const label = button.textContent || '設定操作';
+        disableButtons(button, label);
         vscode.postMessage({
           type: 'settingsAction',
           kind: button.dataset.settingKind,
-          fieldId: button.dataset.fieldId
+          fieldId: button.dataset.fieldId,
+          label
         });
       });
     });
@@ -401,11 +447,53 @@ function renderAction(action: WorkflowAction): string {
   const classes = [action.primary ? 'primary' : '', action.danger ? 'danger' : ''].filter(Boolean).join(' ');
   const attributes = [
     `data-kind="${escapeAttribute(action.kind)}"`,
+    `data-label="${escapeAttribute(action.label)}"`,
     action.commandId ? `data-command-id="${escapeAttribute(action.commandId)}"` : '',
     action.reportKey ? `data-report-key="${escapeAttribute(String(action.reportKey))}"` : '',
     action.stepId ? `data-step-id="${escapeAttribute(action.stepId)}"` : '',
   ].filter(Boolean).join(' ');
   return `<button class="${classes}" ${attributes}>${escapeHtml(action.label)}</button>`;
+}
+
+function fallbackWorkflowActionLabel(message: WorkflowMessage): string {
+  if (message.type === 'settingsAction') {
+    return '設定操作';
+  }
+  if (message.kind === 'command') {
+    return commandLabel(message.commandId);
+  }
+  if (message.kind === 'openReport') {
+    return 'レポートを開く';
+  }
+  if (message.kind === 'confirmStep') {
+    return '工程を更新';
+  }
+  if (message.kind === 'openSettings') {
+    return '設定を開く';
+  }
+  if (message.kind === 'openOutputWorkspace') {
+    return '出力workspaceを開く';
+  }
+  if (message.kind === 'copyLastCommand') {
+    return '最後のCLIコマンドをコピー';
+  }
+  return '処理';
+}
+
+function commandLabel(commandId?: string): string {
+  const labels: Record<string, string> = {
+    'unitTestRunner.analyzeCurrentFunction': '現在関数を解析',
+    'unitTestRunner.analyzeSelectedFunction': '選択関数を解析',
+    'unitTestRunner.reanalyzeCurrentFunction': '現在関数を再解析',
+    'unitTestRunner.finalizeDossier': 'dossierを確定',
+    'unitTestRunner.generateTestDesign': 'テスト設計を生成',
+    'unitTestRunner.generateHarnessSkeleton': 'ハーネスを生成',
+    'unitTestRunner.buildProbeDryRun': 'ビルドプローブをdry-run',
+    'unitTestRunner.runBuildProbe': 'ビルドプローブを実行',
+    'unitTestRunner.runTests': 'テストを実行',
+    'unitTestRunner.prepareEvidence': 'エビデンスを準備',
+  };
+  return commandId ? labels[commandId] ?? commandId : 'コマンド実行';
 }
 
 function escapeHtml(value: string): string {
