@@ -112,7 +112,7 @@ def _case_results_from_design(test_case_design: dict[str, Any]) -> list[TestCase
                 exit_related=False,
                 related_coverage_ids=coverage,
                 review_required=review,
-                evidence="test execution was not run" if review else "",
+                evidence="テストは未実行です。" if review else "",
             )
         )
     return results
@@ -126,8 +126,8 @@ def _placeholder_review_items(harness_report: dict[str, Any], test_case_design: 
                 f"REVIEW_PLACEHOLDER_{index:03d}",
                 "placeholder_expected_value",
                 placeholder.get("related_test_case_id"),
-                f"Placeholder remains: {placeholder.get('name')}",
-                placeholder.get("suggested_action", "Review generated test expected values."),
+                f"プレースホルダが残っています: {placeholder.get('name')}",
+                placeholder.get("suggested_action", "生成テストの期待値を確認してください。"),
                 "warning",
             )
         )
@@ -140,8 +140,8 @@ def _placeholder_review_items(harness_report: dict[str, Any], test_case_design: 
                         f"REVIEW_EXPECTED_{len(items) + 1:03d}",
                         "placeholder_expected_value",
                         case.get("test_case_id"),
-                        "Expected observation is not finalized.",
-                        "Review function specification and replace TBD expected value.",
+                        "期待値の確認が未完了です。",
+                        "関数仕様を確認し、TBD の期待値を置き換えてください。",
                         "warning",
                     )
                 )
