@@ -373,12 +373,24 @@ def _compile_command(source: Path, object_file: Path, include_dirs: list[BuildPa
 
 
 def _render_makefile(compile_units: list[CompileUnit], include_dirs: list[BuildPathEntry], defines: list[str], compiler_options: list[str]) -> str:
-    objects = " ".join(unit.object_file.as_posix().replace("/", "\\") for unit in compile_units)
-    lines = ["# generated VC6 build probe Makefile", "CC=cl", "LINK=link", f"CFLAGS={' '.join(compiler_options)} {' '.join('/D\"' + item + '\"' for item in defines)} {' '.join(_makefile_include_arg(item) for item in include_dirs)}", f"OBJS={objects}", "", "all: ..\\bin\\utr_probe.exe", "", "..\\bin\\utr_probe.exe: $(OBJS)", "\t$(LINK) /nologo /OPT:REF /OUT:$@ $(OBJS)", ""]
+    objects = " ".join(_makefile_workspace_file(unit.object_file) for unit in compile_units)
+    lines = [
+        "# generated VC6 build probe Makefile",
+        "CC=cl",
+        "LINK=link",
+        f"CFLAGS={' '.join(compiler_options)} {' '.join('/D\"' + item + '\"' for item in defines)} {' '.join(_makefile_include_arg(item) for item in include_dirs)}",
+        f"OBJS={objects}",
+        "",
+        "all: ..\\bin\\utr_probe.exe",
+        "",
+        "..\\bin\\utr_probe.exe: $(OBJS)",
+        "\t$(LINK) /nologo /OPT:REF /OUT:$@ $(OBJS)",
+        "",
+    ]
     for unit in compile_units:
-        source = unit.source_file.as_posix().replace("/", "\\")
-        obj = unit.object_file.as_posix().replace("/", "\\")
-        lines.extend([f"{obj}: ..\\{source}", f"\t$(CC) $(CFLAGS) /Fo\"{obj}\" /c \"..\\{source}\"", ""])
+        source = _makefile_workspace_file(unit.source_file)
+        obj = _makefile_workspace_file(unit.object_file)
+        lines.extend([f"{obj}: {source}", f"\t$(CC) $(CFLAGS) /Fo\"{obj}\" /c \"{source}\"", ""])
     return "\n".join(lines)
 
 
@@ -388,6 +400,10 @@ def _render_build_bat(vcvars: Path | str | None) -> str:
         lines.append(f'if exist "{vcvars}" call "{vcvars}"')
     lines.extend(["nmake /f Makefile > ..\\logs\\build.log 2>&1", "set BUILD_EXIT=%ERRORLEVEL%", "exit /b %BUILD_EXIT%"])
     return "\n".join(lines)
+
+
+def _makefile_workspace_file(path: Path) -> str:
+    return (Path("..") / path).as_posix().replace("/", "\\")
 
 
 def _makefile_include_arg(entry: BuildPathEntry) -> str:
