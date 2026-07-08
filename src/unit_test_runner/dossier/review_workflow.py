@@ -17,8 +17,8 @@ def build_review_items(payloads: dict[str, dict[str, Any]]) -> tuple[list[Dossie
             DossierReviewItem(
                 "REVIEW_FINAL_001",
                 "evidence_review",
-                "Review generated function dossier",
-                "Confirm generated analysis, test design, build status, and evidence before approval.",
+                "生成dossierの最終確認",
+                "承認前に、生成された解析結果、テスト設計、ビルド状態、エビデンスを確認してください。",
                 severity="info",
                 suggested_reviewer_role="unit_test_lead",
             )
@@ -29,9 +29,9 @@ def build_review_items(payloads: dict[str, dict[str, Any]]) -> tuple[list[Dossie
                 "UNRESOLVED_REVIEW_001",
                 "dossier_review_workflow",
                 "manual_final_review",
-                "Final human review is still required.",
-                "Dossier generation is not an approval decision.",
-                suggested_action="Review function_dossier.md and mark checklist items outside this tool.",
+                "最終的な人手レビューが必要です。",
+                "dossier生成は承認判断そのものではありません。",
+                suggested_action="function_dossier.md を確認し、チェック項目の完了判断をツール外で記録してください。",
             )
         )
     return review_items, unresolved
@@ -49,19 +49,19 @@ def _from_test_case_design(payload: dict[str, Any], review_items: list[DossierRe
                     item_id,
                     "test_case_design_generation",
                     "expected_result_unknown",
-                    f"Expected result requires review for {test_case_id}.",
-                    "The generated test cannot be treated as approved until expected values are reviewed.",
+                    f"テストケース {test_case_id} の期待結果を確認してください。",
+                    "生成テストは、期待値レビューが完了するまで承認済みとして扱えません。",
                     ["test_case_design"],
                     [test_case_id] if test_case_id else [],
-                    "Review function specification and replace TBD expected values.",
+                    "関数仕様を確認し、TBD の期待値を置き換えてください。",
                 )
             )
             review_items.append(
                 DossierReviewItem(
                     f"REVIEW_EXPECTED_{len(review_items) + 1:03d}",
                     "expected_result_review",
-                    "Review expected result",
-                    f"Confirm expected observations for {test_case_id}.",
+                    "期待結果を確認",
+                    f"テストケース {test_case_id} の期待値・期待観測を確認してください。",
                     ["test_case_design"],
                     [test_case_id] if test_case_id else [],
                 )
@@ -76,14 +76,14 @@ def _from_harness(payload: dict[str, Any], review_items: list[DossierReviewItem]
                 f"UNRESOLVED_PLACEHOLDER_{len(unresolved) + 1:03d}",
                 "harness_skeleton_generation",
                 "harness_placeholder",
-                f"Placeholder remains: {placeholder.get('name')}",
-                "Generated harness needs manual completion.",
+                f"プレースホルダが残っています: {placeholder.get('name')}",
+                "生成ハーネスには手動補完が必要です。",
                 ["harness_skeleton_report"],
                 [test_case_id] if test_case_id else [],
-                placeholder.get("suggested_action", "Review generated harness placeholders."),
+                placeholder.get("suggested_action", "生成ハーネスのプレースホルダを確認してください。"),
             )
         )
-        review_items.append(DossierReviewItem(f"REVIEW_HARNESS_{len(review_items) + 1:03d}", "stub_behavior_review", "Review harness placeholder", str(placeholder.get("name")), ["harness_skeleton_report"], [test_case_id] if test_case_id else []))
+        review_items.append(DossierReviewItem(f"REVIEW_HARNESS_{len(review_items) + 1:03d}", "stub_behavior_review", "ハーネスのプレースホルダを確認", str(placeholder.get("name")), ["harness_skeleton_report"], [test_case_id] if test_case_id else []))
 
 
 def _from_completion(payload: dict[str, Any], review_items: list[DossierReviewItem], unresolved: list[DossierUnresolvedItem]) -> None:
@@ -93,15 +93,15 @@ def _from_completion(payload: dict[str, Any], review_items: list[DossierReviewIt
                 f"UNRESOLVED_BUILD_{len(unresolved) + 1:03d}",
                 "build_completion",
                 manual.get("item_kind", "manual_action"),
-                manual.get("description", "Manual build completion action remains."),
-                manual.get("reason", "Build completion cannot be fully automated."),
+                manual.get("description", "手動でのビルド補完作業が残っています。"),
+                manual.get("reason", "ビルド補完は完全には自動化できません。"),
                 ["build_completion_plan"],
                 [],
-                manual.get("suggested_action", "Review build completion plan."),
+                manual.get("suggested_action", "ビルド補完計画を確認してください。"),
                 blocks_readiness=False,
             )
         )
-        review_items.append(DossierReviewItem(f"REVIEW_BUILD_{len(review_items) + 1:03d}", "build_review", "Review build completion item", manual.get("description", ""), ["build_completion_plan"]))
+        review_items.append(DossierReviewItem(f"REVIEW_BUILD_{len(review_items) + 1:03d}", "build_review", "ビルド補完項目を確認", manual.get("description", ""), ["build_completion_plan"]))
 
 
 def _from_execution(payload: dict[str, Any], review_items: list[DossierReviewItem], unresolved: list[DossierUnresolvedItem]) -> None:
@@ -112,11 +112,11 @@ def _from_execution(payload: dict[str, Any], review_items: list[DossierReviewIte
                 f"UNRESOLVED_EXEC_{len(unresolved) + 1:03d}",
                 "execution_evidence",
                 "execution_inconclusive",
-                f"Test execution status is {status}.",
-                "Evidence is not a final pass result.",
+                f"テスト実行状態は「{status}」です。",
+                "このエビデンスだけでは最終PASS判定にはなりません。",
                 ["test_execution_report"],
                 [],
-                "Resolve placeholders or rerun tests after review.",
+                "プレースホルダを解消するか、レビュー後にテストを再実行してください。",
             )
         )
-        review_items.append(DossierReviewItem(f"REVIEW_EXEC_{len(review_items) + 1:03d}", "execution_review", "Review execution evidence", f"Execution status is {status}.", ["test_execution_report"]))
+        review_items.append(DossierReviewItem(f"REVIEW_EXEC_{len(review_items) + 1:03d}", "execution_review", "実行エビデンスを確認", f"テスト実行状態は「{status}」です。", ["test_execution_report"]))
