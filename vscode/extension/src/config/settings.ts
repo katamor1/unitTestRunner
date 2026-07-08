@@ -16,6 +16,11 @@ export interface AdapterSettings {
   runBuildProbeRequiresConfirmation: boolean;
   runTestsRequiresConfirmation: boolean;
   commandTimeoutSeconds: number;
+  quickProfile: string;
+  quickOutputRoot: string;
+  quickReusePreviousWorkspace: boolean;
+  quickAutoOpenSummary: boolean;
+  quickAllowExecution: boolean;
 }
 
 export type RawSettings = Record<string, unknown>;
@@ -47,6 +52,11 @@ export function readAdapterSettingsFromObject(raw: RawSettings, defaultSourceRoo
     runBuildProbeRequiresConfirmation: booleanValue(raw.runBuildProbeRequiresConfirmation, true),
     runTestsRequiresConfirmation: booleanValue(raw.runTestsRequiresConfirmation, true),
     commandTimeoutSeconds: numberValue(raw.commandTimeoutSeconds, 300),
+    quickProfile: stringValue(nonEmptyString(raw.quickProfile), 'design'),
+    quickOutputRoot: stringValue(nonEmptyString(raw.quickOutputRoot), ''),
+    quickReusePreviousWorkspace: booleanValue(raw.quickReusePreviousWorkspace, true),
+    quickAutoOpenSummary: booleanValue(raw.quickAutoOpenSummary, true),
+    quickAllowExecution: booleanValue(raw.quickAllowExecution, false),
   };
 }
 
