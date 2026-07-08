@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from unit_test_runner.reports.japanese import ja_label
+
 from .dossier_models import DossierReviewItem, DossierUnresolvedItem
 
 
@@ -107,16 +109,17 @@ def _from_completion(payload: dict[str, Any], review_items: list[DossierReviewIt
 def _from_execution(payload: dict[str, Any], review_items: list[DossierReviewItem], unresolved: list[DossierUnresolvedItem]) -> None:
     status = payload.get("function", {}).get("status") or payload.get("status")
     if status in {"inconclusive", "failed", "blocked", "timeout", "not_run"}:
+        status_label = ja_label(status)
         unresolved.append(
             DossierUnresolvedItem(
                 f"UNRESOLVED_EXEC_{len(unresolved) + 1:03d}",
                 "execution_evidence",
                 "execution_inconclusive",
-                f"テスト実行状態は「{status}」です。",
+                f"テスト実行状態は「{status_label}」です。",
                 "このエビデンスだけでは最終PASS判定にはなりません。",
                 ["test_execution_report"],
                 [],
                 "プレースホルダを解消するか、レビュー後にテストを再実行してください。",
             )
         )
-        review_items.append(DossierReviewItem(f"REVIEW_EXEC_{len(review_items) + 1:03d}", "execution_review", "実行エビデンスを確認", f"テスト実行状態は「{status}」です。", ["test_execution_report"]))
+        review_items.append(DossierReviewItem(f"REVIEW_EXEC_{len(review_items) + 1:03d}", "execution_review", "実行エビデンスを確認", f"テスト実行状態は「{status_label}」です。", ["test_execution_report"]))
