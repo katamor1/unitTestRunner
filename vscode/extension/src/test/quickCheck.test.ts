@@ -32,11 +32,11 @@ describe('UnitTestRunner quick check adapter core', () => {
     assert.equal(settings.quickAllowExecution, false);
   });
 
-  it('normalizes quick check profiles to CLI phases', () => {
-    assert.equal(normalizeQuickCheckProfile('analysis'), 'analysis');
+  it('normalizes quick check profiles to generated-design CLI phases', () => {
     assert.equal(normalizeQuickCheckProfile('design'), 'design');
     assert.equal(normalizeQuickCheckProfile('harness'), 'harness');
     assert.equal(normalizeQuickCheckProfile('build-dry-run'), 'build-dry-run');
+    assert.equal(normalizeQuickCheckProfile('analysis'), 'design');
     assert.equal(normalizeQuickCheckProfile('unexpected'), 'design');
     assert.equal(quickCheckPhase('build-dry-run'), 'build');
   });
