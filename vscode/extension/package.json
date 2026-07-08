@@ -16,6 +16,10 @@
     "Other"
   ],
   "activationEvents": [
+    "onCommand:unitTestRunner.quickCheckCurrentFunction",
+    "onCommand:unitTestRunner.quickCheckSelectedFunction",
+    "onCommand:unitTestRunner.openQuickSummary",
+    "onCommand:unitTestRunner.runFullGateForCurrentFunction",
     "onCommand:unitTestRunner.analyzeCurrentFunction",
     "onCommand:unitTestRunner.analyzeSelectedFunction",
     "onCommand:unitTestRunner.reanalyzeCurrentFunction",
@@ -45,9 +49,25 @@
     "onView:unitTestRunner.workflow",
     "onStartupFinished"
   ],
-  "main": "./dist/extension.js",
+  "main": "./dist/quickExtension.js",
   "contributes": {
     "commands": [
+      {
+        "command": "unitTestRunner.quickCheckCurrentFunction",
+        "title": "UnitTestRunner: Quick Check Current Function"
+      },
+      {
+        "command": "unitTestRunner.quickCheckSelectedFunction",
+        "title": "UnitTestRunner: Quick Check Selected Function"
+      },
+      {
+        "command": "unitTestRunner.openQuickSummary",
+        "title": "UnitTestRunner: Quick Summaryを開く"
+      },
+      {
+        "command": "unitTestRunner.runFullGateForCurrentFunction",
+        "title": "UnitTestRunner: Full Gate for Current Function"
+      },
       {
         "command": "unitTestRunner.analyzeCurrentFunction",
         "title": "UnitTestRunner: 現在関数を解析"
@@ -156,6 +176,16 @@
     "menus": {
       "editor/context": [
         {
+          "command": "unitTestRunner.quickCheckCurrentFunction",
+          "when": "editorLangId == c || editorLangId == cpp",
+          "group": "navigation@8"
+        },
+        {
+          "command": "unitTestRunner.quickCheckSelectedFunction",
+          "when": "editorHasSelection && (editorLangId == c || editorLangId == cpp)",
+          "group": "navigation@9"
+        },
+        {
           "command": "unitTestRunner.analyzeCurrentFunction",
           "when": "editorLangId == c || editorLangId == cpp",
           "group": "navigation@10"
@@ -252,6 +282,37 @@
           "type": "boolean",
           "default": true,
           "description": "analyze-function 実行時に --finalize-dossier を渡します。"
+        },
+        "unitTestRunner.quickProfile": {
+          "type": "string",
+          "enum": [
+            "analysis",
+            "design",
+            "harness",
+            "build-dry-run"
+          ],
+          "default": "design",
+          "description": "Quick Checkで実行する軽量プロファイルです。通常は design、ハーネス確認まで行う場合は harness を使います。"
+        },
+        "unitTestRunner.quickOutputRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Quick Check専用の出力ルートです。未設定時は outputRoot/_quick を使います。"
+        },
+        "unitTestRunner.quickReusePreviousWorkspace": {
+          "type": "boolean",
+          "default": true,
+          "description": "Quick Checkで同じ関数のworkspace名を安定させ、反復実行しやすくします。"
+        },
+        "unitTestRunner.quickAutoOpenSummary": {
+          "type": "boolean",
+          "default": true,
+          "description": "Quick Check成功後に quick_summary.md を自動で開きます。"
+        },
+        "unitTestRunner.quickAllowExecution": {
+          "type": "boolean",
+          "default": false,
+          "description": "将来のQuick Check実行系profileを許可するための安全設定です。現時点の既定profileでは実行を伴いません。"
         },
         "unitTestRunner.useJsonOutput": {
           "type": "boolean",
