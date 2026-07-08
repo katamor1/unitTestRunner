@@ -83,6 +83,8 @@ class BuildWorkspaceGenerationTests(unittest.TestCase):
             makefile = (out_dir / "build" / "Makefile").read_text(encoding="cp932")
             self.assertIn('/I"..\\generated\\include"', makefile)
             self.assertNotIn('/I"generated/include"', makefile)
+            self.assertIn("/Gy", payload["compiler_options"])
+            self.assertIn("/OPT:REF", makefile)
 
             self.assertEqual("not_run", probe_payload["function"]["status"])
             self.assertFalse(probe_payload["executed"])
@@ -138,6 +140,75 @@ class BuildWorkspaceGenerationTests(unittest.TestCase):
             self.assertTrue((out_dir / include_dirs["common/include"].workspace_path).exists())
             makefile = (out_dir / "build" / "Makefile").read_text(encoding="cp932")
             self.assertIn('/I"..\\extracted\\common\\include"', makefile)
+
+    def test_generator_enables_function_level_linking_for_unused_peer_functions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir) / "project"
+            source = project / "shared" / "shared.c"
+            header = project / "shared" / "shared2.h"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                '#include "shared2.h"\n\n'
+                "int g_count = 0;\n\n"
+                "int Shared(void)\n"
+                "{\n"
+                "    g_count++;\n"
+                "    return g_count;\n"
+                "}\n\n"
+                "int Shared2(void)\n"
+                "{\n"
+                "    g_com->ptr->test = g_count;\n"
+                "    return g_count;\n"
+                "}\n",
+                encoding="ascii",
+            )
+            header.write_text(
+                "typedef struct _gbl1 { int test; } gbl1;\n"
+                "typedef struct _gbl_com { gbl1* ptr; } gbl_com;\n"
+                "extern gbl_com *g_com;\n",
+                encoding="ascii",
+            )
+            out_dir = Path(temp_dir) / "out"
+            build_context = {
+                "workspace_root": str(project),
+                "include_dirs": ["shared"],
+                "defines": ["WIN32", "_DEBUG"],
+                "compiler_options": ["/nologo", "/W3", "/MDd", "/Od", "/ZI"],
+            }
+            source_digest = {
+                "source": {"path": str(source)},
+                "preprocessor": {
+                    "includes": [
+                        {
+                            "name": "shared2.h",
+                            "resolved_candidates": [str(header)],
+                        }
+                    ]
+                },
+            }
+            harness_report = {
+                "function": {"name": "Shared"},
+                "source": {"path": str(source)},
+                "output_root": str(out_dir),
+                "generated_files": [],
+            }
+
+            report, _probe = generate_build_workspace(
+                build_context,
+                source_digest,
+                harness_report,
+                out_dir,
+                run_probe=False,
+                dry_run=True,
+            )
+
+            payload = report.to_dict()
+            makefile = (out_dir / "build" / "Makefile").read_text(encoding="cp932")
+            compile_commands = (out_dir / "build" / "compile_commands.txt").read_text(encoding="cp932")
+            self.assertIn("/Gy", payload["compiler_options"])
+            self.assertIn("/Gy", compile_commands)
+            self.assertIn("/OPT:REF", makefile)
+            self.assertIn("..\\extracted\\shared\\shared.c", makefile)
 
     def test_run_probe_preserves_redirected_build_log_for_diagnostics(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -211,6 +211,8 @@ def _compiler_options(build_context: dict[str, Any]) -> list[str]:
         result.insert(0, "/nologo")
     if not any(item.startswith("/W") for item in result):
         result.append("/W3")
+    if not any(item.lower() == "/gy" for item in result):
+        result.append("/Gy")
     return result
 
 
@@ -456,7 +458,7 @@ def _render_makefile(compile_units: list[CompileUnit], include_dirs: list[BuildP
         "all: ..\\bin\\utr_probe.exe",
         "",
         "..\\bin\\utr_probe.exe: $(OBJS)",
-        "\t$(LINK) /nologo /OUT:$@ $(OBJS)",
+        "\t$(LINK) /nologo /OPT:REF /OUT:$@ $(OBJS)",
         "",
     ]
     for unit in compile_units:
