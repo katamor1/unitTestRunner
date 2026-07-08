@@ -102,6 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--harness-report")
     probe.add_argument("--vc6-bin")
     probe.add_argument("--vcvars")
+    probe.add_argument("--toolchain", choices=("vc6", "verification", "host"), default="vc6", help="Build toolchain for workspace/report build probes. Use verification/host when VC6 is not installed.")
+    probe.add_argument("--cc", help="C compiler for --toolchain verification. Defaults to UNIT_TEST_RUNNER_CC, CC, or auto-detection.")
     probe.add_argument("--out")
     probe.add_argument("--dry-run", action="store_true")
     probe.add_argument("--run", action="store_true")
@@ -187,7 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
     suite_list.add_argument("--suite", required=True)
     suite_list.add_argument("--tag")
 
-    suite_remove = subcommands.add_parser("suite-remove", help="Remove a registered function workspace from a suite manifest.")
+    suite_remove = subcommands.add_parser("suite-remove", help="Remove a registered function workspace from a regression suite manifest.")
     suite_remove.add_argument("--suite", required=True)
     suite_remove.add_argument("--entry-id", required=True)
 

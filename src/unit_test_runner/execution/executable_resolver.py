@@ -27,7 +27,7 @@ def resolve_executable(
         relative = path
     warnings: list[TestExecutionWarning] = []
     if not absolute.exists():
-        warnings.append(TestExecutionWarning("executable_not_found", f"Executable not found: {relative}", related_file=relative))
+        warnings.append(TestExecutionWarning("executable_not_found", f"実行ファイルが見つかりません: {relative}", related_file=relative))
     return ExecutableInfo(
         path=relative,
         exists=absolute.exists(),

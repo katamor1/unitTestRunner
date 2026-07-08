@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import time
@@ -21,6 +22,7 @@ from .build_models import (
 )
 from .build_report_writer import write_build_reports, write_build_text
 from .log_parser import parse_build_log
+from .verification_toolchain import render_verification_build_info, run_verification_build
 
 
 def generate_build_workspace(
@@ -33,9 +35,13 @@ def generate_build_workspace(
     vcvars: Path | str | None = None,
     timeout_seconds: int = 120,
     overwrite: bool = False,
+    toolchain: str | None = None,
+    cc: Path | str | None = None,
 ) -> tuple[BuildWorkspaceReport, BuildProbeReport]:
     del overwrite
     output_root = Path(output_root).resolve()
+    toolchain = _normalize_toolchain(toolchain or os.environ.get("UNIT_TEST_RUNNER_BUILD_TOOLCHAIN") or "vc6")
+    cc = cc or os.environ.get("UNIT_TEST_RUNNER_CC")
     _ensure_layout(output_root)
     source_path = Path(source_digest.get("source", {}).get("path") or harness_report.get("source", {}).get("path") or "")
     function_name = harness_report.get("function", {}).get("name") or "unknown_function"
@@ -46,7 +52,7 @@ def generate_build_workspace(
     defines = _defines(build_context)
     compiler_options = _compiler_options(build_context)
     compile_units = _compile_units(output_root, copied_files, generated_files, include_dirs, defines, compiler_options)
-    build_commands = _write_build_files(output_root, compile_units, include_dirs, defines, compiler_options, vcvars, dry_run)
+    build_commands = _write_build_files(output_root, compile_units, include_dirs, defines, compiler_options, vcvars, dry_run, toolchain, cc)
     status = "partial" if any(item.severity == "error" for item in diagnostics) else "generated"
     workspace_report = BuildWorkspaceReport(
         source_path=source_path,
@@ -64,7 +70,23 @@ def generate_build_workspace(
         build_commands=build_commands,
         diagnostics=diagnostics,
     )
-    probe_report = _build_probe_report(output_root, source_path, function_name, build_commands, harness_report, run_probe, dry_run, timeout_seconds, vcvars)
+    probe_report = _build_probe_report(
+        output_root,
+        source_path,
+        function_name,
+        build_commands,
+        compile_units,
+        include_dirs,
+        defines,
+        compiler_options,
+        harness_report,
+        run_probe,
+        dry_run,
+        timeout_seconds,
+        vcvars,
+        toolchain,
+        cc,
+    )
     write_build_reports(output_root, workspace_report, probe_report)
     return workspace_report, probe_report
 
@@ -227,6 +249,8 @@ def _write_build_files(
     compiler_options: list[str],
     vcvars: Path | str | None,
     dry_run: bool,
+    toolchain: str,
+    cc: Path | str | None,
 ) -> list[BuildCommand]:
     makefile = _render_makefile(compile_units, include_dirs, defines, compiler_options)
     write_build_text(output_root / "build" / "Makefile", makefile)
@@ -236,6 +260,18 @@ def _write_build_files(
     write_build_text(output_root / "build" / "clean.bat", clean_bat)
     compile_commands = "\n".join(unit.command for unit in compile_units) + "\n"
     write_build_text(output_root / "build" / "compile_commands.txt", compile_commands)
+    if toolchain == "verification":
+        write_build_text(output_root / "build" / "verification_build.txt", render_verification_build_info(cc))
+        return [
+            BuildCommand(
+                command_id="CMD_BUILD_001",
+                command_kind="verification_toolchain",
+                working_directory=Path("."),
+                command_line=_verification_command_line(cc),
+                log_file=Path("logs/build.log"),
+                dry_run=dry_run,
+            )
+        ]
     return [
         BuildCommand(
             command_id="CMD_BUILD_001",
@@ -253,16 +289,23 @@ def _build_probe_report(
     source_path: Path,
     function_name: str,
     build_commands: list[BuildCommand],
+    compile_units: list[CompileUnit],
+    include_dirs: list[BuildPathEntry],
+    defines: list[str],
+    compiler_options: list[str],
     harness_report: dict[str, Any],
     run_probe: bool,
     dry_run: bool,
     timeout_seconds: int,
     vcvars: Path | str | None,
+    toolchain: str,
+    cc: Path | str | None,
 ) -> BuildProbeReport:
     stub_candidates = {item.get("original_function_name", "") for item in harness_report.get("stub_skeletons", [])}
     if dry_run or not run_probe:
         log_path = output_root / "logs" / "build.log"
-        log_path.write_text("DRY RUN\nbuild.bat\n", encoding="utf-8")
+        command_line = build_commands[0].command_line if build_commands else "build.bat"
+        log_path.write_text(f"DRY RUN\n{command_line}\n", encoding="utf-8")
         return BuildProbeReport(
             source_path=source_path,
             function_name=function_name,
@@ -275,6 +318,62 @@ def _build_probe_report(
             unresolved_symbols=[],
             pch_issues=[],
             vc6_compatibility_issues=[],
+            log_files=[Path("logs/build.log")],
+        )
+    if toolchain == "verification":
+        started = datetime.now(timezone.utc)
+        start_tick = time.monotonic()
+        verification = run_verification_build(output_root, compile_units, include_dirs, defines, compiler_options, cc=cc, timeout_seconds=timeout_seconds, env_setup=vcvars)
+        duration_ms = int((time.monotonic() - start_tick) * 1000)
+        finished = datetime.now(timezone.utc)
+        if not verification.executed:
+            return BuildProbeReport(
+                source_path=source_path,
+                function_name=function_name,
+                status="environment_missing",
+                executed=False,
+                exit_code=None,
+                commands=[],
+                diagnostics=verification.diagnostics,
+                missing_includes=[],
+                unresolved_symbols=[],
+                pch_issues=[],
+                vc6_compatibility_issues=[],
+                log_files=[Path("logs/build.log")],
+                started_at=started.isoformat(),
+                finished_at=finished.isoformat(),
+                duration_ms=duration_ms,
+            )
+        parsed = parse_build_log(verification.log_text, stub_candidates)
+        diagnostics = parsed.diagnostics + verification.diagnostics
+        status = "succeeded" if verification.exit_code == 0 else "failed"
+        command = build_commands[0] if build_commands else BuildCommand("CMD_BUILD_001", "verification_toolchain", Path("."), verification.command_line, Path("logs/build.log"), False)
+        return BuildProbeReport(
+            source_path=source_path,
+            function_name=function_name,
+            status=status,
+            executed=True,
+            exit_code=verification.exit_code,
+            started_at=started.isoformat(),
+            finished_at=finished.isoformat(),
+            duration_ms=duration_ms,
+            commands=[
+                BuildCommandResult(
+                    command_id=command.command_id,
+                    command_kind=command.command_kind,
+                    command_line=verification.command_line,
+                    exit_code=verification.exit_code if verification.exit_code is not None else 1,
+                    stdout_log=None,
+                    stderr_log=None,
+                    combined_log=Path("logs/build.log"),
+                    diagnostics=diagnostics,
+                )
+            ],
+            diagnostics=diagnostics,
+            missing_includes=parsed.missing_includes,
+            unresolved_symbols=parsed.unresolved_symbols,
+            pch_issues=parsed.pch_issues,
+            vc6_compatibility_issues=parsed.vc6_compatibility_issues,
             log_files=[Path("logs/build.log")],
         )
     nmake = shutil.which("nmake")
@@ -401,3 +500,18 @@ def _is_under_declared_include_dir(relative_path: Path, build_context: dict[str,
         if include_dir and (normalized == include_dir or normalized.startswith(include_dir + "/")):
             return True
     return False
+
+
+def _normalize_toolchain(toolchain: str | None) -> str:
+    value = (toolchain or "vc6").strip().lower()
+    aliases = {"vc6": "vc6", "verification": "verification", "verify": "verification", "host": "verification"}
+    if value not in aliases:
+        raise ValueError(f"Unsupported build toolchain: {toolchain}")
+    return aliases[value]
+
+
+def _verification_command_line(cc: Path | str | None) -> str:
+    args = ["unit-test-runner", "build-probe", "--workspace", ".", "--run", "--toolchain", "verification"]
+    if cc:
+        args.extend(["--cc", str(cc)])
+    return " ".join(args)
