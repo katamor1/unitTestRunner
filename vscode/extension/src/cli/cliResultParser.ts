@@ -102,6 +102,8 @@ function reportsFromParsed(parsed: Record<string, unknown>, fallback: ReportPath
     reviewChecklistMd: stringValue(reportSource.review_checklist) ?? fallback.reviewChecklistMd,
     unresolvedItemsMd: stringValue(reportSource.unresolved_items) ?? fallback.unresolvedItemsMd,
     nextActionsMd: stringValue(reportSource.next_actions) ?? fallback.nextActionsMd,
+    quickSummaryJson: stringValue(reportSource.quick_summary_json) ?? fallback.quickSummaryJson,
+    quickSummaryMd: stringValue(reportSource.quick_summary_md) ?? fallback.quickSummaryMd,
     testCaseDesignMd: stringValue(reportSource.test_case_design_md) ?? fallback.testCaseDesignMd,
     testCaseDesignJson: stringValue(reportSource.test_case_design_json) ?? fallback.testCaseDesignJson,
     testCaseDesignCsv: stringValue(reportSource.test_case_design_csv) ?? fallback.testCaseDesignCsv,
