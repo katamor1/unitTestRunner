@@ -120,4 +120,14 @@ def _path_like(raw: str, dsp_dir: Path, workspace_root: Path) -> PathLikeValue:
 
 
 def _macros(value: str) -> list[str]:
-    return re.findall(r"\$\(([^)]+)\)", value)
+    macros: list[str] = []
+    patterns = [
+        r"\$\(([^)]+)\)",
+        r"\$\{([^}]+)\}",
+        r"\(\$([A-Za-z_][A-Za-z0-9_]*)\)",
+        r"%([^%]+)%",
+    ]
+    for pattern in patterns:
+        for macro in re.findall(pattern, value):
+            append_unique(macros, macro)
+    return macros
