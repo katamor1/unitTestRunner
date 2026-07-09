@@ -40,6 +40,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('unitTestRunner.quickCheckCurrentFunction', () => runQuickCommand(() => quickCheckActiveFunction(context, output))),
     vscode.commands.registerCommand('unitTestRunner.quickCheckSelectedFunction', () => runQuickCommand(() => quickCheckActiveFunction(context, output))),
+    vscode.commands.registerCommand('unitTestRunner.openGeneratedTestSource', () => runQuickCommand(() => openGeneratedTestSource(context))),
     vscode.commands.registerCommand('unitTestRunner.openQuickSummary', () => runQuickCommand(() => openQuickSummary(context))),
     vscode.commands.registerCommand('unitTestRunner.openGeneratedTestSource', () => runQuickCommand(() => openGeneratedTestSource(context))),
     vscode.commands.registerCommand('unitTestRunner.runFullGateForCurrentFunction', () => runQuickCommand(() => runFullGateForCurrentFunction(context, output))),
@@ -60,7 +61,7 @@ async function runQuickCommand(action: () => Promise<void>): Promise<void> {
 }
 
 async function quickCheckActiveFunction(context: vscode.ExtensionContext, output: vscode.OutputChannel): Promise<void> {
-  const settings = readConfig(context);
+  const settings = quickFlowSettings(readConfig(context));
   showValidation(settings);
   const targetBase = await activeFunctionTarget(settings);
   const outputWorkspace = buildQuickOutputWorkspace(settings, targetBase);
@@ -69,7 +70,7 @@ async function quickCheckActiveFunction(context: vscode.ExtensionContext, output
   const invocation = buildQuickCheckInvocation(quickSettings, target);
   const reports = await executeInvocation(context, output, invocation, outputWorkspace);
   await recordWorkflowSuccess(context, {
-    kind: 'buildProbeDryRun',
+    kind: 'harness',
     outputWorkspace,
     functionName: target.functionName,
     reports,
@@ -161,41 +162,84 @@ async function executeInvocation(context: vscode.ExtensionContext, output: vscod
   return parsed.reports;
 }
 
-async function openQuickSummary(context: vscode.ExtensionContext): Promise<void> {
-  const workspace = context.globalState.get<string>(LAST_WORKSPACE_KEY);
-  if (!workspace) {
-    throw new Error('記録済みのQuick Check出力workspaceがありません。');
+async function openGeneratedTestSource(context: vscode.ExtensionContext): Promise<void> {
+  const workspace = await lastWorkspace(context, '記録済みのQuick Check出力workspaceがありません。');
+  const functionName = await lastFunctionName(context);
+  const candidates = generatedTestSourceCandidates(workspace, functionName);
+  const existing = candidates.find((candidate) => fs.existsSync(candidate));
+  if (existing) {
+    await openReport(existing);
+    return;
   }
+  const generatedTests = path.join(workspace, 'generated', 'tests');
+  if (fs.existsSync(generatedTests)) {
+    const matches = fs.readdirSync(generatedTests)
+      .filter((name) => /^test_.*\.c$/i.test(name))
+      .map((name) => path.join(generatedTests, name));
+    if (matches.length === 1) {
+      await openReport(matches[0]);
+      return;
+    }
+    if (matches.length > 1) {
+      const selected = await vscode.window.showQuickPick(matches, { placeHolder: '開くテストソースを選択してください。' });
+      if (selected) {
+        await openReport(selected);
+        return;
+      }
+    }
+  }
+  throw new Error(`生成テストソースが見つかりません: ${candidates[0]}`);
+}
+
+async function openQuickSummary(context: vscode.ExtensionContext): Promise<void> {
+  const workspace = await lastWorkspace(context, '記録済みのQuick Check出力workspaceがありません。');
   await openReport(resolveReportPaths(workspace).quickSummaryMd ?? path.join(workspace, 'reports', 'quick_summary.md'));
 }
 
-async function openGeneratedTestSource(context: vscode.ExtensionContext): Promise<void> {
-  const state = readWorkflowState(context);
-  const workspace = state.outputWorkspace || state.reports?.workspace || context.globalState.get<string>(LAST_WORKSPACE_KEY);
-  if (!workspace) {
-    throw new Error('記録済みの出力workspaceがありません。先にQuick Checkを実行してください。');
+function quickFlowSettings(settings: AdapterSettings): AdapterSettings {
+  if (settings.quickProfile === 'build-dry-run') {
+    return settings;
   }
-  const functionName = state.functionName;
-  const candidate = functionName ? path.join(workspace, 'generated', 'tests', `test_${sanitizeIdentifier(functionName)}.c`) : undefined;
-  const testSource = candidate && fs.existsSync(candidate) ? candidate : firstGeneratedTestSource(workspace);
-  if (!testSource) {
-    throw new Error(`生成テストソースが見つかりません: ${path.join(workspace, 'generated', 'tests')}`);
-  }
-  await openReport(testSource);
+  return { ...settings, quickProfile: 'harness' };
 }
 
-function firstGeneratedTestSource(workspace: string): string | undefined {
-  const testsDir = path.join(workspace, 'generated', 'tests');
-  if (!fs.existsSync(testsDir)) {
-    return undefined;
-  }
-  const entries = fs.readdirSync(testsDir).filter((entry) => /^test_.*\.c$/i.test(entry)).sort();
-  return entries[0] ? path.join(testsDir, entries[0]) : undefined;
+function generatedTestSourceCandidates(workspace: string, functionName: string): string[] {
+  const safe = sanitizeIdentifier(functionName);
+  return [
+    path.join(workspace, 'generated', 'tests', `test_${safe}.c`),
+    path.join(workspace, 'generated', 'tests', `test_${functionName}.c`),
+  ];
 }
 
 function sanitizeIdentifier(value: string): string {
   const sanitized = value.replace(/\W+/g, '_').replace(/^_+|_+$/g, '');
-  return sanitized || 'function';
+  if (!sanitized) {
+    return 'item';
+  }
+  return /^\d/.test(sanitized) ? `_${sanitized}` : sanitized;
+}
+
+async function lastWorkspace(context: vscode.ExtensionContext, missingMessage: string): Promise<string> {
+  const workspace = context.globalState.get<string>(LAST_WORKSPACE_KEY) || readWorkflowState(context).outputWorkspace || readWorkflowState(context).reports?.workspace;
+  if (!workspace) {
+    throw new Error(missingMessage);
+  }
+  return workspace;
+}
+
+async function lastFunctionName(context: vscode.ExtensionContext): Promise<string> {
+  const state = readWorkflowState(context);
+  if (state.functionName) {
+    return state.functionName;
+  }
+  const prompt = await vscode.window.showInputBox({
+    prompt: '生成テストソースを開く関数名を入力してください。',
+    validateInput: (value) => (/^[A-Za-z_]\w*$/.test(value) ? undefined : 'Cの関数識別子を入力してください。'),
+  });
+  if (!prompt) {
+    throw new Error('関数名の指定が必要です。');
+  }
+  return prompt;
 }
 
 function readRawConfig(): RawSettings {
