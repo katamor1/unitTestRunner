@@ -432,7 +432,6 @@ function commandLabel(commandId?: string): string {
     'unitTestRunner.quickCheckSelectedFunction': 'Quick Check',
     'unitTestRunner.openGeneratedTestSource': 'テストソースを開く',
     'unitTestRunner.openQuickSummary': 'Quick Summaryを開く',
-    'unitTestRunner.openGeneratedTestSource': 'テストケースソースを開く',
     'unitTestRunner.runFullGateForCurrentFunction': 'Full Gateへ進む',
     'unitTestRunner.analyzeCurrentFunction': '現在関数を解析',
     'unitTestRunner.analyzeSelectedFunction': '選択関数を解析',
