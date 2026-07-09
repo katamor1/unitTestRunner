@@ -11,9 +11,10 @@ _FUNCTION_RE_TEMPLATE = r"void\s+{name}\s*\(\s*void\s*\)\s*\{{(?P<body>.*?)^\}}"
 _LVALUE_RE = re.compile(r"^[A-Za-z_]\w*(?:\s*(?:->|\.)\s*[A-Za-z_]\w*|\s*\[[A-Za-z0-9_+\-*/% ()]+\])*$")
 _FORBIDDEN_FRAGMENT_RE = re.compile(r"[{}#;\n\r]")
 _POINTER_CHAIN_RE = re.compile(r"\b(?P<root>[A-Za-z_]\w*)\s*->\s*(?P<field>[A-Za-z_]\w*)\s*->")
-_EXTERN_POINTER_RE_TEMPLATE = r"(?m)^\s*extern\s+(?P<type>[^;\n()]*?)\s*\*\s*{name}\s*;"
+_EXTERN_POINTER_RE_TEMPLATE = r"(?m)^\s*(?:extern|EXTERN)\s+(?P<type>[^;\n()]*?)\s*\*\s*{name}\s*;"
 _TYPEDEF_STRUCT_RE = re.compile(r"typedef\s+struct\s+(?:[A-Za-z_]\w*)?\s*\{(?P<body>.*?)\}\s*(?P<alias>[A-Za-z_]\w*)\s*;", re.DOTALL)
 _FIELD_RE = re.compile(r"(?P<type>[A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*)\s*(?P<pointer>\*+)?\s*(?P<name>[A-Za-z_]\w*)\s*(?:\[[^\]]+\])?$")
+_COMPACT_POINTER_FIELD_RE = re.compile(r"(?P<type>[A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*)\s*(?P<pointer>\*+)\s*(?P<name>[A-Za-z_]\w*)\s*(?:\[[^\]]+\])?$")
 
 
 def reflect_state_setups(output_root: Path | str, test_case_design: Any, function_name: str | None = None) -> list[Path]:
@@ -197,7 +198,7 @@ def _parse_field(raw_field: str) -> dict[str, Any] | None:
     text = " ".join(raw_field.strip().split())
     if not text:
         return None
-    match = _FIELD_RE.match(text.replace(" *", "*").replace("* ", "*")) or _FIELD_RE.match(text)
+    match = _FIELD_RE.match(text) or _COMPACT_POINTER_FIELD_RE.match(text)
     if not match:
         return None
     return {"type": match.group("type").strip(), "name": match.group("name"), "pointer": bool(match.group("pointer"))}
@@ -258,141 +259,85 @@ def _reflect_body(body: str, state_setups: list[dict[str, Any]]) -> str:
     statements = _state_setup_statement_lines(state_setups)
     if not declarations and not statements:
         return body
-    declaration_insert = _declaration_insert_index(lines)
-    if declarations:
-        for line in reversed(declarations):
-            lines.insert(declaration_insert, line)
-        declaration_insert += len(declarations)
-    statement_insert = _statement_insert_index(lines, declaration_insert)
-    block = ["    /* state_setups auto reflection */", *statements, ""] if statements else []
-    for line in reversed(block):
-        lines.insert(statement_insert, line)
-    return "\n".join(lines) + ("\n" if body.endswith("\n") else "")
-
-
-def _declaration_insert_index(lines: list[str]) -> int:
-    index = 0
-    while index < len(lines) and not lines[index].strip():
-        index += 1
-    while index < len(lines):
-        stripped = lines[index].strip()
-        if not stripped:
-            return index
-        if _looks_like_declaration(stripped):
-            index += 1
-            continue
-        return index
-    return len(lines)
-
-
-def _statement_insert_index(lines: list[str], start: int) -> int:
-    index = start
-    while index < len(lines) and not lines[index].strip():
-        index += 1
-    while index < len(lines):
-        stripped = lines[index].strip()
-        if re.match(r"Stub_\w+_Reset\s*\(\s*\)\s*;", stripped):
-            index += 1
-            continue
-        break
-    return index
+    insert_index = _first_executable_line_index(lines)
+    block = ["    /* state_setups auto reflection */"] + declarations + statements + [""]
+    return "\n".join(lines[:insert_index] + block + lines[insert_index:])
 
 
 def _fixture_declaration_lines(state_setups: list[dict[str, Any]]) -> list[str]:
     lines: list[str] = []
     for setup in state_setups:
         for declaration in _list(setup.get("fixture_declarations")):
-            line = _declaration_line(declaration)
-            if line and line not in lines:
-                lines.append(line)
+            if _forbidden_statement_fragment(declaration):
+                lines.append(f"    /* review required: skipped unsafe fixture declaration: {declaration} */")
+            else:
+                lines.append(f"    {declaration.rstrip(';')};")
     return lines
 
 
 def _state_setup_statement_lines(state_setups: list[dict[str, Any]]) -> list[str]:
     lines: list[str] = []
     for setup in state_setups:
-        hint = str(setup.get("setup_method_hint") or "direct_assignment")
-        variable_name = str(setup.get("variable_name") or "").strip()
-        if hint == "not_directly_accessible":
-            lines.append(f"    /* REVIEW REQUIRED: {variable_name or 'state'} is not directly accessible. */")
-            continue
         for statement in _list(setup.get("setup_statements")):
-            lines.append(_statement_line(statement))
-        if hint == "custom_statements":
-            continue
-        target = str(setup.get("target_expression") or variable_name).strip()
-        value = str(setup.get("value_expression") or "").strip()
-        if target and value:
-            if _safe_lvalue(target) and _safe_expression(value):
-                lines.append(f"    {target} = {value};")
+            if _forbidden_statement_fragment(statement):
+                lines.append(f"    /* review required: skipped unsafe setup statement: {statement} */")
             else:
-                lines.append(f"    /* REVIEW REQUIRED: state setup was not auto-reflected for {variable_name or target}. */")
-    return [line for line in lines if line]
+                lines.append(f"    {statement.rstrip(';')};")
+        variable = str(setup.get("variable_name") or "")
+        value = str(setup.get("value_expression") or "")
+        if not variable:
+            continue
+        if not _safe_lvalue(variable) or _forbidden_statement_fragment(value):
+            lines.append(f"    /* review required: skipped unsafe state setup for {variable}: {value} */")
+            continue
+        lines.append(f"    {variable} = {value};")
+    return lines
 
 
-def _statement_line(statement: object) -> str:
-    text = _strip_semicolon(str(statement or "").strip())
-    if not text:
-        return ""
-    if "=" in text:
-        lhs, rhs = text.split("=", 1)
-        if _safe_lvalue(lhs.strip()) and _safe_expression(rhs.strip()):
-            return f"    {lhs.strip()} = {rhs.strip()};"
-    if _FORBIDDEN_FRAGMENT_RE.search(text):
-        return "    /* REVIEW REQUIRED: unsafe state setup statement was omitted. */"
-    return f"    {text};"
-
-
-def _declaration_line(declaration: object) -> str:
-    text = _strip_semicolon(str(declaration or "").strip())
-    if not text or _FORBIDDEN_FRAGMENT_RE.search(text) or "=" in text:
-        return ""
-    return f"    {text};"
-
-
-def _include_line(include: object) -> str:
-    text = str(include or "").strip().replace("\\", "/")
-    if not text or "\n" in text or "\r" in text:
-        return ""
-    if text.startswith("#include"):
-        return text
-    if text.startswith("<") and text.endswith(">"):
-        return f"#include {text}"
-    if text.startswith('"') and text.endswith('"'):
-        return f"#include {text}"
-    return f'#include "{text}"'
-
-
-def _looks_like_declaration(stripped: str) -> bool:
-    if not stripped.endswith(";"):
-        return False
-    if stripped.startswith(("return ", "if ", "for ", "while ", "switch ", "UTR_", "Stub_")):
-        return False
-    return "=" not in stripped and "(" not in stripped
+def _first_executable_line_index(lines: list[str]) -> int:
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("/*") or stripped.startswith("//"):
+            continue
+        if re.match(r"(?:static\s+)?[A-Za-z_]\w*(?:\s+[A-Za-z_]\w*|\s*\*)*\s+[A-Za-z_]\w*(?:\[[^\]]+\])?\s*(?:=\s*[^;]+)?;", stripped):
+            continue
+        return index
+    return len(lines)
 
 
 def _safe_lvalue(value: str) -> bool:
-    return _LVALUE_RE.match(value.strip()) is not None
+    return bool(_LVALUE_RE.match(value))
 
 
-def _safe_expression(value: str) -> bool:
-    return bool(value.strip()) and _FORBIDDEN_FRAGMENT_RE.search(value) is None
+def _forbidden_statement_fragment(value: str) -> bool:
+    return bool(_FORBIDDEN_FRAGMENT_RE.search(str(value)))
 
 
-def _strip_semicolon(value: str) -> str:
-    return value[:-1].strip() if value.endswith(";") else value
-
-
-def _list(value: Any) -> list[Any]:
+def _list(value: Any) -> list[str]:
+    if value is None:
+        return []
     if isinstance(value, list):
-        return value
-    return []
+        return [str(item) for item in value]
+    return [str(value)]
 
 
 def _all_state_setups(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    result: list[dict[str, Any]] = []
+    setups: list[dict[str, Any]] = []
     for case in cases:
         for setup in case.get("state_setups") or []:
             if isinstance(setup, dict):
-                result.append(setup)
-    return result
+                setups.append(setup)
+    return setups
+
+
+def _include_line(include: str) -> str | None:
+    text = str(include).strip()
+    if not text:
+        return None
+    if text.startswith("#include"):
+        return text
+    if text.startswith("<") or text.startswith('"'):
+        return f"#include {text}"
+    return f'#include "{text}"'
