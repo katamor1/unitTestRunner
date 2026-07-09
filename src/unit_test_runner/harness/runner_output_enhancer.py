@@ -15,6 +15,7 @@ def enhance_runner_output(output_root: Path | str, function_name: str, tests: li
     test_count = len(tests)
     source = f'''/* generated runner skeleton: review required */
 #include <stdio.h>
+#include <string.h>
 #include "utr_assert.h"
 #include "utr_runner.h"
 #include "{case_header}"
@@ -30,11 +31,37 @@ static Utr_TestEntry utr_tests[] = {{
 
 static int utr_test_count = {test_count};
 
+static int Utr_RunOneIndex(int index, int *passed, int *failed, int *skipped)
+{{
+    int before;
+    int after;
+
+    if (utr_tests[index].func != 0) {{
+        before = Utr_GetFailureCount();
+        printf("UTR RUN %s\n", utr_tests[index].name);
+        fflush(stdout);
+        utr_tests[index].func();
+        after = Utr_GetFailureCount();
+        if (after == before) {{
+            (*passed)++;
+            printf("UTR OK %s\n", utr_tests[index].name);
+            fflush(stdout);
+            return 0;
+        }}
+        (*failed)++;
+        printf("UTR FAILED %s\n", utr_tests[index].name);
+        fflush(stdout);
+        return 1;
+    }}
+    (*skipped)++;
+    printf("UTR SKIPPED %s\n", utr_tests[index].name);
+    fflush(stdout);
+    return 0;
+}}
+
 void Utr_RunAllTests(void)
 {{
     int index;
-    int before;
-    int after;
     int passed;
     int failed;
     int skipped;
@@ -46,32 +73,47 @@ void Utr_RunAllTests(void)
     inconclusive = 0;
     Utr_ResetFailureCount();
     for (index = 0; index < utr_test_count; index++) {{
-        if (utr_tests[index].func != 0) {{
-            before = Utr_GetFailureCount();
-            printf("UTR RUN %s\\n", utr_tests[index].name);
-            fflush(stdout);
-            utr_tests[index].func();
-            after = Utr_GetFailureCount();
-            if (after == before) {{
-                passed++;
-                printf("UTR OK %s\\n", utr_tests[index].name);
-            }} else {{
-                failed++;
-                printf("UTR FAILED %s\\n", utr_tests[index].name);
-            }}
-            fflush(stdout);
-        }} else {{
-            skipped++;
-            printf("UTR SKIPPED %s\\n", utr_tests[index].name);
-            fflush(stdout);
-        }}
+        (void)Utr_RunOneIndex(index, &passed, &failed, &skipped);
     }}
-    printf("UTR SUMMARY total=%d passed=%d failed=%d skipped=%d inconclusive=%d\\n", passed + failed + skipped + inconclusive, passed, failed, skipped, inconclusive);
+    printf("UTR SUMMARY total=%d passed=%d failed=%d skipped=%d inconclusive=%d\n", passed + failed + skipped + inconclusive, passed, failed, skipped, inconclusive);
     fflush(stdout);
 }}
 
-int main(void)
+int Utr_RunNamedTest(const char *name)
 {{
+    int index;
+    int passed;
+    int failed;
+    int skipped;
+    int inconclusive;
+    int result;
+
+    passed = 0;
+    failed = 0;
+    skipped = 0;
+    inconclusive = 0;
+    result = 2;
+    Utr_ResetFailureCount();
+    for (index = 0; index < utr_test_count; index++) {{
+        if (strcmp(utr_tests[index].name, name) == 0) {{
+            result = Utr_RunOneIndex(index, &passed, &failed, &skipped);
+            printf("UTR SUMMARY total=%d passed=%d failed=%d skipped=%d inconclusive=%d\n", passed + failed + skipped + inconclusive, passed, failed, skipped, inconclusive);
+            fflush(stdout);
+            return result;
+        }}
+    }}
+    skipped = 1;
+    printf("UTR SKIPPED %s\n", name);
+    printf("UTR SUMMARY total=%d passed=%d failed=%d skipped=%d inconclusive=%d\n", passed + failed + skipped + inconclusive, passed, failed, skipped, inconclusive);
+    fflush(stdout);
+    return result;
+}}
+
+int main(int argc, char **argv)
+{{
+    if (argc == 3 && strcmp(argv[1], "--case") == 0) {{
+        return Utr_RunNamedTest(argv[2]);
+    }}
     Utr_RunAllTests();
     return Utr_GetFailureCount() == 0 ? 0 : 1;
 }}
