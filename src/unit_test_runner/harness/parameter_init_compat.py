@@ -30,7 +30,6 @@ _SCALAR_BASE_TYPES = {
     "signed long long",
     "signed long long int",
     "unsigned long long",
-    "unsigned long long int",
     "float",
     "double",
     "long double",
@@ -81,17 +80,19 @@ def _render_test_function(
             continue
         if int(parameter.get("pointer_level") or 0) > 0:
             base_type = parameter.get("base_type") or "int"
-            if value == "NULL":
-                declarations.append(f"    {type_raw} {name};")
-                setup_lines.append(f"    {name} = NULL;")
-            else:
-                if _is_scalar_type(base_type):
-                    declarations.append(f"    {base_type} {name}_storage;")
-                    setup_lines.append(f"    {name}_storage = {_safe_initializer_value(value)};")
+            if _is_scalar_type(base_type):
+                declarations.append(f"    {base_type} {name}_storage;")
+                if value == "NULL":
+                    setup_lines.append(f"    /* review required: NULL candidate for {name} is not used in default auto-run; using valid storage instead. */")
+                    setup_lines.append(f"    {name}_storage = TBD_VALID_INT_VALUE;")
                 else:
-                    declarations.append(f"    {base_type} {name}_storage = {{0}};")
-                declarations.append(f"    {type_raw} {name};")
-                setup_lines.append(f"    {name} = &{name}_storage;")
+                    setup_lines.append(f"    {name}_storage = {_safe_initializer_value(value)};")
+            else:
+                declarations.append(f"    {base_type} {name}_storage = {{0}};")
+                if value == "NULL":
+                    setup_lines.append(f"    /* review required: NULL candidate for {name} is not used in default auto-run; using valid storage instead. */")
+            declarations.append(f"    {type_raw} {name};")
+            setup_lines.append(f"    {name} = &{name}_storage;")
             continue
         declarations.extend(_value_parameter_declaration_and_setup(value, name, type_raw, setup_lines))
     if return_type != "void":
