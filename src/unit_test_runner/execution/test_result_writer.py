@@ -41,7 +41,38 @@ def write_test_execution_reports(workspace: Path | str, report: TestExecutionRep
 
 
 def render_execution_markdown(report: TestExecutionReport) -> str:
-    lines = ["# テスト実行レポート", "", "## 対象", f"- 関数: {report.function_name}", f"- 状態: {ja_label(report.status)}", f"- 実行済み: {'はい' if report.executed else 'いいえ'}", "", "## 結果", "| テストケース | 状態 | レビュー要否 | エビデンス |", "|---|---|---|---|"]
+    summary = report.parsed_result
+    lines = [
+        "# テスト実行レポート",
+        "",
+        "## 対象",
+        f"- 関数: {report.function_name}",
+        f"- 状態: {ja_label(report.status)}",
+        f"- 実行済み: {'はい' if report.executed else 'いいえ'}",
+    ]
+    if report.command_result and report.command_result.exit_code is not None:
+        lines.append(f"- 終了コード: {report.command_result.exit_code} / 0x{report.command_result.exit_code & 0xFFFFFFFF:08X}")
+    if report.command_result and report.command_result.timed_out:
+        lines.append("- タイムアウト: はい")
+    if summary:
+        lines.extend(
+            [
+                "",
+                "## サマリ",
+                "| 項目 | 件数 |",
+                "|---|---:|",
+                f"| 設計/表示対象ケース | {summary.total} |",
+                f"| 開始されたケース | {summary.started} |",
+                f"| 完了したケース | {summary.completed} |",
+                f"| 成功 | {summary.passed} |",
+                f"| 失敗 | {summary.failed} |",
+                f"| 異常終了/タイムアウト | {summary.crashed} |",
+                f"| 未実行 | {summary.not_run} |",
+                f"| 判定保留 | {summary.inconclusive} |",
+                f"| parser confidence | {md_cell(summary.parser_confidence)} |",
+            ]
+        )
+    lines.extend(["", "## 結果", "| テストケース | 状態 | レビュー要否 | エビデンス |", "|---|---|---|---|"])
     for case in report.case_results:
         lines.append(f"| {case.test_case_id or ''} | {md_label_cell(case.status)} | {'はい' if case.review_required else 'いいえ'} | {md_cell(case.evidence)} |")
     return "\n".join(lines) + "\n"
