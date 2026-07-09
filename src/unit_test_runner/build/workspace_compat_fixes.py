@@ -68,6 +68,44 @@ def _makefile_include_arg(entry: BuildPathEntry) -> str:
     return f'/I"{include_path}"'
 
 
+def _function_level_source_text(source: Path, source_digest: dict[str, Any], function_name: str) -> str | None:
+    if not source.exists():
+        return None
+    tokens = bwg._source_tokens(source_digest)
+    definitions = bwg._function_definitions_from_tokens(tokens)
+    if not definitions or not any(item["name"] == function_name for item in definitions):
+        return None
+    keep = bwg._reachable_function_names(function_name, definitions, tokens)
+    if all(item["name"] in keep for item in definitions):
+        return None
+    try:
+        raw = source.read_bytes()
+    except OSError:
+        return None
+    return bwg.decode_bytes_auto(_remove_unkept_functions_from_bytes(raw, definitions, keep))
+
+
+def _remove_unkept_functions_from_bytes(source_bytes: bytes, definitions: list[dict[str, Any]], keep: set[str]) -> bytes:
+    result = source_bytes
+    for definition in sorted(definitions, key=lambda item: int(item["start"]), reverse=True):
+        if definition["name"] in keep:
+            continue
+        start = int(definition["start"])
+        end = int(definition["end"])
+        if start < 0 or end < start or end > len(result):
+            continue
+        removed = result[start:end]
+        result = result[:start] + _removed_function_replacement_bytes(definition["name"], removed) + result[end:]
+    return result
+
+
+def _removed_function_replacement_bytes(name: str, removed: bytes) -> bytes:
+    newline = b"\r\n" if b"\r\n" in removed else b"\n"
+    newline_count = removed.count(b"\n")
+    comment = f"/* unit-test-runner build probe: unused peer function {name} removed for function-level linking. */".encode("ascii")
+    return comment + (newline * max(1, newline_count))
+
+
 def apply_build_probe_compat_fixes() -> None:
     bwg._EXTERN_VARIABLE_RE = _EXTERN_OR_EXTERN_MACRO_RE
     bwg._include_dir_text = _include_dir_text
@@ -75,3 +113,4 @@ def apply_build_probe_compat_fixes() -> None:
     bwg._include_dir_path = _include_dir_path
     bwg._include_dirs = _include_dirs
     bwg._makefile_include_arg = _makefile_include_arg
+    bwg._function_level_source_text = _function_level_source_text
