@@ -67,7 +67,7 @@ def prepare_test_execution_evidence(
             review_items.extend(precondition_review_items)
         else:
             executed = True
-            command_result, parsed_summary, case_results, status = run_test_executable(workspace, executable_info, timeout_seconds)
+            command_result, parsed_summary, runner_case_results, status = run_test_executable(workspace, executable_info, timeout_seconds)
             if parsed_summary.total == 0 and design_case_results:
                 warnings.append(
                     TestExecutionWarning(
@@ -76,15 +76,18 @@ def prepare_test_execution_evidence(
                     )
                 )
                 case_results = _case_results_without_runner_output(design_case_results, status)
-                parsed_summary = TestResultSummary(
-                    total=len(case_results),
-                    passed=0,
-                    failed=0,
-                    skipped=0,
-                    inconclusive=len(case_results),
-                    assertion_failures=0,
-                    parser_confidence="low",
-                )
+                parsed_summary = _summary_from_case_results(case_results, parser_confidence="low")
+            else:
+                case_results = _merge_runner_case_results_with_design(design_case_results, runner_case_results, status)
+                parsed_summary = _summary_from_case_results(case_results, assertion_failures=parsed_summary.assertion_failures, parser_confidence=parsed_summary.parser_confidence)
+                if parsed_summary.not_run > 0:
+                    warnings.append(
+                        TestExecutionWarning(
+                            "runner_cases_not_reached",
+                            f"テストケース設計は {len(design_case_results)} 件ですが、runner出力で開始されたケースは {parsed_summary.started} 件です。未到達ケースを not_run として記録しました。",
+                        )
+                    )
+                status = _status_from_summary(parsed_summary, status)
     else:
         (logs / "test_execution.log").write_text("DRY RUN\n" + command.command_line + "\n", encoding="utf-8")
         command_result = ExecutionCommandResult(None, None, None, None, None, None, Path("logs/test_execution.log"), False)
@@ -95,7 +98,7 @@ def prepare_test_execution_evidence(
             case.review_required = True
             if case.status == "passed":
                 case.status = "inconclusive"
-        parsed_summary.inconclusive = len([case for case in case_results if case.review_required])
+        parsed_summary = _summary_from_case_results(case_results, assertion_failures=parsed_summary.assertion_failures, parser_confidence=parsed_summary.parser_confidence)
     report = TestExecutionReport(
         source_path=source_path,
         function_name=function_name,
@@ -136,6 +139,44 @@ def _case_results_from_design(test_case_design: dict[str, Any]) -> list[TestCase
     return results
 
 
+def _merge_runner_case_results_with_design(
+    design_case_results: list[TestCaseExecutionResult],
+    runner_case_results: list[TestCaseExecutionResult],
+    execution_status: str,
+) -> list[TestCaseExecutionResult]:
+    runner_by_id = {case.test_case_id: case for case in runner_case_results if case.test_case_id}
+    merged: list[TestCaseExecutionResult] = []
+    for design_case in design_case_results:
+        if design_case.test_case_id in runner_by_id:
+            observed = runner_by_id[design_case.test_case_id]
+            observed.related_coverage_ids = observed.related_coverage_ids or list(design_case.related_coverage_ids)
+            observed.review_required = observed.review_required or design_case.review_required
+            merged.append(observed)
+            continue
+        evidence = "runner出力にこのテストケースの開始行がないため、未実行として記録しました。"
+        warnings = [TestExecutionWarning("runner_case_not_reached", evidence, related_test_case_id=design_case.test_case_id)]
+        if execution_status in {"failed", "timeout"} and runner_case_results:
+            evidence = "先行ケースの異常終了または実行中断により、このテストケースへ到達していません。logs/test_execution.log を確認してください。"
+            warnings = [TestExecutionWarning("runner_case_not_reached_after_failure", evidence, related_test_case_id=design_case.test_case_id)]
+        merged.append(
+            TestCaseExecutionResult(
+                test_case_id=design_case.test_case_id,
+                generated_function_name=design_case.generated_function_name,
+                status="not_run",
+                exit_related=False,
+                related_coverage_ids=list(design_case.related_coverage_ids),
+                review_required=design_case.review_required,
+                evidence=evidence,
+                warnings=warnings,
+            )
+        )
+    design_ids = {case.test_case_id for case in design_case_results}
+    for runner_case in runner_case_results:
+        if runner_case.test_case_id not in design_ids:
+            merged.append(runner_case)
+    return merged
+
+
 def _case_results_without_runner_output(design_case_results: list[TestCaseExecutionResult], execution_status: str) -> list[TestCaseExecutionResult]:
     results: list[TestCaseExecutionResult] = []
     evidence = "runner出力からケース結果を取得できませんでした。logs/test_execution.log を確認してください。"
@@ -155,6 +196,36 @@ def _case_results_without_runner_output(design_case_results: list[TestCaseExecut
             )
         )
     return results
+
+
+def _summary_from_case_results(
+    case_results: list[TestCaseExecutionResult],
+    assertion_failures: int = 0,
+    parser_confidence: str = "medium",
+) -> TestResultSummary:
+    passed = len([case for case in case_results if case.status == "passed"])
+    failed = len([case for case in case_results if case.status == "failed"])
+    skipped = len([case for case in case_results if case.status == "skipped"])
+    inconclusive = len([case for case in case_results if case.status in {"inconclusive", "not_found_in_output"}])
+    crashed = len([case for case in case_results if case.status in {"crashed", "timeout"}])
+    not_run = len([case for case in case_results if case.status == "not_run"])
+    started = len([case for case in case_results if case.status not in {"not_run", "not_found_in_output"}])
+    completed = passed + failed + skipped + inconclusive
+    if crashed or not_run:
+        parser_confidence = "low"
+    return TestResultSummary(len(case_results), passed, failed, skipped, inconclusive, assertion_failures, parser_confidence, crashed, not_run, started, completed)
+
+
+def _status_from_summary(summary: TestResultSummary, current_status: str) -> str:
+    if summary.crashed > 0 or summary.failed > 0 or current_status == "failed":
+        return "failed"
+    if current_status == "timeout":
+        return "timeout"
+    if summary.not_run > 0 or summary.inconclusive > 0:
+        return "inconclusive"
+    if summary.total > 0 and summary.passed == summary.total:
+        return "passed"
+    return current_status
 
 
 def _placeholder_review_items(harness_report: dict[str, Any], test_case_design: dict[str, Any]) -> list[ExecutionReviewItem]:
