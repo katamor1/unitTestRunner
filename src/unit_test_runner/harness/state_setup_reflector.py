@@ -15,6 +15,7 @@ _EXTERN_POINTER_RE_TEMPLATE = r"(?m)^\s*(?:extern|EXTERN)\s+(?P<type>[^;\n()]*?)
 _TYPEDEF_STRUCT_RE = re.compile(r"typedef\s+struct\s+(?:[A-Za-z_]\w*)?\s*\{(?P<body>.*?)\}\s*(?P<alias>[A-Za-z_]\w*)\s*;", re.DOTALL)
 _FIELD_RE = re.compile(r"(?P<type>[A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*)\s*(?P<pointer>\*+)?\s*(?P<name>[A-Za-z_]\w*)\s*(?:\[[^\]]+\])?$")
 _COMPACT_POINTER_FIELD_RE = re.compile(r"(?P<type>[A-Za-z_]\w*(?:\s+[A-Za-z_]\w*)*)\s*(?P<pointer>\*+)\s*(?P<name>[A-Za-z_]\w*)\s*(?:\[[^\]]+\])?$")
+_INCLUDE_TARGET_RE = re.compile(r'^\s*#include\s+[<"]([^>"]+)[>"]', re.MULTILINE)
 
 
 def reflect_state_setups(output_root: Path | str, test_case_design: Any, function_name: str | None = None) -> list[Path]:
@@ -39,7 +40,7 @@ def reflect_state_setups(output_root: Path | str, test_case_design: Any, functio
     if not any(case.get("state_setups") for case in cases):
         return []
     text = test_source.read_text(encoding="cp932", errors="replace")
-    text = _ensure_fixture_includes(text, cases)
+    text = _ensure_fixture_includes(text, cases, output_root)
     for case in cases:
         text = _reflect_case(text, case)
     write_c_file(test_source, text, overwrite=True)
@@ -212,7 +213,7 @@ def _relative_include_from_generated_tests(output_root: Path, header_path: Path)
         return header_path.as_posix()
 
 
-def _ensure_fixture_includes(text: str, cases: list[dict[str, Any]]) -> str:
+def _ensure_fixture_includes(text: str, cases: list[dict[str, Any]], output_root: Path) -> str:
     include_lines: list[str] = []
     for setup in _all_state_setups(cases):
         for include in _list(setup.get("fixture_includes")) + _list(setup.get("setup_includes")):
@@ -222,7 +223,8 @@ def _ensure_fixture_includes(text: str, cases: list[dict[str, Any]]) -> str:
     if not include_lines:
         return text
     existing = set(re.findall(r'^#include\s+[^\n]+', text, flags=re.MULTILINE))
-    additions = [line for line in include_lines if line not in existing]
+    provided_basenames = _provided_include_basenames(text, output_root)
+    additions = [line for line in include_lines if line not in existing and _include_basename(line) not in provided_basenames]
     if not additions:
         return text
     include_matches = list(re.finditer(r'^#include\s+[^\n]+\n?', text, flags=re.MULTILINE))
@@ -230,6 +232,58 @@ def _ensure_fixture_includes(text: str, cases: list[dict[str, Any]]) -> str:
         insert_at = include_matches[-1].end()
         return text[:insert_at] + "".join(line + "\n" for line in additions) + text[insert_at:]
     return "".join(line + "\n" for line in additions) + "\n" + text
+
+
+def _provided_include_basenames(text: str, output_root: Path) -> set[str]:
+    basenames: set[str] = set()
+    pending = list(_include_targets(text))
+    visited: set[Path] = set()
+    while pending:
+        target = pending.pop(0)
+        basenames.add(Path(target).name)
+        resolved = _resolve_include_target(output_root, target)
+        if resolved is None or resolved in visited:
+            continue
+        visited.add(resolved)
+        try:
+            nested_text = resolved.read_text(encoding="cp932", errors="replace")
+        except OSError:
+            continue
+        for nested in _include_targets(nested_text):
+            if Path(nested).name not in basenames:
+                pending.append(nested)
+    return basenames
+
+
+def _include_targets(text: str) -> list[str]:
+    return [match.group(1) for match in _INCLUDE_TARGET_RE.finditer(text)]
+
+
+def _include_basename(include_line: str) -> str:
+    targets = _include_targets(include_line)
+    return Path(targets[0]).name if targets else include_line
+
+
+def _resolve_include_target(output_root: Path, target: str) -> Path | None:
+    target_path = Path(target)
+    candidates = [
+        output_root / "generated" / "harness" / target_path,
+        output_root / "generated" / "include" / target_path,
+        output_root / "generated" / "stubs" / target_path,
+        output_root / "generated" / "tests" / target_path,
+        output_root / "generated" / "tests" / target_path.name,
+        output_root / "generated" / "harness" / target_path.name,
+        output_root / "extracted" / target_path,
+        output_root / "extracted" / target_path.name,
+    ]
+    candidates.extend((output_root / "extracted").rglob(target_path.name))
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                return candidate.resolve()
+        except OSError:
+            continue
+    return None
 
 
 def _reflect_case(text: str, case: dict[str, Any]) -> str:
