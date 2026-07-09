@@ -39,11 +39,12 @@ type WorkflowMessage = WorkflowActionMessage | SettingsActionMessage;
 type WorkflowStepViews = ReturnType<typeof buildWorkflowStepViews>;
 
 export const SIMPLE_WORKFLOW_ACTIONS: WorkflowAction[] = [
-  { id: 'quickCheckCurrent', kind: 'command', label: 'Quick Check', commandId: 'unitTestRunner.quickCheckCurrentFunction', primary: true },
+  { id: 'quickCheckCurrent', kind: 'command', label: '1. Quick Check（ビルド準備まで）', commandId: 'unitTestRunner.quickCheckCurrentFunction', primary: true },
+  { id: 'openGeneratedTestSource', kind: 'command', label: '2. テストケースソースを開く', commandId: 'unitTestRunner.openGeneratedTestSource', primary: true },
+  { id: 'runBuildProbe', kind: 'command', label: '3. ビルド実行', commandId: 'unitTestRunner.runBuildProbe', primary: true, danger: true },
+  { id: 'runTests', kind: 'command', label: '4. テスト実行', commandId: 'unitTestRunner.runTests', primary: true, danger: true },
   { id: 'openQuickSummary', kind: 'command', label: 'Quick Summaryを開く', commandId: 'unitTestRunner.openQuickSummary' },
   { id: 'runFullGate', kind: 'command', label: 'Full Gateへ進む', commandId: 'unitTestRunner.runFullGateForCurrentFunction', danger: true },
-  { id: 'openDossier', kind: 'openReport', label: 'dossierを開く', reportKey: 'functionDossierMd' },
-  { id: 'openOutputWorkspace', kind: 'openOutputWorkspace', label: '出力workspaceを開く' },
 ];
 
 export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
@@ -172,245 +173,53 @@ export function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style nonce="${nonce}">
-    body {
-      color: var(--vscode-foreground);
-      background: var(--vscode-sideBar-background);
-      font-family: var(--vscode-font-family);
-      font-size: var(--vscode-font-size);
-      margin: 0;
-      padding: 12px;
-    }
-    .summary {
-      border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-editorGroup-border));
-      padding-bottom: 10px;
-      margin-bottom: 10px;
-    }
-    .settings {
-      border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-editorGroup-border));
-      margin-bottom: 10px;
-      padding-bottom: 10px;
-    }
-    .settings-summary {
-      align-items: center;
-      cursor: pointer;
-      display: flex;
-      gap: 8px;
-      justify-content: space-between;
-      list-style: none;
-      margin-bottom: 8px;
-    }
-    .settings-summary::-webkit-details-marker {
-      display: none;
-    }
-    .settings h2, .optional h2, .simple-card h2 {
-      font-size: 12px;
-      margin: 0 0 8px 0;
-      text-transform: uppercase;
-      color: var(--vscode-descriptionForeground);
-    }
-    .settings-toggle {
-      color: var(--vscode-descriptionForeground);
-      font-size: 11px;
-      white-space: nowrap;
-    }
-    .settings[open] .settings-collapsed-label,
-    .settings:not([open]) .settings-expanded-label {
-      display: none;
-    }
-    .settings-ready {
-      color: var(--vscode-descriptionForeground);
-      margin: 0 0 8px 0;
-    }
-    .setting-field {
-      border-left: 3px solid var(--vscode-editorGroup-border);
-      margin: 0 0 8px 0;
-      padding: 8px 0 8px 10px;
-    }
-    .setting-field.default {
-      border-left-color: var(--vscode-testing-iconQueued);
-    }
-    .setting-field.configured,
-    .setting-field.optional {
-      border-left-color: var(--vscode-testing-iconPassed);
-    }
-    .setting-field.missing,
-    .setting-field.warning {
-      border-left-color: var(--vscode-inputValidation-warningBorder);
-      background: var(--vscode-inputValidation-warningBackground);
-    }
-    .setting-title {
-      align-items: baseline;
-      display: flex;
-      gap: 6px;
-      justify-content: space-between;
-    }
-    .setting-title h3 {
-      font-size: 12px;
-      line-height: 1.3;
-      margin: 0;
-    }
-    .setting-status {
-      color: var(--vscode-descriptionForeground);
-      font-size: 11px;
-      white-space: nowrap;
-    }
-    .setting-value, .path, .simple-meta {
-      color: var(--vscode-descriptionForeground);
-      overflow-wrap: anywhere;
-    }
-    .setting-value {
-      margin-top: 4px;
-    }
-    .setting-message {
-      color: var(--vscode-inputValidation-warningForeground);
-      margin-top: 4px;
-      overflow-wrap: anywhere;
-    }
-    .name {
-      font-weight: 700;
-      margin-bottom: 4px;
-    }
-    .notice, .error, .busy {
-      border: 1px solid var(--vscode-inputValidation-warningBorder);
-      background: var(--vscode-inputValidation-warningBackground);
-      color: var(--vscode-inputValidation-warningForeground);
-      padding: 8px;
-      margin: 8px 0;
-    }
-    .error {
-      border-color: var(--vscode-inputValidation-errorBorder);
-      background: var(--vscode-inputValidation-errorBackground);
-      color: var(--vscode-inputValidation-errorForeground);
-    }
-    .busy {
-      border-color: var(--vscode-focusBorder);
-      background: var(--vscode-editorWidget-background);
-      color: var(--vscode-foreground);
-      font-weight: 700;
-    }
-    .busy span {
-      color: var(--vscode-descriptionForeground);
-      font-weight: 400;
-    }
-    .view-switch {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px;
-      margin: 0 0 10px 0;
-    }
-    .panel-view.hidden {
-      display: none;
-    }
-    .simple-card {
-      border-left: 3px solid var(--vscode-focusBorder);
-      background: var(--vscode-editorWidget-background);
-      margin: 0 0 10px 0;
-      padding: 10px;
-    }
-    .simple-card h3 {
-      font-size: 14px;
-      line-height: 1.35;
-      margin: 0 0 6px 0;
-    }
-    .simple-counts {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px;
-      margin: 8px 0;
-    }
-    .simple-count {
-      border: 1px solid var(--vscode-editorGroup-border);
-      padding: 8px;
-    }
-    .simple-count strong {
-      display: block;
-      font-size: 16px;
-    }
-    .simple-count span {
-      color: var(--vscode-descriptionForeground);
-      font-size: 11px;
-    }
-    .step {
-      border-left: 3px solid var(--vscode-editorGroup-border);
-      padding: 9px 0 10px 10px;
-      margin: 0 0 8px 0;
-      opacity: 0.72;
-    }
-    .step.done {
-      border-left-color: var(--vscode-testing-iconPassed);
-      opacity: 0.82;
-    }
-    .step.current {
-      border-left-color: var(--vscode-focusBorder);
-      background: var(--vscode-list-activeSelectionBackground);
-      color: var(--vscode-list-activeSelectionForeground);
-      opacity: 1;
-      padding-right: 8px;
-    }
-    .step h3 {
-      font-size: 13px;
-      line-height: 1.3;
-      margin: 0 0 6px 0;
-    }
-    .status {
-      display: inline-block;
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      margin-bottom: 4px;
-    }
-    .current .status {
-      color: var(--vscode-list-activeSelectionForeground);
-      font-weight: 700;
-    }
-    p {
-      margin: 4px 0;
-      line-height: 1.45;
-    }
-    .required {
-      color: var(--vscode-descriptionForeground);
-    }
-    .current .required {
-      color: var(--vscode-list-activeSelectionForeground);
-    }
-    .actions {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      margin-top: 8px;
-    }
-    button {
-      background: var(--vscode-button-secondaryBackground);
-      color: var(--vscode-button-secondaryForeground);
-      border: 1px solid transparent;
-      border-radius: 2px;
-      min-height: 28px;
-      padding: 4px 8px;
-      text-align: left;
-      cursor: pointer;
-      overflow-wrap: anywhere;
-    }
-    button:hover {
-      background: var(--vscode-button-secondaryHoverBackground);
-    }
-    button:disabled {
-      cursor: wait;
-      opacity: 0.65;
-    }
-    button.primary, button.active-mode {
-      background: var(--vscode-button-background);
-      color: var(--vscode-button-foreground);
-    }
-    button.primary:hover, button.active-mode:hover {
-      background: var(--vscode-button-hoverBackground);
-    }
-    button.danger {
-      border-color: var(--vscode-inputValidation-warningBorder);
-    }
-    .optional {
-      margin-top: 14px;
-      border-top: 1px solid var(--vscode-editorGroup-border);
-      padding-top: 10px;
-    }
+    body { color: var(--vscode-foreground); background: var(--vscode-sideBar-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); margin: 0; padding: 12px; }
+    .summary { border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-editorGroup-border)); padding-bottom: 10px; margin-bottom: 10px; }
+    .settings { border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-editorGroup-border)); margin-bottom: 10px; padding-bottom: 10px; }
+    .settings-summary { align-items: center; cursor: pointer; display: flex; gap: 8px; justify-content: space-between; list-style: none; margin-bottom: 8px; }
+    .settings-summary::-webkit-details-marker { display: none; }
+    .settings h2, .optional h2, .simple-card h2, .simple-flow h2 { font-size: 12px; margin: 0 0 8px 0; text-transform: uppercase; color: var(--vscode-descriptionForeground); }
+    .settings-toggle, .setting-status, .setting-value, .path, .simple-meta, .simple-step-status { color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+    .settings[open] .settings-collapsed-label, .settings:not([open]) .settings-expanded-label { display: none; }
+    .setting-field { border-left: 3px solid var(--vscode-editorGroup-border); margin: 0 0 8px 0; padding: 8px 0 8px 10px; }
+    .setting-field.default { border-left-color: var(--vscode-testing-iconQueued); }
+    .setting-field.configured, .setting-field.optional { border-left-color: var(--vscode-testing-iconPassed); }
+    .setting-field.missing, .setting-field.warning { border-left-color: var(--vscode-inputValidation-warningBorder); background: var(--vscode-inputValidation-warningBackground); }
+    .setting-title { align-items: baseline; display: flex; gap: 6px; justify-content: space-between; }
+    .setting-title h3 { font-size: 12px; line-height: 1.3; margin: 0; }
+    .setting-value, .setting-message { margin-top: 4px; }
+    .setting-message { color: var(--vscode-inputValidation-warningForeground); }
+    .name { font-weight: 700; margin-bottom: 4px; }
+    .notice, .error, .busy { border: 1px solid var(--vscode-inputValidation-warningBorder); background: var(--vscode-inputValidation-warningBackground); color: var(--vscode-inputValidation-warningForeground); padding: 8px; margin: 8px 0; }
+    .error { border-color: var(--vscode-inputValidation-errorBorder); background: var(--vscode-inputValidation-errorBackground); color: var(--vscode-inputValidation-errorForeground); }
+    .busy { border-color: var(--vscode-focusBorder); background: var(--vscode-editorWidget-background); color: var(--vscode-foreground); font-weight: 700; }
+    .busy span { color: var(--vscode-descriptionForeground); font-weight: 400; }
+    .view-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0 0 10px 0; }
+    .panel-view.hidden { display: none; }
+    .simple-card, .simple-step { border-left: 3px solid var(--vscode-focusBorder); background: var(--vscode-editorWidget-background); margin: 0 0 10px 0; padding: 10px; }
+    .simple-flow { display: flex; flex-direction: column; gap: 8px; }
+    .simple-step.done { border-left-color: var(--vscode-testing-iconPassed); }
+    .simple-step.current { border-left-color: var(--vscode-focusBorder); }
+    .simple-step.pending { opacity: 0.72; }
+    .simple-step h3, .simple-card h3 { font-size: 14px; line-height: 1.35; margin: 0 0 6px 0; }
+    .simple-step-status { display: inline-block; font-size: 11px; margin-bottom: 4px; }
+    .simple-actions, .actions { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+    .step { border-left: 3px solid var(--vscode-editorGroup-border); padding: 9px 0 10px 10px; margin: 0 0 8px 0; opacity: 0.72; }
+    .step.done { border-left-color: var(--vscode-testing-iconPassed); opacity: 0.82; }
+    .step.current { border-left-color: var(--vscode-focusBorder); background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); opacity: 1; padding-right: 8px; }
+    .step h3 { font-size: 13px; line-height: 1.3; margin: 0 0 6px 0; }
+    .status { display: inline-block; font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 4px; }
+    .current .status { color: var(--vscode-list-activeSelectionForeground); font-weight: 700; }
+    p { margin: 4px 0; line-height: 1.45; }
+    .required { color: var(--vscode-descriptionForeground); }
+    .current .required { color: var(--vscode-list-activeSelectionForeground); }
+    button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: 1px solid transparent; border-radius: 2px; min-height: 28px; padding: 4px 8px; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+    button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+    button:disabled { cursor: wait; opacity: 0.65; }
+    button.primary, button.active-mode { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+    button.primary:hover, button.active-mode:hover { background: var(--vscode-button-hoverBackground); }
+    button.danger { border-color: var(--vscode-inputValidation-warningBorder); }
+    .optional { margin-top: 14px; border-top: 1px solid var(--vscode-editorGroup-border); padding-top: 10px; }
   </style>
 </head>
 <body data-default-mode="simple">
@@ -432,9 +241,7 @@ export function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState
       const safeMode = mode === 'full' ? 'full' : 'simple';
       document.getElementById('simplePanel')?.classList.toggle('hidden', safeMode !== 'simple');
       document.getElementById('fullPanel')?.classList.toggle('hidden', safeMode !== 'full');
-      document.querySelectorAll('button[data-view-mode]').forEach((button) => {
-        button.classList.toggle('active-mode', button.dataset.viewMode === safeMode);
-      });
+      document.querySelectorAll('button[data-view-mode]').forEach((button) => button.classList.toggle('active-mode', button.dataset.viewMode === safeMode));
       vscode.setState({ ...persistedState, panelMode: safeMode });
     }
     setPanelMode(persistedState.panelMode || 'simple');
@@ -448,36 +255,20 @@ export function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState
         activeButton.textContent = '実行中: ' + runningText;
       }
     }
-    if (initialRunningLabel) {
-      disableButtons(null, initialRunningLabel);
-    }
-    document.querySelectorAll('button[data-view-mode]').forEach((button) => {
-      button.addEventListener('click', () => setPanelMode(button.dataset.viewMode));
-    });
+    if (initialRunningLabel) { disableButtons(null, initialRunningLabel); }
+    document.querySelectorAll('button[data-view-mode]').forEach((button) => button.addEventListener('click', () => setPanelMode(button.dataset.viewMode)));
     document.querySelectorAll('button[data-kind]').forEach((button) => {
       button.addEventListener('click', () => {
         const label = button.dataset.label || button.textContent || '処理';
         disableButtons(button, label);
-        vscode.postMessage({
-          type: 'workflowAction',
-          kind: button.dataset.kind,
-          commandId: button.dataset.commandId,
-          reportKey: button.dataset.reportKey,
-          stepId: button.dataset.stepId,
-          label
-        });
+        vscode.postMessage({ type: 'workflowAction', kind: button.dataset.kind, commandId: button.dataset.commandId, reportKey: button.dataset.reportKey, stepId: button.dataset.stepId, label });
       });
     });
     document.querySelectorAll('button[data-setting-kind]').forEach((button) => {
       button.addEventListener('click', () => {
         const label = button.textContent || '設定操作';
         disableButtons(button, label);
-        vscode.postMessage({
-          type: 'settingsAction',
-          kind: button.dataset.settingKind,
-          fieldId: button.dataset.fieldId,
-          label
-        });
+        vscode.postMessage({ type: 'settingsAction', kind: button.dataset.settingKind, fieldId: button.dataset.fieldId, label });
       });
     });
   </script>
@@ -486,30 +277,82 @@ export function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState
 }
 
 function renderSimpleWorkflowPanel(functionName: string, workspace: string, steps: WorkflowStepViews): string {
-  const current = steps.find((step) => step.status === 'current') ?? steps[0];
-  const doneCount = steps.filter((step) => step.status === 'done').length;
+  const flowSteps = simpleFlowSteps(steps);
   return `<div class="summary">
   <div class="name">${escapeHtml(functionName)}</div>
   <div class="path">${escapeHtml(workspace)}</div>
 </div>
 <div class="simple-card">
   <h2>現在の状態</h2>
-  <h3>${escapeHtml(current?.title ?? '設定確認')}</h3>
-  <p>${escapeHtml(current?.requiredAction ?? '設定を確認してください。')}</p>
-  <div class="simple-counts">
-    <div class="simple-count"><strong>${doneCount}</strong><span>完了工程</span></div>
-    <div class="simple-count"><strong>${steps.length}</strong><span>全工程</span></div>
-  </div>
+  <h3>4ステップでテスト実行まで通します</h3>
+  <p class="simple-meta">関数にカーソルを置いて Quick Check → 生成テストを確認・修正 → ビルド実行 → テスト実行、の順に進めます。</p>
+</div>
+<div class="simple-flow">
+  ${flowSteps.map(renderSimpleStep).join('')}
 </div>
 <div class="simple-card">
-  <h2>よく使う操作</h2>
-  <div class="actions">${SIMPLE_WORKFLOW_ACTIONS.map(renderAction).join('')}</div>
+  <h2>補助操作</h2>
+  <div class="actions">${SIMPLE_WORKFLOW_ACTIONS.filter((action) => ['openQuickSummary', 'runFullGate'].includes(action.id)).map(renderAction).join('')}${renderAction({ id: 'openOutputWorkspace', kind: 'openOutputWorkspace', label: '出力workspaceを開く' })}</div>
 </div>
 <div class="simple-card">
   <h2>表示切替</h2>
   <p class="simple-meta">正式レビューや証跡確認の全工程を見る場合は従来表示に切り替えます。</p>
   <button type="button" data-view-mode="full">従来パネルを表示</button>
 </div>`;
+}
+
+interface SimpleStep {
+  title: string;
+  description: string;
+  status: 'done' | 'current' | 'pending';
+  actions: WorkflowAction[];
+}
+
+function simpleFlowSteps(steps: WorkflowStepViews): SimpleStep[] {
+  const quickDone = isStepDone(steps, 'buildProbeDryRun');
+  const buildDone = isStepDone(steps, 'buildProbeRun');
+  const testDone = isStepDone(steps, 'runTests');
+  const reviewDone = quickDone;
+  return [
+    {
+      title: '1. 関数にカーソルして Quick Check',
+      description: '解析、テスト設計、ハーネス生成、ビルドdry-runまでまとめて準備します。',
+      status: quickDone ? 'done' : 'current',
+      actions: [SIMPLE_WORKFLOW_ACTIONS[0], SIMPLE_WORKFLOW_ACTIONS[4]],
+    },
+    {
+      title: '2. テストケースのソースコードを確認・修正',
+      description: 'generated/tests/test_<関数>.c を開いて、期待値や入力値をレビューします。',
+      status: !quickDone ? 'pending' : reviewDone && !buildDone ? 'current' : 'done',
+      actions: [SIMPLE_WORKFLOW_ACTIONS[1]],
+    },
+    {
+      title: '3. ビルド実行',
+      description: 'VC6/nmake のビルドプローブを実行して、生成コード込みでコンパイルします。',
+      status: !quickDone ? 'pending' : buildDone ? 'done' : 'current',
+      actions: [SIMPLE_WORKFLOW_ACTIONS[2], { id: 'openBuildProbe', kind: 'openReport', label: 'ビルドレポートを開く', reportKey: 'buildProbeReportMd' }],
+    },
+    {
+      title: '4. テスト実行・結果確認',
+      description: '生成テストを実行し、test_execution_report.md で結果を確認します。',
+      status: !buildDone ? 'pending' : testDone ? 'done' : 'current',
+      actions: [SIMPLE_WORKFLOW_ACTIONS[3], { id: 'openTestExecution', kind: 'openReport', label: 'テスト結果を開く', reportKey: 'testExecutionReportMd' }],
+    },
+  ];
+}
+
+function isStepDone(steps: WorkflowStepViews, stepId: WorkflowStepId): boolean {
+  return steps.some((step) => step.id === stepId && step.status === 'done');
+}
+
+function renderSimpleStep(step: SimpleStep): string {
+  const label = step.status === 'done' ? '完了' : step.status === 'current' ? '次に実施' : '未実施';
+  return `<section class="simple-step ${step.status}">
+  <span class="simple-step-status">${label}</span>
+  <h3>${escapeHtml(step.title)}</h3>
+  <p>${escapeHtml(step.description)}</p>
+  <div class="simple-actions">${step.actions.map(renderAction).join('')}</div>
+</section>`;
 }
 
 function renderFullWorkflowPanel(functionName: string, workspace: string, steps: WorkflowStepViews, optionalActions: WorkflowAction[]): string {
@@ -577,6 +420,7 @@ function commandLabel(commandId?: string): string {
     'unitTestRunner.quickCheckCurrentFunction': 'Quick Check',
     'unitTestRunner.quickCheckSelectedFunction': 'Quick Check',
     'unitTestRunner.openQuickSummary': 'Quick Summaryを開く',
+    'unitTestRunner.openGeneratedTestSource': 'テストケースソースを開く',
     'unitTestRunner.runFullGateForCurrentFunction': 'Full Gateへ進む',
     'unitTestRunner.analyzeCurrentFunction': '現在関数を解析',
     'unitTestRunner.analyzeSelectedFunction': '選択関数を解析',
