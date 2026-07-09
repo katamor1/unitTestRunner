@@ -57,9 +57,12 @@ class QuickSummaryGenerationTests(unittest.TestCase):
             self.assertTrue(quick_json.exists())
             self.assertTrue(quick_md.exists())
             summary = json.loads(quick_json.read_text(encoding="utf-8"))
+            stdout_payload = json.loads(completed.stdout)
             self.assertEqual("Control_Update", summary["target"]["function"])
             self.assertEqual("design", summary["phase"])
             self.assertEqual(str(quick_json), summary["reports"]["quick_summary_json"])
+            self.assertEqual(str(quick_json), stdout_payload["reports"]["quick_summary_json"])
+            self.assertEqual(str(quick_md), stdout_payload["reports"]["quick_summary_md"])
             self.assertIn("# Quick Check Summary", quick_md.read_text(encoding="utf-8"))
 
 
