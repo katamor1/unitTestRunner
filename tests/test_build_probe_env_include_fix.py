@@ -9,6 +9,7 @@ SRC_ROOT = REPO_ROOT / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
 from unit_test_runner.build.build_workspace_generator import generate_build_workspace
+from unit_test_runner.c_analyzer.source_digest import build_source_digest
 from unit_test_runner.harness.harness_skeleton_generator import generate_harness_skeleton
 from unit_test_runner.vc6.dsp_options import parse_build_settings, tokenize_compiler_options
 
@@ -83,6 +84,57 @@ class BuildProbeEnvIncludeFixTests(unittest.TestCase):
             self.assertTrue(placeholder.exists())
             self.assertIn("gbl_com * g_com = {0};", placeholder.read_text(encoding="cp932"))
             self.assertIn("generated/stubs/utr_extern_globals.c", {unit.source_file.as_posix() for unit in report.compile_units})
+
+    def test_function_level_source_removal_uses_byte_offsets_for_cp932_crlf_sources(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = Path(temp_dir) / "project"
+            shared = project / "shared"
+            source = shared / "shared.c"
+            shared.mkdir(parents=True)
+            (shared / "shared0.h").write_text("typedef short DWORD;\n", encoding="ascii")
+            (shared / "shared2.h").write_text("typedef struct gbl_input_tag { int value; } gbl_input;\n", encoding="ascii")
+            source.write_bytes(
+                (
+                    "//テスト\r\n"
+                    "#include \"shared0.h\"\r\n"
+                    "#include \"shared2.h\"\r\n"
+                    "\r\n"
+                    "int g_count = 0;\r\n"
+                    "\r\n"
+                    "int Shared(void)\r\n"
+                    "{\r\n"
+                    "    g_count++;\r\n"
+                    "    return g_count;\r\n"
+                    "}\r\n"
+                    "\r\n"
+                    "int Shared2(void)\r\n"
+                    "{\r\n"
+                    "    g_count++;\r\n"
+                    "    return g_count;\r\n"
+                    "}\r\n"
+                    "\r\n"
+                    "DWORD Shared3(gbl_input* prm)\r\n"
+                    "{\r\n"
+                    "    g_count++;\r\n"
+                    "    prm->value = g_count;\r\n"
+                    "    return g_count;\r\n"
+                    "}\r\n"
+                ).encode("cp932")
+            )
+            out_dir = Path(temp_dir) / "out"
+            build_context = {"workspace_root": str(project), "include_dirs": ["shared"], "defines": [], "compiler_options": []}
+            source_digest = build_source_digest(source, build_context).to_dict()
+            harness_report = {"function": {"name": "Shared3"}, "source": {"path": str(source)}, "output_root": str(out_dir), "generated_files": []}
+
+            generate_build_workspace(build_context, source_digest, harness_report, out_dir, run_probe=False, dry_run=True)
+
+            isolated = (out_dir / "extracted" / "shared" / "shared.c").read_text(encoding="cp932")
+            normalized = isolated.replace("\r\n", "\n").replace("\r", "\n")
+            self.assertIn("DWORD Shared3(gbl_input* prm)", isolated)
+            self.assertNotIn("int Shared(void)", isolated)
+            self.assertNotIn("int Shared2(void)", isolated)
+            self.assertNotIn("\n;\n}", normalized)
+            self.assertEqual(isolated.count("{"), isolated.count("}"))
 
     def test_target_invocation_includes_target_source_headers_for_typedef_return(self):
         with tempfile.TemporaryDirectory() as temp_dir:
