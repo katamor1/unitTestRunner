@@ -138,6 +138,58 @@ class StateSetupReflectorTests(unittest.TestCase):
             self.assertEqual("g_com", setup["variable_name"])
             self.assertEqual("g_com->ptr->...", setup["inferred_from"])
 
+    def test_skips_fixture_include_already_provided_by_target_invocation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            test_dir = workspace / "generated" / "tests"
+            harness_dir = workspace / "generated" / "harness"
+            test_dir.mkdir(parents=True)
+            harness_dir.mkdir(parents=True)
+            source = test_dir / "test_Shared3.c"
+            source.write_text(
+                "#include \"utr_assert.h\"\n"
+                "#include \"target_invocation.h\"\n"
+                "\n"
+                "void Test_TC_Shared3_001(void)\n"
+                "{\n"
+                "    int actual_return;\n"
+                "    actual_return = Target_Invoke_Shared3();\n"
+                "}\n",
+                encoding="cp932",
+            )
+            (harness_dir / "target_invocation.h").write_text(
+                "#ifndef TARGET_INVOCATION_H_\n"
+                "#define TARGET_INVOCATION_H_\n"
+                "#include \"shared2.h\"\n"
+                "#endif\n",
+                encoding="cp932",
+            )
+            design = {
+                "function": {"name": "Shared3"},
+                "test_cases": [
+                    {
+                        "test_case_id": "TC_Shared3_001",
+                        "state_setups": [
+                            {
+                                "variable_name": "g_com",
+                                "value_expression": "&fixture_g_com",
+                                "fixture_includes": ["../../extracted/shared/shared2.h"],
+                                "fixture_declarations": ["static gbl1 fixture_g_com_ptr", "static gbl_com fixture_g_com"],
+                                "setup_statements": ["fixture_g_com.ptr = &fixture_g_com_ptr"],
+                            }
+                        ],
+                    }
+                ],
+            }
+
+            reflect_state_setups(workspace, design, "Shared3")
+
+            text = source.read_text(encoding="cp932")
+            self.assertIn('#include "target_invocation.h"', text)
+            self.assertNotIn('#include "../../extracted/shared/shared2.h"', text)
+            self.assertIn("    static gbl1 fixture_g_com_ptr;", text)
+            self.assertIn("    g_com = &fixture_g_com;", text)
+
 
 if __name__ == "__main__":
     unittest.main()
