@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from .exit_codes import EXIT_NOT_IMPLEMENTED
@@ -75,4 +76,30 @@ def _reports_from_data(data: dict[str, Any]) -> dict[str, Any] | None:
         nested = review.get("reports")
         if isinstance(nested, dict):
             return nested
+    dossier_reports = _reports_from_dossier_path(data.get("dossier"))
+    if dossier_reports is not None:
+        return dossier_reports
     return None
+
+
+def _reports_from_dossier_path(value: Any) -> dict[str, str] | None:
+    if not isinstance(value, str) or not value:
+        return None
+    reports = Path(value).parent
+    return {
+        "function_dossier_json": str(reports / "function_dossier.json"),
+        "function_dossier_md": str(reports / "function_dossier.md"),
+        "quick_summary_json": str(reports / "quick_summary.json"),
+        "quick_summary_md": str(reports / "quick_summary.md"),
+        "test_case_design_json": str(reports / "test_case_design.json"),
+        "test_case_design_md": str(reports / "test_case_design.md"),
+        "test_case_design_csv": str(reports / "test_case_design.csv"),
+        "function_signature_json": str(reports / "function_signature.json"),
+        "global_access_json": str(reports / "global_access.json"),
+        "call_report_json": str(reports / "call_report.json"),
+        "harness_skeleton_report_json": str(reports / "harness_skeleton_report.json"),
+        "harness_skeleton_report_md": str(reports / "harness_skeleton_report.md"),
+        "build_probe_report_md": str(reports / "build_probe_report.md"),
+        "test_execution_report_md": str(reports / "test_execution_report.md"),
+        "evidence_package_md": str(reports / "evidence_package.md"),
+    }
