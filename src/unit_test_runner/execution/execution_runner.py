@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .execution_models import ExecutableInfo, ExecutionCommand, ExecutionCommandResult, TestResultSummary
+from .execution_models import ExecutableInfo, ExecutionCommand, ExecutionCommandResult, TestCaseExecutionResult, TestExecutionWarning, TestResultSummary
 from .runner_output_parser import parse_runner_output
 
 
@@ -56,6 +56,92 @@ def run_test_executable(workspace: Path | str, executable: ExecutableInfo | Path
         parsed = parse_runner_output(stdout + stderr, exit_code=None, timed_out=True)
         result = ExecutionCommandResult(None, started.isoformat(), datetime.now(timezone.utc).isoformat(), int((time.monotonic() - start) * 1000), Path("logs/test_stdout.log"), Path("logs/test_stderr.log"), Path("logs/test_execution.log"), True)
         return result, parsed.summary, parsed.case_results, "timeout"
+
+
+def run_test_executable_cases(workspace: Path | str, executable: ExecutableInfo | Path | str, test_case_ids: list[str], timeout_seconds: int = 60):
+    workspace = Path(workspace).resolve()
+    executable_path = executable.path if isinstance(executable, ExecutableInfo) else Path(executable)
+    started = datetime.now(timezone.utc)
+    start = time.monotonic()
+    stdout_log = workspace / "logs" / "test_stdout.log"
+    stderr_log = workspace / "logs" / "test_stderr.log"
+    combined_log = workspace / "logs" / "test_execution.log"
+    command_path = executable_path if executable_path.is_absolute() else workspace / executable_path
+    stdout_parts: list[str] = []
+    stderr_parts: list[str] = []
+    case_results: list[TestCaseExecutionResult] = []
+    exit_code: int | None = 0
+    timed_out = False
+    for test_case_id in test_case_ids:
+        case_stdout = ""
+        case_stderr = ""
+        try:
+            completed = subprocess.run([str(command_path), "--case", test_case_id], cwd=workspace, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout_seconds, check=False)
+            case_stdout = completed.stdout
+            case_stderr = completed.stderr
+            if completed.returncode != 0 and exit_code == 0:
+                exit_code = completed.returncode
+            parsed = parse_runner_output(case_stdout + case_stderr, exit_code=completed.returncode, timed_out=False)
+            if parsed.case_results:
+                case_results.extend(parsed.case_results)
+            else:
+                case_results.append(_synthetic_case_result(test_case_id, completed.returncode, False))
+        except subprocess.TimeoutExpired as exc:
+            timed_out = True
+            exit_code = None
+            case_stdout = exc.stdout or ""
+            case_stderr = exc.stderr or ""
+            parsed = parse_runner_output(case_stdout + case_stderr, exit_code=None, timed_out=True)
+            if parsed.case_results:
+                case_results.extend(parsed.case_results)
+            else:
+                case_results.append(_synthetic_case_result(test_case_id, None, True))
+        stdout_parts.extend([f"UTR CASE PROCESS {test_case_id}\n", case_stdout])
+        stderr_parts.extend([case_stderr])
+    duration = int((time.monotonic() - start) * 1000)
+    stdout_log.write_text("".join(stdout_parts), encoding="utf-8")
+    stderr_log.write_text("".join(stderr_parts), encoding="utf-8")
+    combined_log.write_text("".join(stdout_parts) + "".join(stderr_parts), encoding="utf-8")
+    summary = _summary_from_case_results(case_results)
+    status = _status_from_case_results(summary, timed_out)
+    result = ExecutionCommandResult(exit_code, started.isoformat(), datetime.now(timezone.utc).isoformat(), duration, Path("logs/test_stdout.log"), Path("logs/test_stderr.log"), Path("logs/test_execution.log"), timed_out)
+    return result, summary, case_results, status
+
+
+def _synthetic_case_result(test_case_id: str, exit_code: int | None, timed_out: bool) -> TestCaseExecutionResult:
+    if timed_out:
+        evidence = "個別ケース実行がタイムアウトしました。"
+        return TestCaseExecutionResult(test_case_id, None, "timeout", True, evidence=evidence, warnings=[TestExecutionWarning("runner_case_timeout", evidence, related_test_case_id=test_case_id)])
+    if exit_code not in {None, 0}:
+        evidence = f"個別ケース実行が非0終了しました。exit_code={exit_code}。"
+        return TestCaseExecutionResult(test_case_id, None, "crashed", True, evidence=evidence, warnings=[TestExecutionWarning("runner_case_incomplete", evidence, related_test_case_id=test_case_id)])
+    evidence = "個別ケース実行は終了しましたが、runner出力からケース結果を取得できませんでした。"
+    return TestCaseExecutionResult(test_case_id, None, "inconclusive", False, evidence=evidence, warnings=[TestExecutionWarning("runner_output_missing", evidence, related_test_case_id=test_case_id)])
+
+
+def _summary_from_case_results(case_results: list[TestCaseExecutionResult]) -> TestResultSummary:
+    passed = len([case for case in case_results if case.status == "passed"])
+    failed = len([case for case in case_results if case.status == "failed"])
+    skipped = len([case for case in case_results if case.status == "skipped"])
+    inconclusive = len([case for case in case_results if case.status in {"inconclusive", "not_found_in_output"}])
+    crashed = len([case for case in case_results if case.status in {"crashed", "timeout"}])
+    not_run = len([case for case in case_results if case.status == "not_run"])
+    started = len([case for case in case_results if case.status not in {"not_run", "not_found_in_output"}])
+    completed = passed + failed + skipped + inconclusive
+    confidence = "low" if crashed or not_run else "high"
+    return TestResultSummary(len(case_results), passed, failed, skipped, inconclusive, 0, confidence, crashed, not_run, started, completed)
+
+
+def _status_from_case_results(summary: TestResultSummary, timed_out: bool) -> str:
+    if timed_out:
+        return "timeout"
+    if summary.crashed > 0 or summary.failed > 0:
+        return "failed"
+    if summary.inconclusive > 0 or summary.not_run > 0:
+        return "inconclusive"
+    if summary.total > 0 and summary.passed == summary.total:
+        return "passed"
+    return "not_run"
 
 
 def environment_summary() -> dict[str, str]:

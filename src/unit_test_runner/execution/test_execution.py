@@ -16,7 +16,7 @@ from .execution_models import (
 )
 from .evidence_manifest import build_evidence_manifest, write_evidence_package
 from .executable_resolver import resolve_executable
-from .execution_runner import build_execution_command, run_test_executable
+from .execution_runner import build_execution_command, run_test_executable, run_test_executable_cases
 from .precondition_validator import validate_execution_preconditions
 from .test_result_writer import write_test_execution_reports
 
@@ -67,7 +67,11 @@ def prepare_test_execution_evidence(
             review_items.extend(precondition_review_items)
         else:
             executed = True
-            command_result, parsed_summary, runner_case_results, status = run_test_executable(workspace, executable_info, timeout_seconds)
+            test_case_ids = [case.test_case_id for case in design_case_results if case.test_case_id]
+            if test_case_ids:
+                command_result, parsed_summary, runner_case_results, status = run_test_executable_cases(workspace, executable_info, test_case_ids, timeout_seconds)
+            else:
+                command_result, parsed_summary, runner_case_results, status = run_test_executable(workspace, executable_info, timeout_seconds)
             if parsed_summary.total == 0 and design_case_results:
                 warnings.append(
                     TestExecutionWarning(
