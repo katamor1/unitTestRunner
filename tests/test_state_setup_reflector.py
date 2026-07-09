@@ -97,7 +97,7 @@ class StateSetupReflectorTests(unittest.TestCase):
             (extracted / "shared2.h").write_text(
                 "typedef struct _gbl1 { int test; } gbl1;\n"
                 "typedef struct _gbl_com { gbl1* ptr; } gbl_com;\n"
-                "extern gbl_com *g_com;\n",
+                "EXTERN gbl_com *g_com;\n",
                 encoding="cp932",
             )
             test_source = workspace / "generated" / "tests" / "test_Shared3.c"
