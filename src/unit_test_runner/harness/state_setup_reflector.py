@@ -222,6 +222,8 @@ def _ensure_fixture_includes(text: str, cases: list[dict[str, Any]], output_root
                 include_lines.append(include_text)
     if not include_lines:
         return text
+    fixture_basenames = {_include_basename(line) for line in include_lines}
+    text = _remove_redundant_fixture_include_lines(text, fixture_basenames, output_root)
     existing = set(re.findall(r'^#include\s+[^\n]+', text, flags=re.MULTILINE))
     provided_basenames = _provided_include_basenames(text, output_root)
     additions = [line for line in include_lines if line not in existing and _include_basename(line) not in provided_basenames]
@@ -232,6 +234,29 @@ def _ensure_fixture_includes(text: str, cases: list[dict[str, Any]], output_root
         insert_at = include_matches[-1].end()
         return text[:insert_at] + "".join(line + "\n" for line in additions) + text[insert_at:]
     return "".join(line + "\n" for line in additions) + "\n" + text
+
+
+def _remove_redundant_fixture_include_lines(text: str, fixture_basenames: set[str], output_root: Path) -> str:
+    if not fixture_basenames:
+        return text
+    text_without_fixture_includes = _remove_include_lines_by_basename(text, fixture_basenames)
+    provided_elsewhere = _provided_include_basenames(text_without_fixture_includes, output_root)
+    redundant_basenames = fixture_basenames & provided_elsewhere
+    if not redundant_basenames:
+        return text
+    return _remove_include_lines_by_basename(text, redundant_basenames)
+
+
+def _remove_include_lines_by_basename(text: str, basenames: set[str]) -> str:
+    if not basenames:
+        return text
+    result: list[str] = []
+    for line in text.splitlines(keepends=True):
+        match = _INCLUDE_TARGET_RE.match(line)
+        if match and Path(match.group(1)).name in basenames:
+            continue
+        result.append(line)
+    return "".join(result)
 
 
 def _provided_include_basenames(text: str, output_root: Path) -> set[str]:
