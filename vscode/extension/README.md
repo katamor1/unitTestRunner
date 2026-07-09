@@ -47,7 +47,17 @@ Quick Check 用の主な設定:
 
 ## Workflowパネル
 
-パネルは上から下へ工程順に表示します。現在実行すべき工程は `現在の推奨` として強調されます。
+Workflowパネルは既定で簡易表示を開きます。簡易表示では、現在の対象関数、出力workspace、現在の推奨工程、完了数、よく使う操作だけを表示します。
+
+簡易表示から実行できる主な操作:
+
+- `Quick Check`
+- `Quick Summaryを開く`
+- `Full Gateへ進む`
+- `dossierを開く`
+- `出力workspaceを開く`
+
+正式レビューや証跡確認で全工程を見たい場合は、パネル上部の `従来`、または簡易表示内の `従来パネルを表示` で従来の詳細ワークフロー表示へ切り替えます。詳細表示では、上から下へ工程順に表示し、現在実行すべき工程を `現在の推奨` として強調します。
 
 パネルからレポートを開いた場合、対象ファイルを保存すると次工程へ進みます。編集不要の場合や保存検知できない場合は、`保存済みとして確定` を押します。
 
@@ -81,7 +91,7 @@ Quick Check 用の主な設定:
 |---|---|
 | Workflowパネルが表示されない | Activity Bar の `Unit Test Runner` を開き、拡張が有効か確認します。 |
 | ビューのデータ提供者が未登録と表示される | VSIX更新直後の再読み込み不足の可能性があります。`Developer: Reload Window` またはVS Code再起動を行います。 |
-| Quick Check summary が開かない | `UnitTestRunner: Open Quick Summary` を実行し、直近workspaceの `reports/quick_summary.md` が生成されているか確認します。 |
+| 簡易表示から戻れない | パネル上部の `従来` / `簡易` ボタンで表示を切り替えます。 |
 | Quick Check summary が開かない | `UnitTestRunner: Open Quick Summary` を実行し、直近workspaceの `reports/quick_summary.md` が生成されているか確認します。 |
 | 設定確認から進まない | `.dsw` と `outputRoot` が未設定でないか確認します。 |
 | 生成物が本番ツリー内に出る | `outputRoot` / `quickOutputRoot` を `sourceRoot` の外側へ変更します。 |
