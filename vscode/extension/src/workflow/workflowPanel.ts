@@ -36,6 +36,15 @@ interface SettingsActionMessage {
 }
 
 type WorkflowMessage = WorkflowActionMessage | SettingsActionMessage;
+type WorkflowStepViews = ReturnType<typeof buildWorkflowStepViews>;
+
+export const SIMPLE_WORKFLOW_ACTIONS: WorkflowAction[] = [
+  { id: 'quickCheckCurrent', kind: 'command', label: 'Quick Check', commandId: 'unitTestRunner.quickCheckCurrentFunction', primary: true },
+  { id: 'openQuickSummary', kind: 'command', label: 'Quick Summaryを開く', commandId: 'unitTestRunner.openQuickSummary' },
+  { id: 'runFullGate', kind: 'command', label: 'Full Gateへ進む', commandId: 'unitTestRunner.runFullGateForCurrentFunction', danger: true },
+  { id: 'openDossier', kind: 'openReport', label: 'dossierを開く', reportKey: 'functionDossierMd' },
+  { id: 'openOutputWorkspace', kind: 'openOutputWorkspace', label: '出力workspaceを開く' },
+];
 
 export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
   static readonly viewType = 'unitTestRunner.workflow';
@@ -146,13 +155,16 @@ export function resolveWorkflowReports(state: WorkflowState): Partial<ReportPath
   };
 }
 
-function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, settings: SettingsViewModel, steps: ReturnType<typeof buildWorkflowStepViews>, optionalActions: WorkflowAction[], runningLabel?: string): string {
+export function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, settings: SettingsViewModel, steps: WorkflowStepViews, optionalActions: WorkflowAction[], runningLabel?: string): string {
+  void webview;
   const nonce = createNonce();
   const functionName = state.functionName || '対象関数未選択';
   const workspace = state.outputWorkspace || state.reports?.workspace || '出力workspace未選択';
   const awaiting = state.awaitingSave ? `<div class="notice">保存待ち: ${escapeHtml(state.awaitingSave.filePath)}</div>` : '';
   const error = state.lastError ? `<div class="error">直近エラー: ${escapeHtml(state.lastError)}</div>` : '';
   const running = runningLabel ? `<div class="busy" role="status">実行中: ${escapeHtml(runningLabel)}<br><span>大きいプロジェクトでは時間がかかります。完了までボタンは無効です。</span></div>` : '';
+  const fullPanel = renderFullWorkflowPanel(functionName, workspace, steps, optionalActions);
+  const simplePanel = renderSimpleWorkflowPanel(functionName, workspace, steps);
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -190,13 +202,7 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, setti
     .settings-summary::-webkit-details-marker {
       display: none;
     }
-    .settings h2 {
-      font-size: 12px;
-      margin: 0;
-      text-transform: uppercase;
-      color: var(--vscode-descriptionForeground);
-    }
-    .optional h2 {
+    .settings h2, .optional h2, .simple-card h2 {
       font-size: 12px;
       margin: 0 0 8px 0;
       text-transform: uppercase;
@@ -248,10 +254,12 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, setti
       font-size: 11px;
       white-space: nowrap;
     }
-    .setting-value {
+    .setting-value, .path, .simple-meta {
       color: var(--vscode-descriptionForeground);
-      margin-top: 4px;
       overflow-wrap: anywhere;
+    }
+    .setting-value {
+      margin-top: 4px;
     }
     .setting-message {
       color: var(--vscode-inputValidation-warningForeground);
@@ -261,10 +269,6 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, setti
     .name {
       font-weight: 700;
       margin-bottom: 4px;
-    }
-    .path {
-      color: var(--vscode-descriptionForeground);
-      overflow-wrap: anywhere;
     }
     .notice, .error, .busy {
       border: 1px solid var(--vscode-inputValidation-warningBorder);
@@ -287,6 +291,44 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, setti
     .busy span {
       color: var(--vscode-descriptionForeground);
       font-weight: 400;
+    }
+    .view-switch {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin: 0 0 10px 0;
+    }
+    .panel-view.hidden {
+      display: none;
+    }
+    .simple-card {
+      border-left: 3px solid var(--vscode-focusBorder);
+      background: var(--vscode-editorWidget-background);
+      margin: 0 0 10px 0;
+      padding: 10px;
+    }
+    .simple-card h3 {
+      font-size: 14px;
+      line-height: 1.35;
+      margin: 0 0 6px 0;
+    }
+    .simple-counts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin: 8px 0;
+    }
+    .simple-count {
+      border: 1px solid var(--vscode-editorGroup-border);
+      padding: 8px;
+    }
+    .simple-count strong {
+      display: block;
+      font-size: 16px;
+    }
+    .simple-count span {
+      color: var(--vscode-descriptionForeground);
+      font-size: 11px;
     }
     .step {
       border-left: 3px solid var(--vscode-editorGroup-border);
@@ -354,11 +396,11 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, setti
       cursor: wait;
       opacity: 0.65;
     }
-    button.primary {
+    button.primary, button.active-mode {
       background: var(--vscode-button-background);
       color: var(--vscode-button-foreground);
     }
-    button.primary:hover {
+    button.primary:hover, button.active-mode:hover {
       background: var(--vscode-button-hoverBackground);
     }
     button.danger {
@@ -371,26 +413,34 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, setti
     }
   </style>
 </head>
-<body>
+<body data-default-mode="simple">
   ${renderSettings(settings)}
-  <div class="summary">
-    <div class="name">${escapeHtml(functionName)}</div>
-    <div class="path">${escapeHtml(workspace)}</div>
+  <div class="view-switch" role="group" aria-label="表示切替">
+    <button type="button" data-view-mode="simple" class="active-mode">簡易</button>
+    <button type="button" data-view-mode="full">従来</button>
   </div>
   ${awaiting}
   ${error}
   ${running}
-  ${steps.map(renderStep).join('')}
-  <div class="optional">
-    <h2>任意操作</h2>
-    <div class="actions">${optionalActions.map(renderAction).join('')}</div>
-  </div>
+  <section id="simplePanel" class="panel-view simple-panel">${simplePanel}</section>
+  <section id="fullPanel" class="panel-view full-panel hidden">${fullPanel}</section>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const initialRunningLabel = ${JSON.stringify(runningLabel ?? '')};
+    const persistedState = vscode.getState() || {};
+    function setPanelMode(mode) {
+      const safeMode = mode === 'full' ? 'full' : 'simple';
+      document.getElementById('simplePanel')?.classList.toggle('hidden', safeMode !== 'simple');
+      document.getElementById('fullPanel')?.classList.toggle('hidden', safeMode !== 'full');
+      document.querySelectorAll('button[data-view-mode]').forEach((button) => {
+        button.classList.toggle('active-mode', button.dataset.viewMode === safeMode);
+      });
+      vscode.setState({ ...persistedState, panelMode: safeMode });
+    }
+    setPanelMode(persistedState.panelMode || 'simple');
     function disableButtons(activeButton, label) {
       const runningText = label || '処理';
-      document.querySelectorAll('button').forEach((button) => {
+      document.querySelectorAll('button[data-kind], button[data-setting-kind]').forEach((button) => {
         button.disabled = true;
         button.setAttribute('aria-disabled', 'true');
       });
@@ -401,6 +451,9 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, setti
     if (initialRunningLabel) {
       disableButtons(null, initialRunningLabel);
     }
+    document.querySelectorAll('button[data-view-mode]').forEach((button) => {
+      button.addEventListener('click', () => setPanelMode(button.dataset.viewMode));
+    });
     document.querySelectorAll('button[data-kind]').forEach((button) => {
       button.addEventListener('click', () => {
         const label = button.dataset.label || button.textContent || '処理';
@@ -432,7 +485,46 @@ function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, setti
 </html>`;
 }
 
-function renderStep(step: ReturnType<typeof buildWorkflowStepViews>[number]): string {
+function renderSimpleWorkflowPanel(functionName: string, workspace: string, steps: WorkflowStepViews): string {
+  const current = steps.find((step) => step.status === 'current') ?? steps[0];
+  const doneCount = steps.filter((step) => step.status === 'done').length;
+  return `<div class="summary">
+  <div class="name">${escapeHtml(functionName)}</div>
+  <div class="path">${escapeHtml(workspace)}</div>
+</div>
+<div class="simple-card">
+  <h2>現在の状態</h2>
+  <h3>${escapeHtml(current?.title ?? '設定確認')}</h3>
+  <p>${escapeHtml(current?.requiredAction ?? '設定を確認してください。')}</p>
+  <div class="simple-counts">
+    <div class="simple-count"><strong>${doneCount}</strong><span>完了工程</span></div>
+    <div class="simple-count"><strong>${steps.length}</strong><span>全工程</span></div>
+  </div>
+</div>
+<div class="simple-card">
+  <h2>よく使う操作</h2>
+  <div class="actions">${SIMPLE_WORKFLOW_ACTIONS.map(renderAction).join('')}</div>
+</div>
+<div class="simple-card">
+  <h2>表示切替</h2>
+  <p class="simple-meta">正式レビューや証跡確認の全工程を見る場合は従来表示に切り替えます。</p>
+  <button type="button" data-view-mode="full">従来パネルを表示</button>
+</div>`;
+}
+
+function renderFullWorkflowPanel(functionName: string, workspace: string, steps: WorkflowStepViews, optionalActions: WorkflowAction[]): string {
+  return `<div class="summary">
+  <div class="name">${escapeHtml(functionName)}</div>
+  <div class="path">${escapeHtml(workspace)}</div>
+</div>
+${steps.map(renderStep).join('')}
+<div class="optional">
+  <h2>任意操作</h2>
+  <div class="actions">${optionalActions.map(renderAction).join('')}</div>
+</div>`;
+}
+
+function renderStep(step: WorkflowStepViews[number]): string {
   const label = step.status === 'done' ? '完了' : step.status === 'current' ? '現在の推奨' : '未実施';
   return `<section class="step ${step.status}">
   <span class="status">${label}</span>
@@ -482,6 +574,10 @@ function fallbackWorkflowActionLabel(message: WorkflowMessage): string {
 
 function commandLabel(commandId?: string): string {
   const labels: Record<string, string> = {
+    'unitTestRunner.quickCheckCurrentFunction': 'Quick Check',
+    'unitTestRunner.quickCheckSelectedFunction': 'Quick Check',
+    'unitTestRunner.openQuickSummary': 'Quick Summaryを開く',
+    'unitTestRunner.runFullGateForCurrentFunction': 'Full Gateへ進む',
     'unitTestRunner.analyzeCurrentFunction': '現在関数を解析',
     'unitTestRunner.analyzeSelectedFunction': '選択関数を解析',
     'unitTestRunner.reanalyzeCurrentFunction': '現在関数を再解析',
