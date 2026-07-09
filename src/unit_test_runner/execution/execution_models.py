@@ -146,6 +146,10 @@ class TestResultSummary:
     inconclusive: int = 0
     assertion_failures: int = 0
     parser_confidence: str = "low"
+    crashed: int = 0
+    not_run: int = 0
+    started: int = 0
+    completed: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -156,6 +160,10 @@ class TestResultSummary:
             "inconclusive": self.inconclusive,
             "assertion_failures": self.assertion_failures,
             "parser_confidence": self.parser_confidence,
+            "crashed": self.crashed,
+            "not_run": self.not_run,
+            "started": self.started,
+            "completed": self.completed,
         }
 
 
