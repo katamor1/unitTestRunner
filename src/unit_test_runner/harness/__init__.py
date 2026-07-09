@@ -6,11 +6,13 @@ from typing import Any
 from .c90_writer import sha256_file
 from .harness_report_writer import write_harness_report
 from .harness_skeleton_generator import generate_harness_skeleton as _generate_harness_skeleton
+from .parameter_init_compat import apply_parameter_init_compat
 from .runner_output_enhancer import enhance_runner_output
 from .state_setup_reflector import reflect_state_setups
 from .target_invocation_compat import apply_target_invocation_compat
 
 apply_target_invocation_compat()
+apply_parameter_init_compat()
 
 
 def generate_harness_skeleton(
