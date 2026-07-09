@@ -169,6 +169,44 @@ class BuildProbeEnvIncludeFixTests(unittest.TestCase):
             self.assertNotIn('#include "shared.h"', target_source)
             self.assertIn("DWORD actual_return;", test_source)
 
+    def test_generated_tests_initialize_typedef_struct_value_parameters_as_aggregates(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "shared" / "shared.c"
+            source.parent.mkdir(parents=True)
+            source.write_text("typedef struct gbl_input_tag { int value; } gbl_input;\nDWORD Shared3(gbl_input prm) { return prm.value; }\n", encoding="ascii")
+            signature = {
+                "source": {"path": str(source)},
+                "function": {
+                    "name": "Shared3",
+                    "return_type": {"raw": "DWORD"},
+                    "parameters": [
+                        {
+                            "index": 0,
+                            "name": "prm",
+                            "type": {
+                                "raw": "gbl_input",
+                                "base_type": "gbl_input",
+                                "pointer_level": 0,
+                                "is_array": False,
+                            },
+                        }
+                    ],
+                },
+            }
+            design = {
+                "function": {"name": "Shared3"},
+                "test_cases": [
+                    {"test_case_id": "TC_Shared3_001", "input_assignments": [], "stub_setups": [], "expected_observations": []},
+                    {"test_case_id": "TC_Shared3_002", "input_assignments": [], "stub_setups": [], "expected_observations": []},
+                ],
+            }
+
+            generate_harness_skeleton(signature, {"global_accesses": [], "file_scope_declarations": []}, {"stub_candidates": []}, design, Path(temp_dir))
+
+            test_source = (Path(temp_dir) / "generated" / "tests" / "test_Shared3.c").read_text(encoding="cp932")
+            self.assertIn("gbl_input prm = {0};", test_source)
+            self.assertNotIn("prm = TBD_VALID_INT_VALUE;", test_source)
+
 
 if __name__ == "__main__":
     unittest.main()
