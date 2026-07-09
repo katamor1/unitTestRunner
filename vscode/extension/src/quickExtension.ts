@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
@@ -40,6 +41,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('unitTestRunner.quickCheckCurrentFunction', () => runQuickCommand(() => quickCheckActiveFunction(context, output))),
     vscode.commands.registerCommand('unitTestRunner.quickCheckSelectedFunction', () => runQuickCommand(() => quickCheckActiveFunction(context, output))),
     vscode.commands.registerCommand('unitTestRunner.openQuickSummary', () => runQuickCommand(() => openQuickSummary(context))),
+    vscode.commands.registerCommand('unitTestRunner.openGeneratedTestSource', () => runQuickCommand(() => openGeneratedTestSource(context))),
     vscode.commands.registerCommand('unitTestRunner.runFullGateForCurrentFunction', () => runQuickCommand(() => runFullGateForCurrentFunction(context, output))),
   );
 }
@@ -63,10 +65,11 @@ async function quickCheckActiveFunction(context: vscode.ExtensionContext, output
   const targetBase = await activeFunctionTarget(settings);
   const outputWorkspace = buildQuickOutputWorkspace(settings, targetBase);
   const target = { ...targetBase, outputWorkspace };
-  const invocation = buildQuickCheckInvocation(settings, target);
+  const quickSettings: AdapterSettings = { ...settings, quickProfile: 'build-dry-run' };
+  const invocation = buildQuickCheckInvocation(quickSettings, target);
   const reports = await executeInvocation(context, output, invocation, outputWorkspace);
   await recordWorkflowSuccess(context, {
-    kind: 'analyze',
+    kind: 'buildProbeDryRun',
     outputWorkspace,
     functionName: target.functionName,
     reports,
@@ -164,6 +167,35 @@ async function openQuickSummary(context: vscode.ExtensionContext): Promise<void>
     throw new Error('記録済みのQuick Check出力workspaceがありません。');
   }
   await openReport(resolveReportPaths(workspace).quickSummaryMd ?? path.join(workspace, 'reports', 'quick_summary.md'));
+}
+
+async function openGeneratedTestSource(context: vscode.ExtensionContext): Promise<void> {
+  const state = readWorkflowState(context);
+  const workspace = state.outputWorkspace || state.reports?.workspace || context.globalState.get<string>(LAST_WORKSPACE_KEY);
+  if (!workspace) {
+    throw new Error('記録済みの出力workspaceがありません。先にQuick Checkを実行してください。');
+  }
+  const functionName = state.functionName;
+  const candidate = functionName ? path.join(workspace, 'generated', 'tests', `test_${sanitizeIdentifier(functionName)}.c`) : undefined;
+  const testSource = candidate && fs.existsSync(candidate) ? candidate : firstGeneratedTestSource(workspace);
+  if (!testSource) {
+    throw new Error(`生成テストソースが見つかりません: ${path.join(workspace, 'generated', 'tests')}`);
+  }
+  await openReport(testSource);
+}
+
+function firstGeneratedTestSource(workspace: string): string | undefined {
+  const testsDir = path.join(workspace, 'generated', 'tests');
+  if (!fs.existsSync(testsDir)) {
+    return undefined;
+  }
+  const entries = fs.readdirSync(testsDir).filter((entry) => /^test_.*\.c$/i.test(entry)).sort();
+  return entries[0] ? path.join(testsDir, entries[0]) : undefined;
+}
+
+function sanitizeIdentifier(value: string): string {
+  const sanitized = value.replace(/\W+/g, '_').replace(/^_+|_+$/g, '');
+  return sanitized || 'function';
 }
 
 function readRawConfig(): RawSettings {
