@@ -138,7 +138,7 @@ class StateSetupReflectorTests(unittest.TestCase):
             self.assertEqual("g_com", setup["variable_name"])
             self.assertEqual("g_com->ptr->...", setup["inferred_from"])
 
-    def test_skips_fixture_include_already_provided_by_target_invocation(self):
+    def test_skips_and_removes_fixture_include_already_provided_by_target_invocation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             test_dir = workspace / "generated" / "tests"
@@ -149,6 +149,7 @@ class StateSetupReflectorTests(unittest.TestCase):
             source.write_text(
                 "#include \"utr_assert.h\"\n"
                 "#include \"target_invocation.h\"\n"
+                "#include \"../../extracted/shared/shared2.h\"\n"
                 "\n"
                 "void Test_TC_Shared3_001(void)\n"
                 "{\n"
