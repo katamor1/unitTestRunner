@@ -24,7 +24,7 @@ def build_evidence_manifest(
         test_execution_status=report.status,
         total_tests=report.parsed_result.total if report.parsed_result else 0,
         passed_tests=report.parsed_result.passed if report.parsed_result else 0,
-        failed_tests=report.parsed_result.failed if report.parsed_result else 0,
+        failed_tests=(report.parsed_result.failed + report.parsed_result.crashed) if report.parsed_result else 0,
         inconclusive_tests=report.parsed_result.inconclusive if report.parsed_result else 0,
         unresolved_review_count=len(report.unresolved_review_items),
         ready_for_review=True,
