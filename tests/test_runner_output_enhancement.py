@@ -32,6 +32,19 @@ UTR SUMMARY total=2 passed=1 failed=1 skipped=0 inconclusive=0
         self.assertEqual("passed", cases["TC_Shared3_001"].status)
         self.assertEqual("failed", cases["TC_Shared3_002"].status)
 
+    def test_parser_marks_run_without_completion_as_crashed_on_nonzero_exit(self):
+        parsed = parse_runner_output("UTR RUN TC_Shared3_001\n", exit_code=3221225477)
+
+        self.assertEqual(1, parsed.summary.total)
+        self.assertEqual(0, parsed.summary.passed)
+        self.assertEqual(1, parsed.summary.crashed)
+        self.assertEqual(1, parsed.summary.started)
+        self.assertEqual(0, parsed.summary.completed)
+        self.assertEqual("low", parsed.summary.parser_confidence)
+        self.assertEqual("crashed", parsed.case_results[0].status)
+        self.assertTrue(parsed.case_results[0].exit_related)
+        self.assertIn("exit_code=3221225477", parsed.case_results[0].evidence)
+
     def test_enhanced_runner_emits_flush_ok_failed_and_summary(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
