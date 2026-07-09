@@ -79,30 +79,90 @@ def _function_level_source_text(source: Path, source_digest: dict[str, Any], fun
     if all(item["name"] in keep for item in definitions):
         return None
     try:
-        raw = source.read_bytes()
+        text = bwg.decode_bytes_auto(source.read_bytes())
     except OSError:
         return None
-    return bwg.decode_bytes_auto(_remove_unkept_functions_from_bytes(raw, definitions, keep))
+    return _remove_unkept_functions_from_text(text, definitions, keep)
 
 
-def _remove_unkept_functions_from_bytes(source_bytes: bytes, definitions: list[dict[str, Any]], keep: set[str]) -> bytes:
-    result = source_bytes
+def _remove_unkept_functions_from_text(text: str, definitions: list[dict[str, Any]], keep: set[str]) -> str:
+    result = text
     for definition in sorted(definitions, key=lambda item: int(item["start"]), reverse=True):
         if definition["name"] in keep:
             continue
         start = int(definition["start"])
-        end = int(definition["end"])
+        end = _safe_definition_end(result, definition)
         if start < 0 or end < start or end > len(result):
             continue
         removed = result[start:end]
-        result = result[:start] + _removed_function_replacement_bytes(definition["name"], removed) + result[end:]
+        result = result[:start] + _removed_function_replacement_text(definition["name"], removed) + result[end:]
     return result
 
 
-def _removed_function_replacement_bytes(name: str, removed: bytes) -> bytes:
-    newline = b"\r\n" if b"\r\n" in removed else b"\n"
-    newline_count = removed.count(b"\n")
-    comment = f"/* unit-test-runner build probe: unused peer function {name} removed for function-level linking. */".encode("ascii")
+def _safe_definition_end(text: str, definition: dict[str, Any]) -> int:
+    start = max(0, int(definition.get("start", 0)))
+    expected_end = min(len(text), max(start, int(definition.get("end", start))))
+    if expected_end > start and text[expected_end - 1] == "}":
+        return expected_end
+    open_index = text.find("{", start, expected_end + 1)
+    if open_index == -1:
+        return expected_end
+    close_index = _matching_brace_index(text, open_index)
+    if close_index == -1:
+        return expected_end
+    return close_index + 1
+
+
+def _matching_brace_index(text: str, open_index: int) -> int:
+    depth = 0
+    index = open_index
+    state = "normal"
+    quote = ""
+    while index < len(text):
+        current = text[index]
+        nxt = text[index + 1] if index + 1 < len(text) else ""
+        if state == "normal":
+            if current == "/" and nxt == "*":
+                state = "block_comment"
+                index += 2
+                continue
+            if current == "/" and nxt == "/":
+                state = "line_comment"
+                index += 2
+                continue
+            if current in {'"', "'"}:
+                quote = current
+                state = "literal"
+                index += 1
+                continue
+            if current == "{":
+                depth += 1
+            elif current == "}":
+                depth -= 1
+                if depth == 0:
+                    return index
+        elif state == "block_comment":
+            if current == "*" and nxt == "/":
+                state = "normal"
+                index += 2
+                continue
+        elif state == "line_comment":
+            if current == "\n":
+                state = "normal"
+        elif state == "literal":
+            if current == "\\":
+                index += 2
+                continue
+            if current == quote:
+                state = "normal"
+        index += 1
+    return -1
+
+
+def _removed_function_replacement_text(name: str, removed: str) -> str:
+    newline = "\r\n" if "\r\n" in removed else "\n"
+    newline_count = removed.count("\n")
+    comment = f"/* unit-test-runner build probe: unused peer function {name} removed for function-level linking. */"
     return comment + (newline * max(1, newline_count))
 
 
