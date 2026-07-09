@@ -38,23 +38,23 @@ static int Utr_RunOneIndex(int index, int *passed, int *failed, int *skipped)
 
     if (utr_tests[index].func != 0) {{
         before = Utr_GetFailureCount();
-        printf("UTR RUN %s\n", utr_tests[index].name);
+        printf("UTR RUN %s\\n", utr_tests[index].name);
         fflush(stdout);
         utr_tests[index].func();
         after = Utr_GetFailureCount();
         if (after == before) {{
             (*passed)++;
-            printf("UTR OK %s\n", utr_tests[index].name);
+            printf("UTR OK %s\\n", utr_tests[index].name);
             fflush(stdout);
             return 0;
         }}
         (*failed)++;
-        printf("UTR FAILED %s\n", utr_tests[index].name);
+        printf("UTR FAILED %s\\n", utr_tests[index].name);
         fflush(stdout);
         return 1;
     }}
     (*skipped)++;
-    printf("UTR SKIPPED %s\n", utr_tests[index].name);
+    printf("UTR SKIPPED %s\\n", utr_tests[index].name);
     fflush(stdout);
     return 0;
 }}
@@ -75,7 +75,7 @@ void Utr_RunAllTests(void)
     for (index = 0; index < utr_test_count; index++) {{
         (void)Utr_RunOneIndex(index, &passed, &failed, &skipped);
     }}
-    printf("UTR SUMMARY total=%d passed=%d failed=%d skipped=%d inconclusive=%d\n", passed + failed + skipped + inconclusive, passed, failed, skipped, inconclusive);
+    printf("UTR SUMMARY total=%d passed=%d failed=%d skipped=%d inconclusive=%d\\n", passed + failed + skipped + inconclusive, passed, failed, skipped, inconclusive);
     fflush(stdout);
 }}
 
@@ -97,14 +97,14 @@ int Utr_RunNamedTest(const char *name)
     for (index = 0; index < utr_test_count; index++) {{
         if (strcmp(utr_tests[index].name, name) == 0) {{
             result = Utr_RunOneIndex(index, &passed, &failed, &skipped);
-            printf("UTR SUMMARY total=%d passed=%d failed=%d skipped=%d inconclusive=%d\n", passed + failed + skipped + inconclusive, passed, failed, skipped, inconclusive);
+            printf("UTR SUMMARY total=%d passed=%d failed=%d skipped=%d inconclusive=%d\\n", passed + failed + skipped + inconclusive, passed, failed, skipped, inconclusive);
             fflush(stdout);
             return result;
         }}
     }}
     skipped = 1;
-    printf("UTR SKIPPED %s\n", name);
-    printf("UTR SUMMARY total=%d passed=%d failed=%d skipped=%d inconclusive=%d\n", passed + failed + skipped + inconclusive, passed, failed, skipped, inconclusive);
+    printf("UTR SKIPPED %s\\n", name);
+    printf("UTR SUMMARY total=%d passed=%d failed=%d skipped=%d inconclusive=%d\\n", passed + failed + skipped + inconclusive, passed, failed, skipped, inconclusive);
     fflush(stdout);
     return result;
 }}
