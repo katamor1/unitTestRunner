@@ -43,8 +43,8 @@ def run_test_executable(workspace: Path | str, executable: ExecutableInfo | Path
         stdout_log.write_text(completed.stdout, encoding="utf-8")
         stderr_log.write_text(completed.stderr, encoding="utf-8")
         combined_log.write_text(completed.stdout + completed.stderr, encoding="utf-8")
-        parsed = parse_runner_output(completed.stdout + completed.stderr)
-        status = "passed" if completed.returncode == 0 and parsed.summary.failed == 0 else "failed"
+        parsed = parse_runner_output(completed.stdout + completed.stderr, exit_code=completed.returncode, timed_out=False)
+        status = "passed" if completed.returncode == 0 and parsed.summary.failed == 0 and parsed.summary.crashed == 0 else "failed"
         result = ExecutionCommandResult(completed.returncode, started.isoformat(), datetime.now(timezone.utc).isoformat(), duration, Path("logs/test_stdout.log"), Path("logs/test_stderr.log"), Path("logs/test_execution.log"), False)
         return result, parsed.summary, parsed.case_results, status
     except subprocess.TimeoutExpired as exc:
@@ -53,8 +53,9 @@ def run_test_executable(workspace: Path | str, executable: ExecutableInfo | Path
         stdout_log.write_text(stdout, encoding="utf-8")
         stderr_log.write_text(stderr, encoding="utf-8")
         combined_log.write_text(stdout + stderr, encoding="utf-8")
+        parsed = parse_runner_output(stdout + stderr, exit_code=None, timed_out=True)
         result = ExecutionCommandResult(None, started.isoformat(), datetime.now(timezone.utc).isoformat(), int((time.monotonic() - start) * 1000), Path("logs/test_stdout.log"), Path("logs/test_stderr.log"), Path("logs/test_execution.log"), True)
-        return result, TestResultSummary(parser_confidence="low"), [], "timeout"
+        return result, parsed.summary, parsed.case_results, "timeout"
 
 
 def environment_summary() -> dict[str, str]:
