@@ -85,7 +85,7 @@ class BuildProbeEnvIncludeFixTests(unittest.TestCase):
             self.assertIn("gbl_com * g_com = {0};", placeholder.read_text(encoding="cp932"))
             self.assertIn("generated/stubs/utr_extern_globals.c", {unit.source_file.as_posix() for unit in report.compile_units})
 
-    def test_function_level_source_removal_uses_byte_offsets_for_cp932_crlf_sources(self):
+    def test_function_level_source_removal_uses_character_offsets_for_cp932_crlf_sources(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             project = Path(temp_dir) / "project"
             shared = project / "shared"
