@@ -13,7 +13,7 @@ from unit_test_runner.build.build_workspace_generator import generate_build_work
 
 
 class BuildWorkspaceTransitiveHeaderTests(unittest.TestCase):
-    def test_declared_include_header_dependencies_are_copied_next_to_parent_header(self):
+    def test_declared_include_header_dependencies_are_referenced_not_copied(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             project = Path(temp_dir) / "project"
             shared = project / "shared"
@@ -58,10 +58,15 @@ class BuildWorkspaceTransitiveHeaderTests(unittest.TestCase):
                 dry_run=True,
             )
 
-            copied_paths = {item.workspace_path.as_posix() for item in report.copied_files}
-            self.assertIn("extracted/shared/shared2.h", copied_paths)
-            self.assertIn("extracted/shared/shared.h", copied_paths)
-            self.assertTrue((out_dir / "extracted" / "shared" / "shared.h").exists())
+            header_refs = {item.source_path for item in report.copied_files if item.file_kind == "target_header"}
+            self.assertIn(parent_header.resolve(), header_refs)
+            self.assertIn(transitive_header.resolve(), header_refs)
+            self.assertFalse((out_dir / "extracted" / "shared" / "shared2.h").exists())
+            self.assertFalse((out_dir / "extracted" / "shared" / "shared.h").exists())
+            include_dirs = {Path(item.raw) for item in report.include_dirs if item.source in {"referenced_header_dir", "dsp_include"}}
+            self.assertIn(shared.resolve(), include_dirs)
+            makefile = (out_dir / "build" / "Makefile").read_text(encoding="cp932")
+            self.assertIn(str(shared.resolve()).replace("/", "\\"), makefile)
             self.assertFalse(any(diagnostic.code == "missing_transitive_include" for diagnostic in report.diagnostics))
 
 
