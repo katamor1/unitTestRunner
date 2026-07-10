@@ -5,6 +5,7 @@ from pathlib import Path
 
 from unit_test_runner.harness.c90_writer import sha256_file, write_c_file
 from unit_test_runner.reports.japanese import ja_label, md_cell, md_label_cell
+from unit_test_runner.vc6.debug_workspace_response import vc6_cpp_options_path
 from unit_test_runner.vc6.debug_workspace_writer import write_vc6_debug_project
 
 from .build_models import BuildDiagnostic, BuildProbeReport, BuildWorkspaceReport, WorkspaceFile
@@ -103,6 +104,9 @@ def _write_debug_dsp(output_root: Path, report: BuildWorkspaceReport) -> None:
         report.diagnostics.append(BuildDiagnostic("vc6_debug_dsp_generation_failed", "warning", f"VC6 debug DSP generation failed: {exc}", None, None, None))
         return
     _record_build_file(output_root, report, dsp_path, "vc6_debug_dsp")
+    options_path = vc6_cpp_options_path(dsp_path)
+    if options_path.exists():
+        _record_build_file(output_root, report, options_path, "vc6_cpp_response")
 
 
 def _record_build_file(output_root: Path, report: BuildWorkspaceReport, path: Path, kind: str) -> None:
