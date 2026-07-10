@@ -77,11 +77,14 @@ class BuildWorkspaceExternGlobalsTests(unittest.TestCase):
             placeholder = out_dir / "generated" / "stubs" / "utr_extern_globals.c"
             self.assertTrue(placeholder.exists())
             text = placeholder.read_text(encoding="cp932")
-            self.assertIn('#include "../../extracted/shared/shared2.h"', text)
+            self.assertIn('#include "shared2.h"', text)
+            self.assertNotIn("../../extracted/shared/shared2.h", text)
+            self.assertFalse((out_dir / "extracted" / "shared" / "shared2.h").exists())
             self.assertIn("gbl_com * g_com = {0};", text)
             compile_sources = {unit.source_file.as_posix() for unit in report.compile_units}
             self.assertIn("generated/stubs/utr_extern_globals.c", compile_sources)
             makefile = (out_dir / "build" / "Makefile").read_text(encoding="cp932")
+            self.assertIn(str(shared.resolve()).replace("/", "\\"), makefile)
             self.assertIn("..\\generated\\stubs\\utr_extern_globals.c", makefile)
             self.assertIn("..\\obj\\utr_extern_globals.obj", makefile)
 
