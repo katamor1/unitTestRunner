@@ -13,6 +13,7 @@ from . import debug_workspace_writer as base
 _ORIGINAL_WRITE_PROJECT = base.write_vc6_debug_project
 _ORIGINAL_WRITE_SUITE = base.write_vc6_debug_suite
 _INCLUDE_OPTION_RE = re.compile(r'(?<!\S)/I(?=\s|")\s*(?:"[^"]*"|\S+)', re.IGNORECASE)
+_ENV_REFERENCE_RE = re.compile(r'%[^%]+%')
 
 
 def vc6_cpp_options_path(dsp_path: Path | str) -> Path:
@@ -24,11 +25,13 @@ def write_vc6_debug_project(
     build_workspace_report: Any | None = None,
     project_name: str | None = None,
 ) -> Path:
-    """Generate a VC6 DSP and move bulk /I options into a response file.
+    """Generate a VC6 DSP and move bulk concrete /I options to a response file.
 
     VC6 can silently truncate a very long ``# ADD CPP`` record when the project
     is loaded by the IDE. Keeping one include option per line in ``<project>.ini``
-    leaves the DSP with a short ``# ADD CPP @\"<project>.ini\"`` record.
+    leaves the DSP with a short ``# ADD CPP @\"<project>.ini\"`` record. Include
+    paths containing IDE or environment macros remain inline so expansion behavior
+    is unchanged.
     """
 
     workspace_path = Path(workspace).resolve()
@@ -45,14 +48,14 @@ def write_vc6_debug_suite(suite_path: Path | str, manifest: Any, out: Path | str
 
 
 def _rewrite_dsp_with_response_file(workspace: Path, dsp_path: Path, report: dict[str, Any]) -> None:
-    include_options = _include_options(dsp_path.parent, workspace, report)
+    response_options, inline_options = _partition_include_options(dsp_path.parent, workspace, report)
     response_path = vc6_cpp_options_path(dsp_path)
-    if not include_options:
+    if not response_options:
         if response_path.exists():
             response_path.unlink()
         return
 
-    base._write_vc6_text(response_path, "\r\n".join(include_options))
+    base._write_vc6_text(response_path, "\r\n".join(response_options))
     text = dsp_path.read_text(encoding="cp932", errors="replace")
     response_record = f'# ADD CPP @"{response_path.name}"'
     output: list[str] = []
@@ -60,7 +63,7 @@ def _rewrite_dsp_with_response_file(workspace: Path, dsp_path: Path, report: dic
 
     for line in text.splitlines():
         if line.startswith("# ADD CPP") and _INCLUDE_OPTION_RE.search(line):
-            output.append(_strip_include_options(line))
+            output.append(_strip_include_options(line, inline_options))
             output.append(response_record)
             inserted = True
         else:
@@ -77,8 +80,9 @@ def _rewrite_dsp_with_response_file(workspace: Path, dsp_path: Path, report: dic
         base._write_vc6_text(dsp_path, "\r\n".join(output))
 
 
-def _include_options(dsp_dir: Path, workspace: Path, report: dict[str, Any]) -> list[str]:
-    result: list[str] = []
+def _partition_include_options(dsp_dir: Path, workspace: Path, report: dict[str, Any]) -> tuple[list[str], list[str]]:
+    response_options: list[str] = []
+    inline_options: list[str] = []
     seen: set[str] = set()
     for item in report.get("include_dirs", []):
         option = base._dsp_include_arg(dsp_dir, workspace, item)
@@ -86,10 +90,17 @@ def _include_options(dsp_dir: Path, workspace: Path, report: dict[str, Any]) -> 
         if not option or key in seen:
             continue
         seen.add(key)
-        result.append(option)
-    return result
+        raw = item.get("raw") if isinstance(item, dict) else getattr(item, "raw", "")
+        target = inline_options if _requires_ide_expansion(str(raw or "")) else response_options
+        target.append(option)
+    return response_options, inline_options
 
 
-def _strip_include_options(line: str) -> str:
+def _requires_ide_expansion(value: str) -> bool:
+    return "$" in value or _ENV_REFERENCE_RE.search(value) is not None
+
+
+def _strip_include_options(line: str, inline_options: list[str]) -> str:
     stripped = _INCLUDE_OPTION_RE.sub("", line)
-    return " ".join(stripped.split())
+    parts = [" ".join(stripped.split()), *inline_options]
+    return " ".join(part for part in parts if part)
