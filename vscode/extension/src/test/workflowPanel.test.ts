@@ -36,7 +36,8 @@ describe('UnitTestRunner workflow panel view modes', () => {
     assert.match(html, /ビルド実行/);
     assert.match(html, /テスト実行/);
     assert.match(html, /Full Gateへ進む/);
-    assert.match(html, /従来パネルを表示/);
+    assert.match(html, /詳細パネルを表示/);
+    assert.doesNotMatch(html, /従来/);
     assert.match(html, /現在の状態/);
     assert.ok(SIMPLE_WORKFLOW_ACTIONS.some((action) => action.commandId === 'unitTestRunner.quickCheckCurrentFunction'));
     assert.ok(SIMPLE_WORKFLOW_ACTIONS.some((action) => action.commandId === 'unitTestRunner.openGeneratedTestSource'));
