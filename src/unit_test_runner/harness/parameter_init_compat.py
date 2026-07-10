@@ -66,37 +66,21 @@ def _render_test_function(
     call_args: list[str] = []
     for parameter in parameters:
         name = parameter["name"]
-        type_raw = parameter["type_raw"]
         call_args.append(name)
         assignment = assignments.get(name, {})
         value = assignment.get("value_expression")
-        if parameter.get("is_array"):
-            base_type = parameter.get("array_base_type") or type_raw
-            if _is_scalar_type(base_type):
-                declarations.append(f"    {base_type} {name}[{parameter['array_size']}];")
-                setup_lines.append(f"    {name}[0] = {_safe_initializer_value(value)};")
-            else:
-                declarations.append(f"    {base_type} {name}[{parameter['array_size']}] = {{0}};")
+        if parameter.get("is_array") or int(parameter.get("pointer_level") or 0) > 0:
+            declarations.append(f"    double {name}_storage[512];")
+            declarations.append(f"    void *{name};")
+            setup_lines.append(f"    memset({name}_storage, 0, sizeof({name}_storage));")
+            if value == "NULL":
+                setup_lines.append(f"    /* review required: NULL candidate for {name} is not used in default auto-run; using valid opaque storage instead. */")
+            setup_lines.append(f"    {name} = (void *){name}_storage;")
             continue
-        if int(parameter.get("pointer_level") or 0) > 0:
-            base_type = parameter.get("base_type") or "int"
-            if _is_scalar_type(base_type):
-                declarations.append(f"    {base_type} {name}_storage;")
-                if value == "NULL":
-                    setup_lines.append(f"    /* review required: NULL candidate for {name} is not used in default auto-run; using valid storage instead. */")
-                    setup_lines.append(f"    {name}_storage = TBD_VALID_INT_VALUE;")
-                else:
-                    setup_lines.append(f"    {name}_storage = {_safe_initializer_value(value)};")
-            else:
-                declarations.append(f"    {base_type} {name}_storage = {{0}};")
-                if value == "NULL":
-                    setup_lines.append(f"    /* review required: NULL candidate for {name} is not used in default auto-run; using valid storage instead. */")
-            declarations.append(f"    {type_raw} {name};")
-            setup_lines.append(f"    {name} = &{name}_storage;")
-            continue
-        declarations.extend(_value_parameter_declaration_and_setup(value, name, type_raw, setup_lines))
-    if return_type != "void":
-        declarations.append(f"    {return_type} actual_return;")
+        declarations.extend(_value_parameter_declaration_and_setup(value, name, _public_value_type(parameter.get("type_raw")), setup_lines))
+    public_return_type = _public_return_type(return_type)
+    if public_return_type != "void":
+        declarations.append(f"    {public_return_type} actual_return;")
     lines.extend(declarations)
     lines.append("")
     for stub_safe in stub_safe_names:
@@ -108,12 +92,12 @@ def _render_test_function(
         lines.append(f"    Stub_{stub_safe}_SetReturn({hsg._safe_c_value(setup.get('value_expression'))});")
     lines.extend(setup_lines)
     invocation = f"Target_Invoke_{hsg.sanitize_identifier(function_name)}({', '.join(call_args)})"
-    if return_type == "void":
+    if public_return_type == "void":
         lines.append(f"    {invocation};")
     else:
         lines.append(f"    actual_return = {invocation};")
-    if return_type != "void":
-        lines.append("    UTR_ASSERT_EQ_INT(TBD_EXPECTED_RETURN_INT, actual_return);")
+    if public_return_type != "void":
+        lines.append("    UTR_ASSERT_EQ_INT(TBD_EXPECTED_RETURN_INT, (int)actual_return);")
     for stub_safe in stub_safe_names:
         lines.append(f"    UTR_ASSERT_TRUE(Stub_{stub_safe}_GetCallCount() >= 0);")
     lines.extend(hsg._expected_observation_assertions(case))
@@ -122,12 +106,22 @@ def _render_test_function(
 
 
 def _value_parameter_declaration_and_setup(value: Any, name: str, type_raw: str, setup_lines: list[str]) -> list[str]:
-    if _is_scalar_type(type_raw):
-        setup_lines.append(f"    {name} = {_safe_initializer_value(value)};")
-        return [f"    {type_raw} {name};"]
-    if value not in (None, ""):
-        setup_lines.append(f"    /* review required: non-scalar input candidate for {name}: {value} */")
-    return [f"    {type_raw} {name} = {{0}};"]
+    setup_lines.append(f"    {name} = {_safe_initializer_value(value)};")
+    return [f"    {type_raw} {name};"]
+
+
+def _public_value_type(type_raw: Any) -> str:
+    compact = _compact_type(type_raw)
+    return compact if compact in _SCALAR_BASE_TYPES else "int"
+
+
+def _public_return_type(type_raw: Any) -> str:
+    compact = _compact_type(type_raw)
+    if compact == "void":
+        return "void"
+    if "*" in compact:
+        return "void *"
+    return compact if compact in _SCALAR_BASE_TYPES else "int"
 
 
 def _safe_initializer_value(value: Any) -> str:
