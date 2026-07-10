@@ -12,7 +12,7 @@ from . import debug_workspace_writer as base
 # module globals, so once patched it automatically uses the project wrapper too.
 _ORIGINAL_WRITE_PROJECT = base.write_vc6_debug_project
 _ORIGINAL_WRITE_SUITE = base.write_vc6_debug_suite
-_INCLUDE_OPTION_RE = re.compile(r'/I\s*(?:"[^"]*"|\S+)', re.IGNORECASE)
+_INCLUDE_OPTION_RE = re.compile(r'(?<!\S)/I(?=\s|")\s*(?:"[^"]*"|\S+)', re.IGNORECASE)
 
 
 def vc6_cpp_options_path(dsp_path: Path | str) -> Path:
@@ -59,7 +59,7 @@ def _rewrite_dsp_with_response_file(workspace: Path, dsp_path: Path, report: dic
     inserted = False
 
     for line in text.splitlines():
-        if line.startswith("# ADD CPP") and not line.startswith("# ADD BASE CPP") and _INCLUDE_OPTION_RE.search(line):
+        if line.startswith("# ADD CPP") and _INCLUDE_OPTION_RE.search(line):
             output.append(_strip_include_options(line))
             output.append(response_record)
             inserted = True
@@ -68,7 +68,7 @@ def _rewrite_dsp_with_response_file(workspace: Path, dsp_path: Path, report: dic
 
     if not inserted:
         for index, line in enumerate(output):
-            if line.startswith("# ADD CPP") and not line.startswith("# ADD BASE CPP"):
+            if line.startswith("# ADD CPP"):
                 output.insert(index + 1, response_record)
                 inserted = True
                 break
