@@ -148,3 +148,15 @@ def _short_configuration(configuration: DspConfiguration) -> str:
     if configuration.project_name and configuration.full_name.startswith(configuration.project_name + " - "):
         return configuration.full_name[len(configuration.project_name) + 3 :]
     return configuration.name or configuration.full_name
+
+
+# Keep the core writer small and apply the legacy-IDE response-file workaround
+# as a compatibility layer, matching the build/harness compatibility pattern.
+from . import debug_workspace_writer as _debug_workspace_writer  # noqa: E402
+from .debug_workspace_response import (  # noqa: E402
+    write_vc6_debug_project as _write_vc6_debug_project,
+    write_vc6_debug_suite as _write_vc6_debug_suite,
+)
+
+_debug_workspace_writer.write_vc6_debug_project = _write_vc6_debug_project
+_debug_workspace_writer.write_vc6_debug_suite = _write_vc6_debug_suite
