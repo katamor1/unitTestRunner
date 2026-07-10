@@ -12,12 +12,35 @@ sys.path.insert(0, str(SRC_ROOT))
 from unit_test_runner.harness.state_setup_reflector import reflect_state_setups
 
 
+def write_invocation_files(workspace: Path) -> tuple[Path, Path]:
+    harness_dir = workspace / "generated" / "harness"
+    harness_dir.mkdir(parents=True, exist_ok=True)
+    header = harness_dir / "target_invocation.h"
+    source = harness_dir / "target_invocation.c"
+    header.write_text(
+        "#ifndef TARGET_INVOCATION_H_\n"
+        "#define TARGET_INVOCATION_H_\n"
+        "int Target_Invoke_Shared3(void);\n"
+        "#endif\n",
+        encoding="cp932",
+    )
+    source.write_text(
+        '#include "target_invocation.h"\n'
+        '#include "../../extracted/shared/shared2.h"\n'
+        "int Shared3(void);\n"
+        "int Target_Invoke_Shared3(void) { return Shared3(); }\n",
+        encoding="cp932",
+    )
+    return header, source
+
+
 class StateSetupReflectorTests(unittest.TestCase):
-    def test_reflects_direct_and_fixture_state_setups_into_test_function(self):
+    def test_reflects_direct_setups_in_test_and_fixture_setups_in_harness_helper(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             test_dir = workspace / "generated" / "tests"
             test_dir.mkdir(parents=True)
+            header, helper_source = write_invocation_files(workspace)
             source = test_dir / "test_Shared3.c"
             source.write_text(
                 "/* generated test skeleton: review required */\n"
@@ -64,23 +87,31 @@ class StateSetupReflectorTests(unittest.TestCase):
 
             changed = reflect_state_setups(workspace, design, "Shared3")
 
-            self.assertEqual([source], changed)
-            text = source.read_text(encoding="cp932")
-            self.assertIn('#include "../../extracted/shared/shared2.h"', text)
-            self.assertIn("    static gbl1 fixture_gbl1;", text)
-            self.assertIn("    static gbl_com fixture_g_com;", text)
-            self.assertIn("    /* state_setups auto reflection */", text)
-            self.assertIn("    fixture_g_com.ptr = &fixture_gbl1;", text)
-            self.assertIn("    fixture_gbl1.test = 0;", text)
-            self.assertIn("    g_com = &fixture_g_com;", text)
-            self.assertIn("    g_count = 14;", text)
-            self.assertLess(text.index("fixture_g_com.ptr"), text.index("Target_Invoke_Shared3"))
+            self.assertIn(source, changed)
+            self.assertIn(header, changed)
+            self.assertIn(helper_source, changed)
+            test_text = source.read_text(encoding="cp932")
+            helper_text = helper_source.read_text(encoding="cp932")
+            header_text = header.read_text(encoding="cp932")
+            self.assertNotIn('#include "../../extracted/shared/shared2.h"', test_text)
+            self.assertNotIn("static gbl1 fixture_gbl1", test_text)
+            self.assertIn("    Utr_StateSetup_TC_Shared3_001();", test_text)
+            self.assertIn("    g_count = 14;", test_text)
+            self.assertLess(test_text.index("Utr_StateSetup_TC_Shared3_001"), test_text.index("Target_Invoke_Shared3"))
+            self.assertIn("void Utr_StateSetup_TC_Shared3_001(void);", header_text)
+            self.assertIn("void Utr_StateSetup_TC_Shared3_001(void)", helper_text)
+            self.assertIn("    static gbl1 fixture_gbl1;", helper_text)
+            self.assertIn("    static gbl_com fixture_g_com;", helper_text)
+            self.assertIn("    fixture_g_com.ptr = &fixture_gbl1;", helper_text)
+            self.assertIn("    fixture_gbl1.test = 0;", helper_text)
+            self.assertIn("    g_com = &fixture_g_com;", helper_text)
 
     def test_infers_simple_pointer_fixture_from_extracted_source_and_header(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             (workspace / "generated" / "tests").mkdir(parents=True)
             (workspace / "reports").mkdir(parents=True)
+            header, helper_source = write_invocation_files(workspace)
             extracted = workspace / "extracted" / "shared"
             extracted.mkdir(parents=True)
             (extracted / "shared.c").write_text(
@@ -127,42 +158,36 @@ class StateSetupReflectorTests(unittest.TestCase):
 
             reflect_state_setups(workspace, design, "Shared3")
 
-            text = test_source.read_text(encoding="cp932")
-            self.assertIn('#include "../../extracted/shared/shared2.h"', text)
-            self.assertIn("    static gbl1 fixture_g_com_ptr;", text)
-            self.assertIn("    static gbl_com fixture_g_com;", text)
-            self.assertIn("    fixture_g_com.ptr = &fixture_g_com_ptr;", text)
-            self.assertIn("    g_com = &fixture_g_com;", text)
+            test_text = test_source.read_text(encoding="cp932")
+            helper_text = helper_source.read_text(encoding="cp932")
+            self.assertNotIn('#include "../../extracted/shared/shared2.h"', test_text)
+            self.assertIn("    Utr_StateSetup_TC_Shared3_001();", test_text)
+            self.assertIn("    static gbl1 fixture_g_com_ptr;", helper_text)
+            self.assertIn("    static gbl_com fixture_g_com;", helper_text)
+            self.assertIn("    fixture_g_com.ptr = &fixture_g_com_ptr;", helper_text)
+            self.assertIn("    g_com = &fixture_g_com;", helper_text)
             updated_design = json.loads((workspace / "reports" / "test_case_design.json").read_text(encoding="utf-8"))
             setup = updated_design["test_cases"][0]["state_setups"][0]
             self.assertEqual("g_com", setup["variable_name"])
             self.assertEqual("g_com->ptr->...", setup["inferred_from"])
 
-    def test_skips_and_removes_fixture_include_already_provided_by_target_invocation(self):
+    def test_removes_stale_product_header_include_from_test_source(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             test_dir = workspace / "generated" / "tests"
-            harness_dir = workspace / "generated" / "harness"
             test_dir.mkdir(parents=True)
-            harness_dir.mkdir(parents=True)
+            write_invocation_files(workspace)
             source = test_dir / "test_Shared3.c"
             source.write_text(
-                "#include \"utr_assert.h\"\n"
-                "#include \"target_invocation.h\"\n"
-                "#include \"../../extracted/shared/shared2.h\"\n"
+                '#include "utr_assert.h"\n'
+                '#include "target_invocation.h"\n'
+                '#include "../../extracted/shared/shared2.h"\n'
                 "\n"
                 "void Test_TC_Shared3_001(void)\n"
                 "{\n"
                 "    int actual_return;\n"
                 "    actual_return = Target_Invoke_Shared3();\n"
                 "}\n",
-                encoding="cp932",
-            )
-            (harness_dir / "target_invocation.h").write_text(
-                "#ifndef TARGET_INVOCATION_H_\n"
-                "#define TARGET_INVOCATION_H_\n"
-                "#include \"shared2.h\"\n"
-                "#endif\n",
                 encoding="cp932",
             )
             design = {
@@ -188,8 +213,7 @@ class StateSetupReflectorTests(unittest.TestCase):
             text = source.read_text(encoding="cp932")
             self.assertIn('#include "target_invocation.h"', text)
             self.assertNotIn('#include "../../extracted/shared/shared2.h"', text)
-            self.assertIn("    static gbl1 fixture_g_com_ptr;", text)
-            self.assertIn("    g_com = &fixture_g_com;", text)
+            self.assertIn("    Utr_StateSetup_TC_Shared3_001();", text)
 
 
 if __name__ == "__main__":
