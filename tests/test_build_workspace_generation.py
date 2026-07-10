@@ -92,7 +92,7 @@ class BuildWorkspaceGenerationTests(unittest.TestCase):
             self.assertTrue((out_dir / "reports" / "build_workspace_report.json").exists())
             self.assertTrue((out_dir / "reports" / "build_probe_report.json").exists())
 
-    def test_generator_mirrors_declared_include_dirs_into_extracted_workspace(self):
+    def test_generator_references_declared_include_dirs_without_copying_headers(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             project = Path(temp_dir) / "project"
             source = project / "src" / "control.c"
@@ -135,12 +135,15 @@ class BuildWorkspaceGenerationTests(unittest.TestCase):
                 dry_run=True,
             )
 
-            self.assertTrue((out_dir / "extracted" / "common" / "include" / "common.h").exists())
+            self.assertFalse((out_dir / "extracted" / "common" / "include" / "common.h").exists())
             self.assertFalse((out_dir / "extracted" / "include" / "common.h").exists())
-            include_dirs = {item.raw: item for item in report.include_dirs}
-            self.assertTrue((out_dir / include_dirs["common/include"].workspace_path).exists())
+            header_refs = [item for item in report.copied_files if item.file_kind == "target_header"]
+            self.assertEqual([header.resolve()], [item.source_path for item in header_refs])
+            self.assertFalse(header_refs[0].copied)
+            include_dirs = {Path(item.raw) for item in report.include_dirs if item.source in {"referenced_header_dir", "dsp_include"}}
+            self.assertIn(header.parent.resolve(), include_dirs)
             makefile = (out_dir / "build" / "Makefile").read_text(encoding="cp932")
-            self.assertIn('/I"..\\extracted\\common\\include"', makefile)
+            self.assertIn(str(header.parent.resolve()).replace("/", "\\"), makefile)
 
     def test_generator_enables_function_level_linking_for_unused_peer_functions(self):
         with tempfile.TemporaryDirectory() as temp_dir:
