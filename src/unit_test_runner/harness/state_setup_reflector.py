@@ -19,12 +19,14 @@ _INCLUDE_TARGET_RE = re.compile(r'^\s*#include\s+[<"]([^>"]+)[>"]', re.MULTILINE
 
 
 def reflect_state_setups(output_root: Path | str, test_case_design: Any, function_name: str | None = None) -> list[Path]:
-    """Reflect test_cases[].state_setups[] into generated/tests/test_<Function>.c.
+    """Reflect test_cases[].state_setups[] into generated test and harness code.
 
-    This is intentionally conservative: unsafe lvalues/statements are emitted as review
-    comments instead of executable C statements.  If state_setups does not already
-    contain pointer fixture setup for expressions such as g_com->ptr->member, a
-    simple fixture is inferred from copied target headers when possible.
+    Product-typed fixture setup is intentionally kept out of generated/tests/*.c.
+    Tests include target_invocation.h, so unguarded product headers should not be
+    pulled into the test translation unit just to allocate fixture structs.
+    Product-header-dependent fixture declarations are emitted into
+    generated/harness/target_invocation.c helper functions instead, and test cases
+    call those helpers before invoking the target wrapper.
     """
     output_root = Path(output_root).resolve()
     payload = _payload(test_case_design)
@@ -40,11 +42,12 @@ def reflect_state_setups(output_root: Path | str, test_case_design: Any, functio
     if not any(case.get("state_setups") for case in cases):
         return []
     text = test_source.read_text(encoding="cp932", errors="replace")
-    text = _ensure_fixture_includes(text, cases, output_root)
+    text = _remove_fixture_include_lines(text, cases)
+    changed = _ensure_target_state_helpers(output_root, cases)
     for case in cases:
         text = _reflect_case(text, case)
     write_c_file(test_source, text, overwrite=True)
-    return [test_source]
+    return [test_source] + changed
 
 
 def _payload(value: Any) -> dict[str, Any]:
@@ -163,6 +166,24 @@ def _workspace_headers(output_root: Path) -> dict[Path, str]:
             headers[header] = header.read_text(encoding="cp932", errors="replace")
         except OSError:
             continue
+    # Header-reference build workspaces do not copy product headers into extracted/.
+    # Recover the referenced original headers from build_workspace_report when present.
+    report_path = output_root / "reports" / "build_workspace_report.json"
+    if report_path.exists():
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            report = {}
+        for item in report.get("referenced_files", []) + report.get("copied_files", []):
+            if item.get("file_kind") != "target_header":
+                continue
+            source_path = Path(item.get("source_path") or "")
+            if not source_path.is_file() or source_path in headers:
+                continue
+            try:
+                headers[source_path] = source_path.read_text(encoding="cp932", errors="replace")
+            except OSError:
+                continue
     return headers
 
 
@@ -213,38 +234,100 @@ def _relative_include_from_generated_tests(output_root: Path, header_path: Path)
         return header_path.as_posix()
 
 
-def _ensure_fixture_includes(text: str, cases: list[dict[str, Any]], output_root: Path) -> str:
-    include_lines: list[str] = []
-    for setup in _all_state_setups(cases):
-        for include in _list(setup.get("fixture_includes")) + _list(setup.get("setup_includes")):
-            include_text = _include_line(include)
-            if include_text and include_text not in include_lines:
-                include_lines.append(include_text)
-    if not include_lines:
-        return text
-    fixture_basenames = {_include_basename(line) for line in include_lines}
-    text = _remove_redundant_fixture_include_lines(text, fixture_basenames, output_root)
-    existing = set(re.findall(r'^#include\s+[^\n]+', text, flags=re.MULTILINE))
-    provided_basenames = _provided_include_basenames(text, output_root)
-    additions = [line for line in include_lines if line not in existing and _include_basename(line) not in provided_basenames]
-    if not additions:
+def _remove_fixture_include_lines(text: str, cases: list[dict[str, Any]]) -> str:
+    basenames = {
+        _include_basename(_include_line(include) or "")
+        for setup in _all_state_setups(cases)
+        for include in _list(setup.get("fixture_includes")) + _list(setup.get("setup_includes"))
+    }
+    return _remove_include_lines_by_basename(text, {item for item in basenames if item})
+
+
+def _ensure_target_state_helpers(output_root: Path, cases: list[dict[str, Any]]) -> list[Path]:
+    helper_cases = [(str(case.get("test_case_id") or case.get("id") or ""), _helper_state_setups(case.get("state_setups") or [])) for case in cases]
+    helper_cases = [(case_id, setups) for case_id, setups in helper_cases if case_id and setups]
+    if not helper_cases:
+        return []
+    header_path = output_root / "generated" / "harness" / "target_invocation.h"
+    source_path = output_root / "generated" / "harness" / "target_invocation.c"
+    if not header_path.exists() or not source_path.exists():
+        return []
+    changed: list[Path] = []
+    header_text = header_path.read_text(encoding="cp932", errors="replace")
+    source_text = source_path.read_text(encoding="cp932", errors="replace")
+    for include_line in _helper_include_lines(helper_cases):
+        source_text = _insert_include_if_missing(source_text, include_line)
+    prototypes = [f"void {_helper_name(case_id)}(void);" for case_id, _setups in helper_cases]
+    updated_header = _insert_before_endif(header_text, prototypes)
+    if updated_header != header_text:
+        write_c_file(header_path, updated_header, overwrite=True)
+        changed.append(header_path)
+    definitions = [_render_helper_definition(case_id, setups) for case_id, setups in helper_cases if f"void {_helper_name(case_id)}(void)" not in source_text]
+    if definitions:
+        source_text = source_text.rstrip() + "\n\n" + "\n".join(definitions) + "\n"
+        write_c_file(source_path, source_text, overwrite=True)
+        changed.append(source_path)
+    elif source_text != source_path.read_text(encoding="cp932", errors="replace"):
+        write_c_file(source_path, source_text, overwrite=True)
+        changed.append(source_path)
+    return changed
+
+
+def _helper_state_setups(state_setups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [setup for setup in state_setups if setup.get("fixture_declarations") or setup.get("fixture_includes") or setup.get("setup_includes") or setup.get("setup_statements")]
+
+
+def _test_local_state_setups(state_setups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [setup for setup in state_setups if setup not in _helper_state_setups(state_setups)]
+
+
+def _helper_include_lines(helper_cases: list[tuple[str, list[dict[str, Any]]]]) -> list[str]:
+    lines: list[str] = []
+    for _case_id, setups in helper_cases:
+        for setup in setups:
+            for include in _list(setup.get("fixture_includes")) + _list(setup.get("setup_includes")):
+                line = _include_line(include)
+                if line and line not in lines:
+                    lines.append(line)
+    return lines
+
+
+def _helper_name(case_id: str) -> str:
+    return f"Utr_StateSetup_{sanitize_identifier(case_id)}"
+
+
+def _render_helper_definition(case_id: str, setups: list[dict[str, Any]]) -> str:
+    lines = [f"void {_helper_name(case_id)}(void)", "{"]
+    body = _fixture_declaration_lines(setups) + _state_setup_statement_lines(setups)
+    if not body:
+        lines.append("    /* no product-typed state setup required */")
+    else:
+        lines.extend(body)
+    lines.extend(["}", ""])
+    return "\n".join(lines)
+
+
+def _insert_include_if_missing(text: str, include_line: str) -> str:
+    basename = _include_basename(include_line)
+    if basename in _provided_include_basenames(text, Path(".")):
         return text
     include_matches = list(re.finditer(r'^#include\s+[^\n]+\n?', text, flags=re.MULTILINE))
     if include_matches:
         insert_at = include_matches[-1].end()
-        return text[:insert_at] + "".join(line + "\n" for line in additions) + text[insert_at:]
-    return "".join(line + "\n" for line in additions) + "\n" + text
+        return text[:insert_at] + include_line + "\n" + text[insert_at:]
+    return include_line + "\n" + text
 
 
-def _remove_redundant_fixture_include_lines(text: str, fixture_basenames: set[str], output_root: Path) -> str:
-    if not fixture_basenames:
+def _insert_before_endif(text: str, lines: list[str]) -> str:
+    additions = [line for line in lines if line not in text]
+    if not additions:
         return text
-    text_without_fixture_includes = _remove_include_lines_by_basename(text, fixture_basenames)
-    provided_elsewhere = _provided_include_basenames(text_without_fixture_includes, output_root)
-    redundant_basenames = fixture_basenames & provided_elsewhere
-    if not redundant_basenames:
-        return text
-    return _remove_include_lines_by_basename(text, redundant_basenames)
+    match = list(re.finditer(r'^#endif\b.*$', text, flags=re.MULTILINE))
+    block = "\n" + "\n".join(additions) + "\n"
+    if match:
+        index = match[-1].start()
+        return text[:index].rstrip() + block + text[index:]
+    return text.rstrip() + block
 
 
 def _remove_include_lines_by_basename(text: str, basenames: set[str]) -> str:
@@ -301,7 +384,9 @@ def _resolve_include_target(output_root: Path, target: str) -> Path | None:
         output_root / "extracted" / target_path,
         output_root / "extracted" / target_path.name,
     ]
-    candidates.extend((output_root / "extracted").rglob(target_path.name))
+    if target_path.is_absolute():
+        candidates.append(target_path)
+    candidates.extend((output_root / "extracted").rglob(target_path.name) if (output_root / "extracted").exists() else [])
     for candidate in candidates:
         try:
             if candidate.is_file():
@@ -324,22 +409,23 @@ def _reflect_case(text: str, case: dict[str, Any]) -> str:
     if not match:
         return text
     body = match.group("body")
-    reflected = _reflect_body(body, state_setups)
+    reflected = _reflect_body(body, state_setups, str(test_case_id))
     if reflected == body:
         return text
     return text[: match.start("body")] + reflected + text[match.end("body") :]
 
 
-def _reflect_body(body: str, state_setups: list[dict[str, Any]]) -> str:
+def _reflect_body(body: str, state_setups: list[dict[str, Any]], test_case_id: str) -> str:
     if "/* state_setups auto reflection */" in body:
         return body
     lines = body.splitlines()
-    declarations = _fixture_declaration_lines(state_setups)
-    statements = _state_setup_statement_lines(state_setups)
-    if not declarations and not statements:
+    local_setups = _test_local_state_setups(state_setups)
+    statements = _state_setup_statement_lines(local_setups)
+    helper_call = [f"    {_helper_name(test_case_id)}();"] if _helper_state_setups(state_setups) else []
+    if not statements and not helper_call:
         return body
     insert_index = _first_executable_line_index(lines)
-    block = ["    /* state_setups auto reflection */"] + declarations + statements + [""]
+    block = ["    /* state_setups auto reflection */"] + helper_call + statements + [""]
     return "\n".join(lines[:insert_index] + block + lines[insert_index:])
 
 
