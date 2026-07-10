@@ -70,9 +70,8 @@ def _render_test_function(
         assignment = assignments.get(name, {})
         value = assignment.get("value_expression")
         if parameter.get("is_array") or int(parameter.get("pointer_level") or 0) > 0:
-            declarations.append(f"    double {name}_storage[512];")
+            declarations.append(f"    static double {name}_storage[512];")
             declarations.append(f"    void *{name};")
-            setup_lines.append(f"    memset({name}_storage, 0, sizeof({name}_storage));")
             if value == "NULL":
                 setup_lines.append(f"    /* review required: NULL candidate for {name} is not used in default auto-run; using valid opaque storage instead. */")
             setup_lines.append(f"    {name} = (void *){name}_storage;")
