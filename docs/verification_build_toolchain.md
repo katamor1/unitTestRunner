@@ -40,7 +40,7 @@ py -m unit_test_runner --json build-probe `
 
 `--cc` を省略した場合は、`UNIT_TEST_RUNNER_CC`、`CC`、`cl`、`gcc`、`clang`、`clang-cl`、`cc` の順で利用可能なコンパイラを探します。`--vcvars` を指定した場合は、そのバッチを呼び出したうえで `cl` を使います。
 
-ビルドに成功すると、従来どおり `reports/build_probe_report.json` の状態が `succeeded` になり、`bin/utr_probe.exe` が生成されます。その後のテスト実行は通常と同じです。
+ビルドに成功すると、既存フローと同様に `reports/build_probe_report.json` の状態が `succeeded` になり、`bin/utr_probe.exe` が生成されます。その後のテスト実行は通常と同じです。
 
 ```powershell
 py -m unit_test_runner --json run-tests `
@@ -50,7 +50,7 @@ py -m unit_test_runner --json run-tests `
 
 ## 実機環境の扱い
 
-既定値は `--toolchain vc6` です。実機環境では従来どおり `build/build.bat` と VC6/nmake を使います。
+既定値は `--toolchain vc6` です。実機環境では `build/build.bat` と VC6/nmake を使います。
 
 ```powershell
 py -m unit_test_runner --json build-probe `
