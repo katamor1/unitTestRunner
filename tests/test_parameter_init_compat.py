@@ -11,7 +11,7 @@ from unit_test_runner.harness.parameter_init_compat import _render_test_function
 
 
 class ParameterInitCompatTests(unittest.TestCase):
-    def test_null_pointer_candidate_uses_valid_storage_by_default(self):
+    def test_null_pointer_candidate_uses_valid_opaque_storage_by_default(self):
         text = _render_test_function(
             "Test_TC_Shared3_001",
             {
@@ -39,10 +39,13 @@ class ParameterInitCompatTests(unittest.TestCase):
             [],
         )
 
-        self.assertIn("gbl_input prm_storage = {0};", text)
-        self.assertIn("prm = &prm_storage;", text)
+        self.assertIn("double prm_storage[512];", text)
+        self.assertIn("void *prm;", text)
+        self.assertIn("memset(prm_storage, 0, sizeof(prm_storage));", text)
+        self.assertIn("prm = (void *)prm_storage;", text)
         self.assertIn("NULL candidate for prm is not used", text)
         self.assertNotIn("prm = NULL;", text)
+        self.assertNotIn("gbl_input prm_storage", text)
 
 
 if __name__ == "__main__":
