@@ -39,9 +39,9 @@ class ParameterInitCompatTests(unittest.TestCase):
             [],
         )
 
-        self.assertIn("double prm_storage[512];", text)
+        self.assertIn("static double prm_storage[512];", text)
         self.assertIn("void *prm;", text)
-        self.assertIn("memset(prm_storage, 0, sizeof(prm_storage));", text)
+        self.assertNotIn("memset(", text)
         self.assertIn("prm = (void *)prm_storage;", text)
         self.assertIn("NULL candidate for prm is not used", text)
         self.assertNotIn("prm = NULL;", text)
