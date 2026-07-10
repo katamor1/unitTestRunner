@@ -11,6 +11,8 @@ sys.path.insert(0, str(SRC_ROOT))
 
 from unit_test_runner.build.build_workspace_generator import generate_build_workspace
 from unit_test_runner.suite.manager import register_workspace
+from unit_test_runner.vc6.debug_workspace_response import vc6_cpp_options_path
+from unit_test_runner.vc6.debug_workspace_writer import write_vc6_debug_project
 
 
 class Vc6DebugWorkspaceWriterTests(unittest.TestCase):
@@ -63,13 +65,57 @@ class Vc6DebugWorkspaceWriterTests(unittest.TestCase):
             )
 
             dsp_path = out_dir / "build" / "UTR_Shared.dsp"
+            options_path = vc6_cpp_options_path(dsp_path)
             dsp_text = dsp_path.read_text(encoding="cp932")
+            options_text = options_path.read_text(encoding="cp932")
             generated = {item.workspace_path.as_posix(): item.file_kind for item in report.generated_build_files}
             self.assertTrue(dsp_path.exists())
+            self.assertTrue(options_path.exists())
             self.assertEqual("vc6_debug_dsp", generated["build/UTR_Shared.dsp"])
+            self.assertEqual("vc6_cpp_response", generated["build/UTR_Shared.ini"])
             self.assertIn('Project File - Name="UTR_Shared"', dsp_text)
             self.assertIn('SOURCE=..\\extracted\\src\\shared.c', dsp_text)
             self.assertIn('/out:"..\\bin\\utr_probe.exe"', dsp_text)
+            self.assertIn('# ADD CPP @"UTR_Shared.ini"', dsp_text)
+            self.assertNotIn('/I "', "\n".join(line for line in dsp_text.splitlines() if line.startswith("# ADD CPP")))
+            self.assertIn('/I "..\\generated\\include"', options_text)
+
+    def test_large_include_set_does_not_create_an_oversized_dsp_line(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir) / "workspace"
+            (workspace / "build").mkdir(parents=True)
+            include_dirs = [
+                {
+                    "raw": f"C:/legacy/product/component_{index:03d}/public/include/very_long_directory_name_{index:03d}",
+                    "workspace_path": None,
+                    "original_path": None,
+                    "exists": True,
+                    "source": "referenced_header_dir",
+                }
+                for index in range(150)
+            ]
+            report = {
+                "function": {"name": "LongIncludes"},
+                "include_dirs": include_dirs,
+                "defines": ["WIN32", "_DEBUG"],
+                "compiler_options": ["/nologo", "/W3", "/Od", "/ZI"],
+                "compile_units": [],
+                "copied_files": [],
+                "referenced_files": [],
+                "generated_build_files": [],
+            }
+
+            dsp_path = write_vc6_debug_project(workspace, report)
+            dsp_text = dsp_path.read_text(encoding="cp932")
+            options_path = vc6_cpp_options_path(dsp_path)
+            option_lines = [line for line in options_path.read_text(encoding="cp932").splitlines() if line.strip()]
+            cpp_lines = [line for line in dsp_text.splitlines() if line.startswith("# ADD CPP")]
+
+            self.assertEqual(150, len(option_lines))
+            self.assertTrue(all(line.startswith('/I "') for line in option_lines))
+            self.assertIn('# ADD CPP @"UTR_LongIncludes.ini"', cpp_lines)
+            self.assertFalse(any('/I "' in line for line in cpp_lines))
+            self.assertLess(max(len(line) for line in dsp_text.splitlines()), 512)
 
     def test_suite_register_generates_dsw_referencing_entry_dsp(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -88,9 +134,11 @@ class Vc6DebugWorkspaceWriterTests(unittest.TestCase):
 
             dsw_path = suite_path.parent / "vc6_debug_suite.dsw"
             dsw_text = dsw_path.read_text(encoding="cp932")
+            dsp_text = (out_dir / "build" / "UTR_Shared.dsp").read_text(encoding="cp932")
             self.assertTrue(dsw_path.exists())
             self.assertIn('Project: "UTR_Shared"=', dsw_text)
             self.assertIn('UTR_Shared.dsp', dsw_text)
+            self.assertIn('# ADD CPP @"UTR_Shared.ini"', dsp_text)
 
 
 if __name__ == "__main__":
