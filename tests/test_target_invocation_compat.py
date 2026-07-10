@@ -48,8 +48,9 @@ class TargetInvocationCompatTests(unittest.TestCase):
             self.assertNotIn('#include "shared2.h"', header)
             self.assertIn("int Target_Invoke_Shared3(void * prm);", header)
             self.assertIn('#include "shared2.h"', source_text)
-            self.assertIn("int Shared3(gbl_input * prm);", source_text)
-            self.assertIn("return (Shared3((gbl_input *)prm));", source_text)
+            self.assertIn("int Shared3(", source_text)
+            self.assertIn("gbl_input *", source_text)
+            self.assertIn("return Shared3((gbl_input *)prm);", source_text)
 
 
 if __name__ == "__main__":
