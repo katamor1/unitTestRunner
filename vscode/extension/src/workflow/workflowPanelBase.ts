@@ -1,9 +1,8 @@
 import * as fs from 'fs';
-import * as vscode from 'vscode';
+import type * as vscode from 'vscode';
 
 import { SettingsActionKind, SettingsFieldId, SettingsViewModel } from '../config/settingsViewModel';
 import { ReportPaths, resolveReportPaths } from '../reports/reportPathResolver';
-import { openReport } from '../reports/reportOpener';
 import { renderSettings } from './settingsPanelRenderer';
 import {
   buildWorkflowStepViews,
@@ -16,6 +15,7 @@ import {
   WorkflowAction,
   WorkflowState,
   WorkflowStepId,
+  WorkflowStepStatus,
   WORKFLOW_STATE_KEY,
 } from './workflowState';
 
@@ -38,11 +38,70 @@ interface SettingsActionMessage {
 type WorkflowMessage = WorkflowActionMessage | SettingsActionMessage;
 type WorkflowStepViews = ReturnType<typeof buildWorkflowStepViews>;
 
+export interface WorkflowActionPresentation {
+  label: string;
+  classes: string;
+  primary: boolean;
+  hidden: boolean;
+}
+
+export function workflowStatusLabel(status: WorkflowStepStatus): string {
+  if (status === 'done') {
+    return '完了';
+  }
+  if (status === 'current') {
+    return '次の操作';
+  }
+  return '未実施';
+}
+
+export function resolveWorkflowActionPresentation(
+  action: WorkflowAction,
+  status?: WorkflowStepStatus,
+): WorkflowActionPresentation {
+  const label = status === 'done' && action.repeatLabel ? action.repeatLabel : action.label;
+  const primary = status === 'current' && action.primary === true;
+  const hidden = status === 'done' && action.kind === 'confirmStep';
+  const classes = [primary ? 'primary' : '', action.danger ? 'danger' : '']
+    .filter(Boolean)
+    .join(' ');
+  return { label, classes, primary, hidden };
+}
+
 export const SIMPLE_WORKFLOW_ACTIONS: WorkflowAction[] = [
-  { id: 'quickCheckCurrent', kind: 'command', label: '1. Quick Check', commandId: 'unitTestRunner.quickCheckCurrentFunction', primary: true },
-  { id: 'openGeneratedTestSource', kind: 'command', label: '2. テストソースを開く・修正', commandId: 'unitTestRunner.openGeneratedTestSource' },
-  { id: 'runBuildProbe', kind: 'command', label: '3. ビルド実行', commandId: 'unitTestRunner.runBuildProbe', danger: true },
-  { id: 'runTests', kind: 'command', label: '4. テスト実行', commandId: 'unitTestRunner.runTests', danger: true },
+  {
+    id: 'quickCheckCurrent',
+    kind: 'command',
+    label: 'Quick Checkを実行',
+    repeatLabel: 'Quick Checkを再実行',
+    commandId: 'unitTestRunner.quickCheckCurrentFunction',
+    primary: true,
+  },
+  {
+    id: 'openGeneratedTestSource',
+    kind: 'command',
+    label: 'テストソースを開く',
+    commandId: 'unitTestRunner.openGeneratedTestSource',
+    primary: true,
+  },
+  {
+    id: 'runBuildProbe',
+    kind: 'command',
+    label: 'ビルドを実行',
+    repeatLabel: 'ビルドを再実行',
+    commandId: 'unitTestRunner.runBuildProbe',
+    primary: true,
+    danger: true,
+  },
+  {
+    id: 'runTests',
+    kind: 'command',
+    label: 'テストを実行',
+    repeatLabel: 'テストを再実行',
+    commandId: 'unitTestRunner.runTests',
+    primary: true,
+    danger: true,
+  },
 ];
 
 export const SIMPLE_SECONDARY_ACTIONS: WorkflowAction[] = [
@@ -90,7 +149,7 @@ export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
 
   private async handleMessage(message: WorkflowMessage): Promise<void> {
     if (this.runningLabel) {
-      void vscode.window.showInformationMessage(`UnitTestRunner: ${this.runningLabel}を実行中です。完了するまでお待ちください。`);
+      void vscodeApi().window.showInformationMessage(`UnitTestRunner: ${this.runningLabel}を実行中です。完了するまでお待ちください。`);
       return;
     }
     this.runningLabel = message.label || fallbackWorkflowActionLabel(message);
@@ -99,21 +158,21 @@ export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
       if (message.type === 'settingsAction') {
         await this.handleSettingsAction(message.fieldId, message.kind);
       } else if (message.kind === 'command' && message.commandId) {
-        await vscode.commands.executeCommand(message.commandId);
+        await vscodeApi().commands.executeCommand(message.commandId);
       } else if (message.kind === 'openReport' && message.reportKey) {
         await this.openWorkflowReport(message.reportKey, message.stepId);
       } else if (message.kind === 'confirmStep' && message.stepId) {
         await this.updateState(completeWorkflowStep(this.readState(), message.stepId));
       } else if (message.kind === 'openSettings') {
-        await vscode.commands.executeCommand('workbench.action.openSettings', 'unitTestRunner');
+        await vscodeApi().commands.executeCommand('workbench.action.openSettings', 'unitTestRunner');
       } else if (message.kind === 'openOutputWorkspace') {
-        await vscode.commands.executeCommand('unitTestRunner.openOutputWorkspace');
+        await vscodeApi().commands.executeCommand('unitTestRunner.openOutputWorkspace');
       } else if (message.kind === 'copyLastCommand') {
-        await vscode.commands.executeCommand('unitTestRunner.copyLastCommand');
+        await vscodeApi().commands.executeCommand('unitTestRunner.copyLastCommand');
       }
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
-      void vscode.window.showErrorMessage(`UnitTestRunner: ${messageText}`);
+      void vscodeApi().window.showErrorMessage(`UnitTestRunner: ${messageText}`);
     } finally {
       this.runningLabel = undefined;
       this.refresh();
@@ -125,13 +184,14 @@ export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
     const reports = resolveWorkflowReports(state);
     const reportPath = reports?.[reportKey];
     if (typeof reportPath !== 'string' || !reportPath) {
-      void vscode.window.showWarningMessage('UnitTestRunner: 対象レポートがまだ記録されていません。');
+      void vscodeApi().window.showWarningMessage('UnitTestRunner: 対象レポートがまだ記録されていません。');
       return;
     }
     if (!fs.existsSync(reportPath)) {
-      void vscode.window.showWarningMessage(`UnitTestRunner: レポートが見つかりません: ${reportPath}`);
+      void vscodeApi().window.showWarningMessage(`UnitTestRunner: レポートが見つかりません: ${reportPath}`);
       return;
     }
+    const { openReport } = await import('../reports/reportOpener');
     await openReport(reportPath);
     if (stepId) {
       await this.updateState(markStepAwaitingSave(state, stepId, reportPath, reportKey));
@@ -237,7 +297,7 @@ export function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState
   ${renderSettings(settings)}
   <div class="view-switch" role="group" aria-label="表示切替">
     <button type="button" data-view-mode="simple" class="active-mode">簡易</button>
-    <button type="button" data-view-mode="full">従来</button>
+    <button type="button" data-view-mode="full">詳細</button>
   </div>
   ${awaiting}
   ${error}
@@ -312,12 +372,12 @@ function renderSimpleWorkflowPanel(functionName: string, workspace: string, step
 </div>
 <div class="simple-card">
   <h2>結果・補助</h2>
-  <div class="actions">${SIMPLE_SECONDARY_ACTIONS.map(renderAction).join('')}</div>
+  <div class="actions">${SIMPLE_SECONDARY_ACTIONS.map((action) => renderAction(action)).join('')}</div>
 </div>
 <div class="simple-card">
   <h2>表示切替</h2>
-  <p class="simple-meta">正式レビューや証跡確認の全工程を見る場合は従来表示に切り替えます。</p>
-  <button type="button" data-view-mode="full">従来パネルを表示</button>
+  <p class="simple-meta">正式レビューや証跡確認の全工程を見る場合は詳細表示に切り替えます。</p>
+  <button type="button" data-view-mode="full">詳細パネルを表示</button>
 </div>`;
 }
 
@@ -340,10 +400,10 @@ function simpleFlowSteps(steps: WorkflowStepViews): SimpleFlowStepView[] {
     testDone ? 'done' : buildDone ? 'current' : 'pending',
   ];
   return [
-    { title: '1. 関数にカーソルして Quick Check', description: '解析・テスト生成の入口です。テストソース確認まで進められるよう、Quick Checkはハーネス生成まで実行します。', status: statuses[0], action: SIMPLE_WORKFLOW_ACTIONS[0] },
-    { title: '2. テストソースを確認・修正', description: 'generated/tests/test_<関数名>.c を開き、入力値・期待値・スタブ設定を人間が確認します。', status: statuses[1], action: SIMPLE_WORKFLOW_ACTIONS[1] },
-    { title: '3. ビルド実行', description: '修正したテストソースを含めて build-probe を実行し、コンパイル・リンク結果を確認します。', status: statuses[2], action: SIMPLE_WORKFLOW_ACTIONS[2] },
-    { title: '4. テスト実行', description: '生成されたテストを実行し、結果レポートまで確認します。', status: statuses[3], action: SIMPLE_WORKFLOW_ACTIONS[3] },
+    { title: '1. Quick Check', description: '解析とテスト生成を行います。', status: statuses[0], action: SIMPLE_WORKFLOW_ACTIONS[0] },
+    { title: '2. テストソース確認', description: '入力値・期待値・スタブ設定を確認し、必要に応じて修正します。', status: statuses[1], action: SIMPLE_WORKFLOW_ACTIONS[1] },
+    { title: '3. ビルド', description: '生成・修正したテストをコンパイルし、リンク結果を確認します。', status: statuses[2], action: SIMPLE_WORKFLOW_ACTIONS[2] },
+    { title: '4. テスト実行', description: '生成されたテストを実行し、結果レポートを確認します。', status: statuses[3], action: SIMPLE_WORKFLOW_ACTIONS[3] },
   ];
 }
 
@@ -357,12 +417,11 @@ function isStepDoneOrCurrentPast(steps: WorkflowStepViews, id: WorkflowStepId): 
 }
 
 function renderSimpleFlowStep(step: SimpleFlowStepView): string {
-  const label = step.status === 'done' ? '完了' : step.status === 'current' ? '次の操作' : '未実施';
   return `<section class="simple-flow-step ${step.status}">
-  <span class="status">${label}</span>
+  <span class="status">${workflowStatusLabel(step.status)}</span>
   <h3>${escapeHtml(step.title)}</h3>
   <p class="simple-meta">${escapeHtml(step.description)}</p>
-  <div class="actions">${renderAction(step.action)}</div>
+  <div class="actions">${renderAction(step.action, step.status)}</div>
 </section>`;
 }
 
@@ -374,31 +433,33 @@ function renderFullWorkflowPanel(functionName: string, workspace: string, steps:
 ${steps.map(renderStep).join('')}
 <div class="optional">
   <h2>任意操作</h2>
-  <div class="actions">${optionalActions.map(renderAction).join('')}</div>
+  <div class="actions">${optionalActions.map((action) => renderAction(action)).join('')}</div>
 </div>`;
 }
 
 function renderStep(step: WorkflowStepViews[number]): string {
-  const label = step.status === 'done' ? '完了' : step.status === 'current' ? '現在の推奨' : '未実施';
   return `<section class="step ${step.status}">
-  <span class="status">${label}</span>
+  <span class="status">${workflowStatusLabel(step.status)}</span>
   <h3>${escapeHtml(step.title)}</h3>
   <p>${escapeHtml(step.purpose)}</p>
   <p class="required">${escapeHtml(step.requiredAction)}</p>
-  <div class="actions">${step.actions.map(renderAction).join('')}</div>
+  <div class="actions">${step.actions.map((action) => renderAction(action, step.status)).join('')}</div>
 </section>`;
 }
 
-function renderAction(action: WorkflowAction): string {
-  const classes = [action.primary ? 'primary' : '', action.danger ? 'danger' : ''].filter(Boolean).join(' ');
+function renderAction(action: WorkflowAction, status?: WorkflowStepStatus): string {
+  const presentation = resolveWorkflowActionPresentation(action, status);
+  if (presentation.hidden) {
+    return '';
+  }
   const attributes = [
     `data-kind="${escapeAttribute(action.kind)}"`,
-    `data-label="${escapeAttribute(action.label)}"`,
+    `data-label="${escapeAttribute(presentation.label)}"`,
     action.commandId ? `data-command-id="${escapeAttribute(action.commandId)}"` : '',
     action.reportKey ? `data-report-key="${escapeAttribute(String(action.reportKey))}"` : '',
     action.stepId ? `data-step-id="${escapeAttribute(action.stepId)}"` : '',
   ].filter(Boolean).join(' ');
-  return `<button class="${classes}" ${attributes}>${escapeHtml(action.label)}</button>`;
+  return `<button class="${presentation.classes}" ${attributes}>${escapeHtml(presentation.label)}</button>`;
 }
 
 function fallbackWorkflowActionLabel(message: WorkflowMessage): string {
@@ -445,6 +506,10 @@ function commandLabel(commandId?: string): string {
     'unitTestRunner.prepareEvidence': 'エビデンスを準備',
   };
   return commandId ? labels[commandId] ?? commandId : 'コマンド実行';
+}
+
+function vscodeApi(): typeof import('vscode') {
+  return require('vscode') as typeof import('vscode');
 }
 
 function escapeHtml(value: string): string {
