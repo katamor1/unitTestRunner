@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from unit_test_runner.c_analyzer.object_definition_finder import find_file_scope_object_definitions
 from unit_test_runner.encoding import decode_bytes_auto
 from unit_test_runner.harness.c90_writer import sha256_file
 from unit_test_runner.process_control import run_process_tree
@@ -455,8 +456,11 @@ def _extern_variable_declarations(text: str) -> list[tuple[str, str, str]]:
 
 
 def _target_source_defines_name(name: str, target_source_texts: list[str]) -> bool:
-    pattern = re.compile(rf"(?m)^\s*(?!extern\b)[^;\n()]*\b{re.escape(name)}\b\s*(?:\[[^\]]*\])?\s*(?:=|;)")
-    return any(pattern.search(text) for text in target_source_texts)
+    return any(
+        definition.name == name
+        for text in target_source_texts
+        for definition in find_file_scope_object_definitions(text)
+    )
 
 
 def _extern_definition_line(prefix: str, name: str, array: str) -> str:

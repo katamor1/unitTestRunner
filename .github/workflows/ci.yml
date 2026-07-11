@@ -149,7 +149,7 @@ jobs:
       - name: Run fixture smoke
         run: |
           $log = Join-Path $env:RUNNER_TEMP "fixture-smoke.log"
-          & py -m unittest tests.test_fixture_cli_smoke -v *>&1 | Tee-Object -FilePath $log
+          & py -m unittest tests.test_fixture_cli_smoke tests.test_vc6_fixture_build_e2e -v *>&1 | Tee-Object -FilePath $log
           $testExit = $LASTEXITCODE
           if ($testExit -ne 0) { exit $testExit }
 

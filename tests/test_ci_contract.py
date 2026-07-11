@@ -57,7 +57,10 @@ class CiContractTests(unittest.TestCase):
 
         text = workflow.read_text(encoding="utf-8")
         self.assertIn("npm.cmd run test:extension-host", text)
-        self.assertIn("py -m unittest tests.test_fixture_cli_smoke -v", text)
+        self.assertIn(
+            "py -m unittest tests.test_fixture_cli_smoke tests.test_vc6_fixture_build_e2e -v",
+            text,
+        )
         self.assertIn("uses: actions/upload-artifact@v4", text)
         self.assertIn("if: failure()", text)
 
