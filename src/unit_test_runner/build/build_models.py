@@ -121,6 +121,28 @@ class BuildPathEntry:
         }
 
 
+@dataclass(frozen=True)
+class LinkLibraryEntry:
+    path: Path
+    source: str
+    link_order: int
+    project_name: str | None = None
+    configuration: str | None = None
+    exists: bool = True
+    scan_status: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "path": _path_text(self.path),
+            "source": self.source,
+            "link_order": self.link_order,
+            "project_name": self.project_name,
+            "configuration": self.configuration,
+            "exists": self.exists,
+            "scan_status": self.scan_status,
+        }
+
+
 @dataclass
 class WorkspaceFile:
     workspace_path: Path
@@ -229,6 +251,8 @@ class BuildWorkspaceReport:
     compiler_options: list[str]
     build_commands: list[BuildCommand]
     diagnostics: list[BuildDiagnostic]
+    link_libraries: list[LinkLibraryEntry] = field(default_factory=list)
+    library_dirs: list[Path] = field(default_factory=list)
     schema_version: str = "0.1"
 
     def to_dict(self) -> dict[str, Any]:
@@ -247,6 +271,8 @@ class BuildWorkspaceReport:
             "compiler_options": self.compiler_options,
             "build_commands": [item.to_dict() for item in self.build_commands],
             "diagnostics": [item.to_dict() for item in self.diagnostics],
+            "link_libraries": [item.to_dict() for item in self.link_libraries],
+            "library_dirs": [_path_text(item) for item in self.library_dirs],
         }
 
 
