@@ -18,7 +18,18 @@ jobs:
           python-version: "3.12"
 
       - name: Run Python tests
-        run: py -m unittest discover -s tests -p "test_*.py"
+        shell: pwsh
+        run: |
+          py -m unittest discover -s tests -p "test_*.py" *>&1 | Tee-Object -FilePath python-test.log
+          exit $LASTEXITCODE
+
+      - name: Upload Python test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-test-log
+          path: python-test.log
+          if-no-files-found: warn
 
       - name: Set up Node
         uses: actions/setup-node@v4
