@@ -1,6 +1,12 @@
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = REPO_ROOT / "src"
+sys.path.insert(0, str(SRC_ROOT))
 
 from tests.coff_fixture import write_import_library, write_library_with_second_linker, write_object_library_without_linker
 from unit_test_runner.vc6.coff_archive import LibrarySymbolCache, normalize_c_link_symbol
