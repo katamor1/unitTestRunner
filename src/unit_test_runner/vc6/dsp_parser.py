@@ -95,19 +95,20 @@ def parse_dsp(path: Path | str, workspace_root: Path | str | None = None) -> Dsp
                 warnings.append(DspParseWarning("unresolved_macro", f"Unresolved macro in compiler option: {macro}", line_number, line))
             continue
 
-        if line.startswith("# ADD") and " LINK32 " in line:
+        link_marker = _link_tool_marker(line)
+        if line.startswith("# ADD") and link_marker is not None:
             if current_config is None:
                 warnings.append(
                     DspParseWarning(
                         "linker_options_without_configuration",
-                        "Linker options appeared outside a configuration block.",
+                        "Linker or librarian options appeared outside a configuration block.",
                         line_number,
                         line,
                     )
                 )
                 continue
-            is_base = line.startswith("# ADD BASE LINK32")
-            options_text = line.split(" LINK32 ", 1)[1]
+            is_base = line.startswith("# ADD BASE")
+            options_text = line.split(link_marker, 1)[1]
             tokens = tokenize_linker_options(options_text)
             if is_base:
                 current_config.linker_base_options.extend(tokens)
@@ -150,6 +151,13 @@ def parse_dsp(path: Path | str, workspace_root: Path | str | None = None) -> Dsp
         warnings=warnings,
         encoding=encoding,
     )
+
+
+def _link_tool_marker(line: str) -> str | None:
+    for marker in (" LINK32 ", " LIB32 "):
+        if marker in line:
+            return marker
+    return None
 
 
 def _merge_path_macros(configuration: DspConfiguration, value) -> None:
