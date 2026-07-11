@@ -68,6 +68,21 @@ class ExecutionRunHistoryTests(unittest.TestCase):
             runner.chmod(0o755)
         return runner
 
+    def _tree_snapshot(self, root: Path) -> tuple[tuple[str, ...], dict[str, bytes]]:
+        directories = tuple(
+            sorted(
+                path.relative_to(root).as_posix()
+                for path in root.rglob("*")
+                if path.is_dir()
+            )
+        )
+        files = {
+            path.relative_to(root).as_posix(): path.read_bytes()
+            for path in root.rglob("*")
+            if path.is_file()
+        }
+        return directories, files
+
     def test_create_run_paths_rejects_an_existing_run_directory(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
@@ -131,7 +146,10 @@ class ExecutionRunHistoryTests(unittest.TestCase):
         from unit_test_runner.contracts import ArtifactKind, validate_payload
         from unit_test_runner.execution.execution_models import TestRunRequest
         from unit_test_runner.execution.report_loader import load_test_execution_report
-        from unit_test_runner.execution.test_execution import execute_test_run
+        from unit_test_runner.execution.test_execution import (
+            execute_test_run,
+            prepare_evidence_from_existing_run,
+        )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
@@ -151,6 +169,8 @@ class ExecutionRunHistoryTests(unittest.TestCase):
                 (seed_root / "test_execution_report.json").read_text(encoding="utf-8")
             )
             legacy_payload = {"schema_version": "0.1", **v1_report["data"]}
+            historical_source_hash = v1_report["subject"]["source_sha256"]
+            legacy_payload["source"]["sha256"] = historical_source_hash
             self._write_json(
                 workspace / "reports" / "test_execution_report.json",
                 legacy_payload,
@@ -172,7 +192,14 @@ class ExecutionRunHistoryTests(unittest.TestCase):
             shutil.copy2(seed_root / "logs" / "test_execution.log", workspace / "logs" / "test_execution.log")
             shutil.rmtree(workspace / "runs")
             (workspace / "reports" / "latest_run.json").unlink()
+            source = workspace / "source" / "sample.c"
+            source.write_text("int sample(void) { return 99; }\n", encoding="utf-8")
+            self.assertNotEqual(
+                historical_source_hash,
+                hashlib.sha256(source.read_bytes()).hexdigest(),
+            )
             legacy_paths = [
+                source,
                 workspace / "reports" / "test_execution_report.json",
                 workspace / "reports" / "test_result.json",
                 workspace / "reports" / "test_result.csv",
@@ -212,11 +239,130 @@ class ExecutionRunHistoryTests(unittest.TestCase):
                 "0.1",
                 migrated["extensions"]["migration"]["source_version"],
             )
+            self.assertEqual(
+                historical_source_hash,
+                migrated["subject"]["source_sha256"],
+            )
             self.assertFalse(validate_payload(ArtifactKind.TEST_EXECUTION_REPORT, migrated))
+            _, _, evidence_manifest = prepare_evidence_from_existing_run(
+                workspace,
+                imported_root.name,
+            )
+            self.assertEqual(
+                "hash_mismatch",
+                evidence_manifest.source_files[0].integrity_status,
+            )
+            self.assertFalse(evidence_manifest.summary.ready_for_review)
             pointer = json.loads(
                 (workspace / "reports" / "latest_run.json").read_text(encoding="utf-8")
             )
             self.assertEqual(imported_root.name, pointer["data"]["run_id"])
+
+    def test_legacy_import_records_missing_logs_without_fabricating_empty_evidence(self):
+        import shutil
+
+        from unit_test_runner.execution.execution_models import TestRunRequest
+        from unit_test_runner.execution.report_loader import load_execution_run
+        from unit_test_runner.execution.test_execution import (
+            execute_test_run,
+            prepare_evidence_from_existing_run,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            runner = self._prepare_workspace(workspace)
+            execute_test_run(
+                TestRunRequest(workspace, runner, 5, True, run_id="seed-run")
+            )
+            seed_root = workspace / "runs" / "seed-run"
+            v1_report = json.loads(
+                (seed_root / "test_execution_report.json").read_text(encoding="utf-8")
+            )
+            legacy_payload = {"schema_version": "0.1", **v1_report["data"]}
+            legacy_payload["source"]["sha256"] = v1_report["subject"][
+                "source_sha256"
+            ]
+            self._write_json(
+                workspace / "reports" / "test_execution_report.json",
+                legacy_payload,
+            )
+            legacy_logs = workspace / "logs"
+            legacy_logs.mkdir()
+            shutil.copy2(
+                seed_root / "logs" / "stdout.log",
+                legacy_logs / "test_stdout.log",
+            )
+            shutil.copy2(
+                seed_root / "logs" / "test_execution.log",
+                legacy_logs / "test_execution.log",
+            )
+            shutil.rmtree(workspace / "runs")
+            (workspace / "reports" / "latest_run.json").unlink()
+
+            imported = load_execution_run(workspace)
+
+            imported_root = workspace / "runs" / imported.run_id
+            self.assertFalse((imported_root / "logs" / "stderr.log").exists())
+            report_payload = json.loads(
+                imported.report_path.read_text(encoding="utf-8")
+            )
+            evidence = {
+                item["file_kind"]: item
+                for item in report_payload["data"]["evidence_files"]
+            }
+            missing_stderr = evidence["execution_stderr_log"]
+            self.assertFalse(missing_stderr["exists"])
+            self.assertIsNone(missing_stderr["sha256"])
+            self.assertEqual("missing", missing_stderr["integrity_status"])
+
+            _, _, manifest = prepare_evidence_from_existing_run(
+                workspace,
+                imported.run_id,
+            )
+            manifest_logs = {item.file_kind: item for item in manifest.logs}
+            self.assertEqual(
+                "missing",
+                manifest_logs["execution_stderr_log"].integrity_status,
+            )
+            self.assertFalse(manifest.summary.ready_for_review)
+
+    def test_invalid_legacy_import_leaves_all_roots_and_pointers_unchanged(self):
+        import shutil
+
+        from unit_test_runner.execution.execution_models import TestRunRequest
+        from unit_test_runner.execution.report_loader import load_execution_run
+        from unit_test_runner.execution.test_execution import execute_test_run
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            runner = self._prepare_workspace(workspace)
+            execute_test_run(
+                TestRunRequest(workspace, runner, 5, True, run_id="seed-run")
+            )
+            seed_report = json.loads(
+                (
+                    workspace
+                    / "runs"
+                    / "seed-run"
+                    / "test_execution_report.json"
+                ).read_text(encoding="utf-8")
+            )
+            legacy_payload = {"schema_version": "0.1", **seed_report["data"]}
+            self._write_json(
+                workspace / "reports" / "test_execution_report.json",
+                legacy_payload,
+            )
+            shutil.rmtree(workspace / "runs")
+            (workspace / "reports" / "latest_run.json").unlink()
+            sentinel = workspace / "evidence" / "existing" / "sentinel.txt"
+            sentinel.parent.mkdir(parents=True)
+            sentinel.write_text("preserve me\n", encoding="utf-8")
+            before = self._tree_snapshot(workspace)
+
+            with self.assertRaisesRegex(ValueError, "historical source SHA-256"):
+                load_execution_run(workspace)
+
+            self.assertEqual(before, self._tree_snapshot(workspace))
 
     def test_actual_run_tests_command_publishes_an_immutable_run(self):
         from argparse import Namespace

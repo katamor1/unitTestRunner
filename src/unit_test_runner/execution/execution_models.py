@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from .evidence_paths import EvidencePaths
+    from .run_paths import RunPaths
 
 
 def _path_text(path: Path | None) -> str | None:
@@ -283,6 +287,11 @@ class EvidenceManifest:
     unresolved_items: list[ExecutionReviewItem]
     summary: EvidenceSummary
     schema_version: str = "0.1"
+    evidence_paths: EvidencePaths | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -316,6 +325,11 @@ class TestExecutionReport:
     warnings: list[TestExecutionWarning]
     policy: TestExecutionPolicy
     schema_version: str = "0.1"
+    run_paths: RunPaths | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return {

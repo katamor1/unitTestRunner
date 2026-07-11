@@ -143,6 +143,120 @@ class EvidenceIntegrityTests(unittest.TestCase):
                         violations,
                     )
 
+    def test_semantic_contract_rejects_inconsistent_evidence_and_run_outcome(self):
+        from unit_test_runner.contracts import ArtifactKind, validate_payload
+        from unit_test_runner.execution.execution_models import TestRunRequest
+        from unit_test_runner.execution.test_execution import (
+            execute_test_run,
+            prepare_evidence_from_existing_run,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            runner = self._prepare_workspace(workspace)
+            report = execute_test_run(TestRunRequest(workspace, runner, 5, True))
+            paths, _, _ = prepare_evidence_from_existing_run(workspace)
+            evidence_payload = json.loads(
+                paths.evidence_manifest.read_text(encoding="utf-8")
+            )
+            self.assertIsNotNone(report.run_paths)
+            execution_payload = json.loads(
+                report.run_paths.execution_report.read_text(encoding="utf-8")
+            )
+
+            failed_green = copy.deepcopy(evidence_payload)
+            failed_green["data"]["summary"]["test_execution_status"] = "failed"
+            failed_green["data"]["summary"]["test_green"] = True
+            violations = validate_payload(
+                ArtifactKind.EVIDENCE_MANIFEST,
+                failed_green,
+            )
+            self.assertTrue(
+                any(
+                    item.code == "inconsistent_summary"
+                    and item.json_path == "$.data.summary.test_green"
+                    for item in violations
+                ),
+                violations,
+            )
+
+            for integrity_status in ("missing", "hash_mismatch"):
+                with self.subTest(integrity_status=integrity_status):
+                    invalid_ready = copy.deepcopy(evidence_payload)
+                    required_file = invalid_ready["data"]["source_files"][0]
+                    required_file["integrity_status"] = integrity_status
+                    required_file["exists"] = integrity_status != "missing"
+                    if integrity_status == "missing":
+                        required_file["sha256"] = None
+                    invalid_ready["data"]["summary"]["ready_for_review"] = True
+                    violations = validate_payload(
+                        ArtifactKind.EVIDENCE_MANIFEST,
+                        invalid_ready,
+                    )
+                    self.assertTrue(
+                        any(
+                            item.code == "inconsistent_readiness"
+                            and item.json_path
+                            == "$.data.summary.ready_for_review"
+                            for item in violations
+                        ),
+                        violations,
+                    )
+
+            noncanonical = copy.deepcopy(execution_payload)
+            noncanonical["data"]["function"]["status"] = "timeout"
+            violations = validate_payload(
+                ArtifactKind.TEST_EXECUTION_REPORT,
+                noncanonical,
+            )
+            self.assertTrue(
+                any(
+                    item.code == "invalid_run_outcome"
+                    and item.json_path == "$.data.function.status"
+                    for item in violations
+                ),
+                violations,
+            )
+
+    def test_missing_required_build_reports_remain_explicit_and_block_review(self):
+        from unit_test_runner.contracts import (
+            ArtifactKind,
+            ContractMode,
+            load_artifact,
+        )
+        from unit_test_runner.execution.execution_models import TestRunRequest
+        from unit_test_runner.execution.test_execution import (
+            execute_test_run,
+            prepare_evidence_from_existing_run,
+        )
+
+        expected_reports = {
+            "build_workspace_report.json": "build_workspace_report",
+            "build_probe_report.json": "build_probe_report",
+        }
+        for filename, file_kind in expected_reports.items():
+            with self.subTest(filename=filename), tempfile.TemporaryDirectory() as temp_dir:
+                workspace = Path(temp_dir)
+                runner = self._prepare_workspace(workspace)
+                execute_test_run(TestRunRequest(workspace, runner, 5, True))
+                (workspace / "reports" / filename).unlink()
+
+                paths, _, manifest = prepare_evidence_from_existing_run(workspace)
+
+                reports = {item.file_kind: item for item in manifest.build_reports}
+                self.assertIn(file_kind, reports)
+                self.assertTrue(reports[file_kind].required)
+                self.assertFalse(reports[file_kind].exists)
+                self.assertIsNone(reports[file_kind].sha256)
+                self.assertEqual("missing", reports[file_kind].integrity_status)
+                self.assertFalse(manifest.summary.ready_for_review)
+                loaded = load_artifact(
+                    paths.evidence_manifest,
+                    expected_kind=ArtifactKind.EVIDENCE_MANIFEST,
+                    mode=ContractMode.STRICT,
+                )
+                self.assertEqual((), loaded.violations)
+
 
 if __name__ == "__main__":
     unittest.main()

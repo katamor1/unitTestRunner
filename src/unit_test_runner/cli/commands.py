@@ -823,7 +823,12 @@ def handle_run_tests(args: argparse.Namespace) -> CLIResult:
         treat_placeholder_as_inconclusive=args.treat_placeholder_as_inconclusive,
         run_id=getattr(args, "run_id", None),
     )
-    payload = _evidence_payload(workspace, report, manifest)
+    payload = _evidence_payload(
+        workspace,
+        report,
+        manifest,
+        evidence_paths=getattr(manifest, "evidence_paths", None),
+    )
     status, exit_code = legacy_execution_exit(report.status, report.executed)
     return CLIResult(
         status=status,
@@ -975,26 +980,6 @@ def _evidence_payload(
             "status": report.status,
             "executed": report.executed,
         }
-    latest_run = (
-        _read_optional_pointer(workspace / "reports" / "latest_run.json")
-        if evidence_paths is None and getattr(report, "schema_version", None) == "1.0.0"
-        else None
-    )
-    if latest_run is not None:
-        run_data = latest_run.get("data", {})
-        reference = run_data.get("execution_report", {})
-        if reference.get("path"):
-            execution_json = workspace / reference["path"]
-            result_json = execution_json.with_name("test_result.json")
-            result_csv = execution_json.with_name("test_result.csv")
-            execution_payload = {
-                "run_id": run_data.get("run_id"),
-                "json": str(execution_json),
-                "result_json": str(result_json),
-                "result_csv": str(result_csv),
-                "status": report.status,
-                "executed": report.executed,
-            }
     manifest_path = (
         evidence_paths.evidence_manifest
         if evidence_paths is not None
@@ -1006,16 +991,6 @@ def _evidence_payload(
         else workspace / "reports" / "evidence_package.md"
     )
     evidence_id = evidence_paths.evidence_id if evidence_paths is not None else None
-    latest_evidence = _read_optional_pointer(
-        workspace / "reports" / "latest_evidence.json"
-    )
-    if evidence_paths is None and latest_evidence is not None:
-        evidence_data = latest_evidence.get("data", {})
-        reference = evidence_data.get("evidence_manifest", {})
-        if reference.get("path"):
-            manifest_path = workspace / reference["path"]
-            package_path = manifest_path.with_name("evidence_package.md")
-            evidence_id = evidence_data.get("evidence_id")
     return {
         "test_execution": execution_payload,
         "evidence": {
@@ -1025,16 +1000,6 @@ def _evidence_payload(
             "status": manifest.summary.test_execution_status,
         },
     }
-
-
-def _read_optional_pointer(path: Path) -> dict[str, Any] | None:
-    if not path.is_file():
-        return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return None
-    return payload if isinstance(payload, dict) else None
 
 
 def _is_writable_directory(path: Path) -> bool:

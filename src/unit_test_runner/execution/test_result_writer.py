@@ -25,6 +25,7 @@ def write_test_execution_reports(
     subject: dict[str, str] | None = None,
     producer_commit: str | None = None,
     extensions: dict[str, Any] | None = None,
+    materialize_missing_logs: bool = True,
 ) -> dict[str, Any] | None:
     if isinstance(workspace, RunPaths):
         if subject is None:
@@ -35,6 +36,7 @@ def write_test_execution_reports(
             subject=subject,
             producer_commit=producer_commit or current_producer_commit(),
             extensions=extensions,
+            materialize_missing_logs=materialize_missing_logs,
         )
     workspace = Path(workspace).resolve()
     reports = workspace / "reports"
@@ -56,10 +58,12 @@ def _write_immutable_test_execution_reports(
     subject: dict[str, str],
     producer_commit: str,
     extensions: dict[str, Any] | None,
+    materialize_missing_logs: bool,
 ) -> dict[str, Any]:
-    for log_path in (paths.stdout_log, paths.stderr_log, paths.combined_log):
-        if not log_path.exists():
-            log_path.write_bytes(b"")
+    if materialize_missing_logs:
+        for log_path in (paths.stdout_log, paths.stderr_log, paths.combined_log):
+            if not log_path.exists():
+                log_path.write_bytes(b"")
     result_data = {
         "summary": report.parsed_result.to_dict() if report.parsed_result else {},
         "case_results": [case.to_dict() for case in report.case_results],

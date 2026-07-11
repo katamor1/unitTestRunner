@@ -300,6 +300,76 @@ class PrepareEvidenceNonDestructiveTests(unittest.TestCase):
                 latest_evidence["data"]["source_run_id"],
             )
 
+    def test_run_tests_cli_preserves_exact_run_evidence_pair_across_interleaving(self):
+        from argparse import Namespace
+        from unittest import mock
+
+        from unit_test_runner.cli.commands import handle_run_tests
+        from unit_test_runner.execution import test_execution
+        from unit_test_runner.execution.execution_models import TestRunRequest
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            runner = self._prepare_workspace(workspace)
+            real_prepare = test_execution.prepare_evidence_from_existing_run
+            observed: dict[str, str | None] = {}
+
+            def interleave(competing_workspace: Path, run_id: str | None = None):
+                initial_pointer = json.loads(
+                    (workspace / "reports" / "latest_run.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                observed["initial_run_id"] = initial_pointer["data"]["run_id"]
+                observed["requested_run_id"] = run_id
+                test_execution.execute_test_run(
+                    TestRunRequest(
+                        workspace,
+                        runner,
+                        5,
+                        True,
+                        run_id="run-interloper",
+                    )
+                )
+                return real_prepare(competing_workspace, run_id=run_id)
+
+            with mock.patch(
+                "unit_test_runner.execution.test_execution.prepare_evidence_from_existing_run",
+                side_effect=interleave,
+            ):
+                result = handle_run_tests(
+                    Namespace(
+                        command="run-tests",
+                        workspace=str(workspace),
+                        executable=str(runner),
+                        run=True,
+                        dry_run=False,
+                        timeout=5,
+                        run_id=None,
+                        allow_placeholder_tests=True,
+                        treat_placeholder_as_inconclusive=True,
+                    )
+                )
+
+            initial_run_id = observed["initial_run_id"]
+            self.assertEqual(initial_run_id, observed["requested_run_id"])
+            self.assertEqual(initial_run_id, result.data["test_execution"]["run_id"])
+            latest_run = json.loads(
+                (workspace / "reports" / "latest_run.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual("run-interloper", latest_run["data"]["run_id"])
+            latest_evidence = json.loads(
+                (workspace / "reports" / "latest_evidence.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(
+                initial_run_id,
+                latest_evidence["data"]["source_run_id"],
+            )
+
     def test_legacy_dry_run_payload_does_not_reuse_latest_real_run_alias(self):
         from argparse import Namespace
 

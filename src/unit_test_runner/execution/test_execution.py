@@ -165,6 +165,7 @@ def execute_test_run(request: TestRunRequest) -> TestExecutionReport:
         warnings=warnings,
         policy=policy,
         schema_version="1.0.0",
+        run_paths=paths,
     )
     subject = _execution_subject(workspace, source_path, function_name)
     producer_commit = current_producer_commit()
@@ -214,6 +215,7 @@ def prepare_evidence_from_existing_run(
         paths,
         producer_commit=producer_commit,
     )
+    manifest.evidence_paths = paths
     manifest_hash = sha256_file(paths.evidence_manifest)
     if manifest_hash is None:
         raise ValueError("Evidence manifest was not published.")
@@ -330,10 +332,14 @@ def prepare_test_execution_evidence(
                 run_id=run_id,
             )
         )
-        _, loaded_report, manifest = prepare_evidence_from_existing_run(
+        if report.run_paths is None:
+            raise ValueError("Execution run paths were not preserved.")
+        evidence_paths, loaded_report, manifest = prepare_evidence_from_existing_run(
             workspace,
-            run_id=run_id,
+            run_id=report.run_paths.run_id,
         )
+        loaded_report.run_paths = report.run_paths
+        manifest.evidence_paths = evidence_paths
         return loaded_report, manifest
     reports = workspace / "reports"
     logs = workspace / "logs"

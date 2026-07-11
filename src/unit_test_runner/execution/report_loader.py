@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,6 +15,7 @@ from unit_test_runner.contracts import (
     RunOutcome,
     load_artifact,
     migrate_payload,
+    validate_payload,
 )
 from unit_test_runner.harness.c90_writer import sha256_file
 
@@ -114,130 +114,136 @@ def _import_legacy_execution_run(
     workspace: Path,
     legacy_report: Path,
 ) -> LoadedExecutionRun:
-    preflight_payload = json.loads(legacy_report.read_text(encoding="utf-8"))
-    preflight_function = preflight_payload.get("function") or {}
-    preflight_status = str(preflight_function.get("status") or "")
-    normalized_preflight_status = (
-        "timed_out" if preflight_status == "timeout" else preflight_status
+    legacy_payload = json.loads(legacy_report.read_text(encoding="utf-8"))
+    migrated = migrate_payload(
+        ArtifactKind.TEST_EXECUTION_REPORT,
+        legacy_payload,
+        target_version="1.0.0",
     )
+    data = migrated.get("data")
+    if not isinstance(data, dict):
+        raise ValueError("Legacy execution report did not migrate to object data.")
+    function = data.get("function") or {}
+    if not isinstance(function, dict):
+        raise ValueError("Legacy execution function must be an object.")
+    raw_status = str(function.get("status") or "")
+    status = "timed_out" if raw_status == "timeout" else raw_status
     terminal = {outcome.value for outcome in RunOutcome if outcome is not RunOutcome.PLANNED}
-    if normalized_preflight_status not in terminal:
+    if status not in terminal:
         raise ValueError(
-            f"Legacy execution report is not terminal: status={preflight_status!r}"
+            f"Legacy execution report is not terminal: status={raw_status!r}"
         )
+    function["status"] = status
+    subject = migrated.get("subject")
+    if not isinstance(subject, dict):
+        raise ValueError("Legacy execution report has no historical subject provenance.")
+    historical_source_hash = subject.get("source_sha256")
+    if not isinstance(historical_source_hash, str):
+        raise ValueError(
+            "Legacy execution report has no verifiable historical source SHA-256; import is blocked."
+        )
+    source_value = subject.get("source_path")
+    if not isinstance(source_value, str) or not source_value:
+        raise ValueError(
+            "Legacy execution report has no verified historical source path; import is blocked."
+        )
+    function_id = subject.get("function_id")
+    if not isinstance(function_id, str) or not function_id:
+        raise ValueError(
+            "Legacy execution report has no verified historical function identity; import is blocked."
+        )
+    source_path = _workspace_path(workspace, source_value)
+    relative_source = source_path.relative_to(workspace)
+    data["source"] = {"path": relative_source.as_posix()}
+    command = data.get("command")
+    if isinstance(command, dict):
+        command["working_directory"] = "."
     run_id = (
         "imported-"
         + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         + "-"
         + uuid4().hex[:8]
     )
-    paths = create_run_paths(workspace, run_id)
-    shutil.copy2(legacy_report, paths.execution_report)
-    legacy_payload = json.loads(paths.execution_report.read_text(encoding="utf-8"))
-    migrated = migrate_payload(
-        ArtifactKind.TEST_EXECUTION_REPORT,
-        legacy_payload,
-        target_version="1.0.0",
-    )
-    data = migrated["data"]
-    function = data.get("function") or {}
-    raw_status = str(function.get("status") or "")
-    status = "timed_out" if raw_status == "timeout" else raw_status
-    if status not in terminal:
-        raise ValueError(
-            f"Legacy execution report is not terminal: status={raw_status!r}"
-        )
-    function["status"] = status
-    source_value = str((data.get("source") or {}).get("path") or "")
-    source_path = _workspace_path(workspace, source_value)
-    if not source_path.is_file():
-        raise ValueError(f"Legacy execution source file does not exist: {source_path}")
-    relative_source = source_path.relative_to(workspace)
-    data["source"] = {"path": relative_source.as_posix()}
-    command = data.get("command")
-    if isinstance(command, dict):
-        command["working_directory"] = "."
-    _copy_legacy_log(
-        workspace / "logs" / "test_stdout.log",
-        paths.stdout_log,
-    )
-    _copy_legacy_log(
-        workspace / "logs" / "test_stderr.log",
-        paths.stderr_log,
-    )
-    _copy_legacy_log(
-        workspace / "logs" / "test_execution.log",
-        paths.combined_log,
-    )
     command_result = data.get("command_result")
     if isinstance(command_result, dict):
-        command_result["stdout_log"] = paths.stdout_log.relative_to(workspace).as_posix()
-        command_result["stderr_log"] = paths.stderr_log.relative_to(workspace).as_posix()
-        command_result["combined_log"] = paths.combined_log.relative_to(workspace).as_posix()
+        command_result["stdout_log"] = f"runs/{run_id}/logs/stdout.log"
+        command_result["stderr_log"] = f"runs/{run_id}/logs/stderr.log"
+        command_result["combined_log"] = f"runs/{run_id}/logs/test_execution.log"
     data["evidence_files"] = []
     report = _report_from_data(data, "1.0.0")
-    subject = _verified_subject(
-        workspace,
-        relative_source,
-        report.function_name,
-    )
     producer_commit = current_producer_commit()
-    write_test_execution_reports(
-        paths,
-        report,
+    preflight_data = report.to_dict()
+    preflight_data.pop("schema_version", None)
+    preflight_payload = build_artifact_payload(
+        ArtifactKind.TEST_EXECUTION_REPORT,
+        preflight_data,
         subject=subject,
         producer_commit=producer_commit,
         extensions=migrated.get("extensions"),
     )
-    report_hash = sha256_file(paths.execution_report)
-    if report_hash is None:
-        raise ValueError("Imported execution report was not published.")
-    pointer = build_artifact_payload(
-        ArtifactKind.LATEST_RUN_POINTER,
-        {
-            "run_id": run_id,
-            "execution_report": {
-                "artifact_kind": ArtifactKind.TEST_EXECUTION_REPORT.value,
-                "path": paths.execution_report.relative_to(workspace).as_posix(),
-                "sha256": report_hash,
+    _require_valid(
+        validate_payload(ArtifactKind.TEST_EXECUTION_REPORT, preflight_payload),
+        legacy_report,
+    )
+
+    paths = create_run_paths(workspace, run_id)
+    try:
+        shutil.copy2(legacy_report, paths.execution_report)
+        _copy_legacy_log(
+            workspace / "logs" / "test_stdout.log",
+            paths.stdout_log,
+        )
+        _copy_legacy_log(
+            workspace / "logs" / "test_stderr.log",
+            paths.stderr_log,
+        )
+        _copy_legacy_log(
+            workspace / "logs" / "test_execution.log",
+            paths.combined_log,
+        )
+        report_payload = write_test_execution_reports(
+            paths,
+            report,
+            subject=subject,
+            producer_commit=producer_commit,
+            extensions=migrated.get("extensions"),
+            materialize_missing_logs=False,
+        )
+        if report_payload is None:
+            raise ValueError("Imported execution report was not published.")
+        report_hash = sha256_file(paths.execution_report)
+        if report_hash is None:
+            raise ValueError("Imported execution report was not published.")
+        pointer = build_artifact_payload(
+            ArtifactKind.LATEST_RUN_POINTER,
+            {
+                "run_id": run_id,
+                "execution_report": {
+                    "artifact_kind": ArtifactKind.TEST_EXECUTION_REPORT.value,
+                    "path": paths.execution_report.relative_to(workspace).as_posix(),
+                    "sha256": report_hash,
+                },
+                "updated_at": datetime.now(timezone.utc).isoformat(),
             },
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        },
-        subject=subject,
-        producer_commit=producer_commit,
-    )
-    write_validated_artifact(
-        workspace / "reports" / "latest_run.json",
-        ArtifactKind.LATEST_RUN_POINTER,
-        pointer,
-        atomic=True,
-    )
-    return load_execution_run(workspace, run_id)
+            subject=subject,
+            producer_commit=producer_commit,
+        )
+        write_validated_artifact(
+            workspace / "reports" / "latest_run.json",
+            ArtifactKind.LATEST_RUN_POINTER,
+            pointer,
+            atomic=True,
+        )
+    except Exception:
+        shutil.rmtree(paths.root, ignore_errors=True)
+        raise
+    report.run_paths = paths
+    return LoadedExecutionRun(run_id, paths.execution_report, report_payload, report)
 
 
 def _copy_legacy_log(source: Path, destination: Path) -> None:
     if source.is_file():
         shutil.copy2(source, destination)
-    else:
-        destination.write_bytes(b"")
-
-
-def _verified_subject(
-    workspace: Path,
-    source_path: Path,
-    function_name: str,
-) -> dict[str, str]:
-    source_hash = sha256_file(workspace / source_path)
-    if source_hash is None:
-        raise ValueError(f"Execution source file does not exist: {source_path}")
-    identity_seed = f"{source_path.as_posix()}\0{function_name}".encode("utf-8")
-    suffix = hashlib.sha256(identity_seed).hexdigest()[:12]
-    slug = re.sub(r"[^a-z0-9]+", "_", function_name.lower()).strip("_")
-    return {
-        "function_id": f"fn_{slug or 'function'}_{suffix}",
-        "source_path": source_path.as_posix(),
-        "source_sha256": source_hash,
-    }
 
 
 def _report_from_data(data: dict[str, Any], schema_version: str) -> TestExecutionReport:

@@ -121,7 +121,6 @@ def build_evidence_manifest_from_run(
                 "ビルドプローブレポート",
             ),
         )
-        if path.is_file()
     ]
     all_files = validate_evidence_files(
         workspace,
