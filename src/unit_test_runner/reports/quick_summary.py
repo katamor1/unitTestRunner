@@ -31,6 +31,7 @@ def quick_summary_payload(out_dir: Path, dossier: dict[str, Any], phase: str, st
             "configuration": target.get("configuration"),
             "project": target.get("project"),
         },
+        "link_resolution": _link_resolution_summary(out_dir, dossier),
         "steps": _step_summaries(dossier),
         "diagnostics": {
             "count": len(diagnostics),
@@ -43,6 +44,7 @@ def quick_summary_payload(out_dir: Path, dossier: dict[str, Any], phase: str, st
 def render_quick_summary_markdown(payload: dict[str, Any]) -> str:
     target = payload.get("target", {}) if isinstance(payload.get("target"), dict) else {}
     diagnostics = payload.get("diagnostics", {}) if isinstance(payload.get("diagnostics"), dict) else {}
+    link_resolution = payload.get("link_resolution", {}) if isinstance(payload.get("link_resolution"), dict) else {}
     lines = [
         "# Quick Check Summary",
         "",
@@ -57,10 +59,25 @@ def render_quick_summary_markdown(payload: dict[str, Any]) -> str:
         f"- ステータス: `{_text(payload.get('status'))}`",
         f"- 出力workspace: `{_text(payload.get('output_root'))}`",
         "",
-        "## 生成ステップ",
-        "| ステップ | 状態 | レポート |",
-        "|---|---|---|",
+        "## リンク解決",
+        f"- 解決済みライブラリ: {link_resolution.get('library_count', 0)}",
+        f"- ライブラリ提供関数: {link_resolution.get('linked_function_count', 0)}",
+        f"- 警告: {link_resolution.get('warning_count', 0)}",
     ]
+    link_warnings = link_resolution.get("warnings", []) if isinstance(link_resolution.get("warnings"), list) else []
+    for warning in link_warnings:
+        if isinstance(warning, dict):
+            lines.append(f"  - {_text(warning.get('code') or 'link_warning')}: {_text(warning.get('message') or '')}")
+        else:
+            lines.append(f"  - {_text(warning)}")
+    lines.extend(
+        [
+            "",
+            "## 生成ステップ",
+            "| ステップ | 状態 | レポート |",
+            "|---|---|---|",
+        ]
+    )
     for step in payload.get("steps", []):
         if not isinstance(step, dict):
             continue
@@ -81,6 +98,35 @@ def render_quick_summary_markdown(payload: dict[str, Any]) -> str:
         lines.append("- なし")
     lines.append("")
     return "\n".join(lines)
+
+
+def _link_resolution_summary(out_dir: Path, dossier: dict[str, Any]) -> dict[str, Any]:
+    build_context = dossier.get("build_context", {}) if isinstance(dossier.get("build_context"), dict) else {}
+    libraries = build_context.get("link_libraries", []) if isinstance(build_context.get("link_libraries"), list) else []
+    warnings = build_context.get("link_context_warnings", []) if isinstance(build_context.get("link_context_warnings"), list) else []
+    call_payload = dossier.get("call_report_payload") if isinstance(dossier.get("call_report_payload"), dict) else None
+    if call_payload is None:
+        call_payload = _read_json_if_possible(out_dir / "reports" / "call_report.json")
+    calls = call_payload.get("calls", []) if isinstance(call_payload, dict) and isinstance(call_payload.get("calls"), list) else []
+    linked_names = {
+        str(call.get("name") or "")
+        for call in calls
+        if isinstance(call, dict) and call.get("target_kind") == "linked_library_function" and call.get("name")
+    }
+    return {
+        "library_count": len(libraries),
+        "linked_function_count": len(linked_names),
+        "warning_count": len(warnings),
+        "warnings": warnings[:20],
+    }
+
+
+def _read_json_if_possible(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _step_summaries(dossier: dict[str, Any]) -> list[dict[str, Any]]:
