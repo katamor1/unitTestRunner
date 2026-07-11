@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from unit_test_runner.encoding import decode_bytes_auto
+from unit_test_runner.process_control import run_process_tree
 
 from .build_models import BuildDiagnostic, BuildPathEntry, CompileUnit
 
@@ -239,31 +240,26 @@ def _link_command(
 
 
 def _run_command(command: list[str], cwd: Path, timeout_seconds: int, env_setup: Path | str | None = None) -> tuple[int, str]:
-    try:
-        if env_setup:
-            if os.name != "nt":
-                return 127, "Environment setup batch files are supported only on Windows.\n"
-            command_line = f'call "{env_setup}" && {subprocess.list2cmdline(command)}'
-            completed = subprocess.run(
-                ["cmd.exe", "/c", command_line],
-                cwd=cwd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                timeout=timeout_seconds,
-                check=False,
-            )
-        else:
-            completed = subprocess.run(
-                command,
-                cwd=cwd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                timeout=timeout_seconds,
-                check=False,
-            )
-        return completed.returncode, _decode_process_output(completed.stdout)
-    except subprocess.TimeoutExpired as exc:
-        return 124, _decode_process_output(exc.stdout) + f"\nCommand timed out after {timeout_seconds} seconds.\n"
+    if env_setup:
+        if os.name != "nt":
+            return 127, "Environment setup batch files are supported only on Windows.\n"
+        command_line = f'call "{env_setup}" && {subprocess.list2cmdline(command)}'
+        managed_command = ["cmd.exe", "/c", command_line]
+    else:
+        managed_command = command
+
+    completed = run_process_tree(
+        managed_command,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout_seconds=timeout_seconds,
+    )
+    output = _decode_process_output(completed.stdout)
+    if completed.timed_out:
+        suffix = f"\nCommand timed out after {timeout_seconds} seconds. Process tree terminated.\n"
+        return 124, output + suffix
+    return completed.returncode if completed.returncode is not None else 1, output
 
 
 def _decode_process_output(output: bytes | str | None) -> str:

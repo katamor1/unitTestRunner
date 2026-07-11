@@ -20,6 +20,8 @@ export type WorkflowStepId =
   | 'reviewEvidence'
   | 'complete';
 
+export type WorkflowStepStatus = 'done' | 'current' | 'pending';
+
 export type WorkflowCommandKind =
   | 'analyze'
   | 'finalize'
@@ -73,6 +75,7 @@ export interface WorkflowAction {
   id: string;
   kind: WorkflowActionKind;
   label: string;
+  repeatLabel?: string;
   commandId?: string;
   reportKey?: keyof ReportPaths;
   stepId?: WorkflowStepId;
@@ -89,7 +92,7 @@ export interface WorkflowStepDefinition {
 }
 
 export interface WorkflowStepView extends WorkflowStepDefinition {
-  status: 'done' | 'current' | 'pending';
+  status: WorkflowStepStatus;
 }
 
 export interface WorkflowCommandSuccess {
@@ -133,8 +136,8 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
     purpose: '現在のCファイルと関数を対象にdossierを生成します。',
     requiredAction: '関数内にカーソルを置くか関数名を選択して解析します。',
     actions: [
-      { id: 'analyzeCurrent', kind: 'command', label: '現在関数を解析', commandId: 'unitTestRunner.analyzeCurrentFunction', primary: true },
-      { id: 'analyzeSelected', kind: 'command', label: '選択関数を解析', commandId: 'unitTestRunner.analyzeSelectedFunction' },
+      { id: 'analyzeCurrent', kind: 'command', label: '現在関数を解析', repeatLabel: '現在関数の解析を再実行', commandId: 'unitTestRunner.analyzeCurrentFunction', primary: true },
+      { id: 'analyzeSelected', kind: 'command', label: '選択関数を解析', repeatLabel: '選択関数の解析を再実行', commandId: 'unitTestRunner.analyzeSelectedFunction' },
     ],
   },
   {
@@ -165,7 +168,7 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
     purpose: 'dossierからtest_case_designを生成します。',
     requiredAction: 'テスト設計生成コマンドを実行します。',
     actions: [
-      { id: 'generateTestDesign', kind: 'command', label: 'テスト設計を生成', commandId: 'unitTestRunner.generateTestDesign', primary: true },
+      { id: 'generateTestDesign', kind: 'command', label: 'テスト設計を生成', repeatLabel: 'テスト設計を再生成', commandId: 'unitTestRunner.generateTestDesign', primary: true },
     ],
   },
   {
@@ -186,7 +189,7 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
     purpose: 'レビュー済みtest_case_design.jsonを使い、Build Probeの前提になるharness_skeleton_reportを生成します。',
     requiredAction: 'test_case_design.jsonの期待値とレビュー項目を保存した後に、ハーネス生成を実行します。',
     actions: [
-      { id: 'generateHarnessSkeleton', kind: 'command', label: 'ハーネスを生成', commandId: 'unitTestRunner.generateHarnessSkeleton', primary: true },
+      { id: 'generateHarnessSkeleton', kind: 'command', label: 'ハーネスを生成', repeatLabel: 'ハーネスを再生成', commandId: 'unitTestRunner.generateHarnessSkeleton', primary: true },
     ],
   },
   {
@@ -195,7 +198,7 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
     purpose: 'harness_skeleton_report.jsonを使い、実ビルド前に生成workspaceとbuild準備を確認します。',
     requiredAction: 'ハーネス生成が完了してから、dry-runでBuild Probeを実行します。',
     actions: [
-      { id: 'buildProbeDryRun', kind: 'command', label: 'dry-runを実行', commandId: 'unitTestRunner.buildProbeDryRun', primary: true },
+      { id: 'buildProbeDryRun', kind: 'command', label: 'dry-runを実行', repeatLabel: 'dry-runを再実行', commandId: 'unitTestRunner.buildProbeDryRun', primary: true },
     ],
   },
   {
@@ -214,7 +217,7 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
     purpose: '生成されたビルド手順を明示確認のうえ実行します。',
     requiredAction: '確認ダイアログを承認してビルドプローブを実行します。',
     actions: [
-      { id: 'runBuildProbe', kind: 'command', label: 'ビルドプローブを実行', commandId: 'unitTestRunner.runBuildProbe', primary: true, danger: true },
+      { id: 'runBuildProbe', kind: 'command', label: 'ビルドプローブを実行', repeatLabel: 'ビルドプローブを再実行', commandId: 'unitTestRunner.runBuildProbe', primary: true, danger: true },
     ],
   },
   {
@@ -223,7 +226,7 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
     purpose: '生成テストを明示確認のうえ実行します。',
     requiredAction: '確認ダイアログを承認してテストを実行します。',
     actions: [
-      { id: 'runTests', kind: 'command', label: 'テストを実行', commandId: 'unitTestRunner.runTests', primary: true, danger: true },
+      { id: 'runTests', kind: 'command', label: 'テストを実行', repeatLabel: 'テストを再実行', commandId: 'unitTestRunner.runTests', primary: true, danger: true },
     ],
   },
   {
@@ -232,7 +235,7 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
     purpose: '実行結果とmanifestをレビュー用エビデンスへ整理します。',
     requiredAction: 'エビデンス準備コマンドを実行します。',
     actions: [
-      { id: 'prepareEvidence', kind: 'command', label: 'エビデンスを準備', commandId: 'unitTestRunner.prepareEvidence', primary: true },
+      { id: 'prepareEvidence', kind: 'command', label: 'エビデンスを準備', repeatLabel: 'エビデンスを再生成', commandId: 'unitTestRunner.prepareEvidence', primary: true },
     ],
   },
   {

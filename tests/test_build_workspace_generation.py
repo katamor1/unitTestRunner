@@ -18,6 +18,7 @@ from unit_test_runner.build.build_workspace_generator import generate_build_work
 from unit_test_runner.build.log_parser import parse_build_log
 from unit_test_runner.c_analyzer.source_digest import build_source_digest
 from unit_test_runner.dossier import analyze_function_workflow
+from unit_test_runner.process_control import ProcessTreeRunResult
 
 
 def run_module(*args):
@@ -219,10 +220,10 @@ class BuildWorkspaceGenerationTests(unittest.TestCase):
             def fake_run(*args, **kwargs):
                 build_dir = Path(kwargs["cwd"])
                 (build_dir.parent / "logs" / "build.log").write_text(diagnostic_log, encoding="utf-8")
-                return subprocess.CompletedProcess(args[0], 2, stdout="")
+                return ProcessTreeRunResult(2, "", None, False)
 
             with mock.patch("unit_test_runner.build.build_workspace_generator.shutil.which", return_value="tool.exe"):
-                with mock.patch("unit_test_runner.build.build_workspace_generator.subprocess.run", side_effect=fake_run):
+                with mock.patch("unit_test_runner.build.build_workspace_generator.run_process_tree", side_effect=fake_run):
                     _report, probe = generate_build_workspace(
                         reports["build_context"],
                         reports["source_digest"],
@@ -245,10 +246,10 @@ class BuildWorkspaceGenerationTests(unittest.TestCase):
             def fake_run(*args, **kwargs):
                 build_dir = Path(kwargs["cwd"])
                 (build_dir.parent / "logs" / "build.log").write_text("Build succeeded\n", encoding="utf-8")
-                return subprocess.CompletedProcess(args[0], 0, stdout="")
+                return ProcessTreeRunResult(0, "", None, False)
 
             with mock.patch("unit_test_runner.build.build_workspace_generator.shutil.which", return_value=None):
-                with mock.patch("unit_test_runner.build.build_workspace_generator.subprocess.run", side_effect=fake_run) as run:
+                with mock.patch("unit_test_runner.build.build_workspace_generator.run_process_tree", side_effect=fake_run) as run:
                     _report, probe = generate_build_workspace(
                         reports["build_context"],
                         reports["source_digest"],

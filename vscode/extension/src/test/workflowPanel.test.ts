@@ -2,46 +2,172 @@ import * as assert from 'assert';
 import { describe, it } from 'node:test';
 
 import { buildSettingsViewModel } from '../config/settingsViewModel';
-import { renderWorkflowHtml, SIMPLE_SECONDARY_ACTIONS, SIMPLE_WORKFLOW_ACTIONS } from '../workflow/workflowPanel';
-import { buildWorkflowStepViews, EMPTY_REPORT_AVAILABILITY, OPTIONAL_WORKFLOW_ACTIONS, WorkflowState } from '../workflow/workflowState';
+import {
+  renderWorkflowHtml,
+  resolveWorkflowActionPresentation,
+  SIMPLE_SECONDARY_ACTIONS,
+  SIMPLE_WORKFLOW_ACTIONS,
+  workflowStatusLabel,
+} from '../workflow/workflowPanel';
+import {
+  buildWorkflowStepViews,
+  EMPTY_REPORT_AVAILABILITY,
+  OPTIONAL_WORKFLOW_ACTIONS,
+  WorkflowAction,
+  WorkflowState,
+} from '../workflow/workflowState';
+
+function testSettings() {
+  return buildSettingsViewModel(
+    {
+      cliPath: 'unit-test-runner',
+      sourceRoot: 'C:\\work\\product',
+      dswPath: 'C:\\work\\product\\Product.dsw',
+      outputRoot: 'D:\\unit-test-output',
+      defaultConfiguration: 'Win32 Debug',
+    },
+    'C:\\work\\product',
+  );
+}
+
+function renderState(state: WorkflowState): string {
+  const steps = buildWorkflowStepViews(state, EMPTY_REPORT_AVAILABILITY);
+  return renderWorkflowHtml({} as never, state, testSettings(), steps, OPTIONAL_WORKFLOW_ACTIONS);
+}
+
+describe('workflow action presentation', () => {
+  const action: WorkflowAction = {
+    id: 'build',
+    kind: 'command',
+    label: 'ビルドを実行',
+    repeatLabel: 'ビルドを再実行',
+    primary: true,
+    danger: true,
+  };
+
+  it('uses the repeat label for completed command actions', () => {
+    const presentation = resolveWorkflowActionPresentation(action, 'done');
+
+    assert.equal(presentation.label, 'ビルドを再実行');
+    assert.equal(presentation.primary, false);
+    assert.equal(presentation.hidden, false);
+    assert.match(presentation.classes, /danger/);
+    assert.doesNotMatch(presentation.classes, /primary/);
+  });
+
+  it('only applies primary emphasis to the current action', () => {
+    assert.equal(resolveWorkflowActionPresentation(action, 'current').primary, true);
+    assert.equal(resolveWorkflowActionPresentation(action, 'pending').primary, false);
+  });
+
+  it('hides a completed confirmation action', () => {
+    const confirmation: WorkflowAction = {
+      id: 'confirm',
+      kind: 'confirmStep',
+      label: '保存済みとして確定',
+    };
+
+    assert.equal(resolveWorkflowActionPresentation(confirmation, 'done').hidden, true);
+    assert.equal(resolveWorkflowActionPresentation(confirmation, 'current').hidden, false);
+  });
+
+  it('uses the same status labels in both panel modes', () => {
+    assert.equal(workflowStatusLabel('done'), '完了');
+    assert.equal(workflowStatusLabel('current'), '次の操作');
+    assert.equal(workflowStatusLabel('pending'), '未実施');
+  });
+});
 
 describe('UnitTestRunner workflow panel view modes', () => {
-  it('renders the simple panel first with a four-step test flow', () => {
-    const settings = buildSettingsViewModel(
-      {
-        cliPath: 'unit-test-runner',
-        sourceRoot: 'C:\\work\\product',
-        dswPath: 'C:\\work\\product\\Product.dsw',
-        outputRoot: 'D:\\unit-test-output',
-        defaultConfiguration: 'Win32 Debug',
-      },
-      'C:\\work\\product',
-    );
+  it('renders the simple panel with consistent headings and completed action labels', () => {
+    const state: WorkflowState = {
+      settingsReady: true,
+      functionName: 'Control_Update',
+      outputWorkspace: 'D:\\unit-test-output\\Control_Update',
+      completedStepIds: ['settings', 'analyze', 'generateHarnessSkeleton', 'buildProbeRun', 'runTests'],
+    };
+
+    const html = renderState(state);
+
+    assert.match(html, /data-default-mode="simple"/);
+    assert.match(html, /id="simplePanel" class="panel-view simple-panel"/);
+    assert.match(html, /id="fullPanel" class="panel-view full-panel hidden"/);
+    assert.match(html, /<h3>1\. Quick Check<\/h3>/);
+    assert.match(html, /<h3>2\. テストソース確認<\/h3>/);
+    assert.match(html, /<h3>3\. ビルド<\/h3>/);
+    assert.match(html, /<h3>4\. テスト実行<\/h3>/);
+    assert.match(html, />Quick Checkを再実行<\/button>/);
+    assert.match(html, />テストソースを開く<\/button>/);
+    assert.match(html, />ビルドを再実行<\/button>/);
+    assert.match(html, />テストを再実行<\/button>/);
+    assert.doesNotMatch(html, />[1-4]\. (?:Quick Check|テストソース|ビルド|テスト実行).*<\/button>/);
+    assert.match(html, /data-label="Quick Checkを再実行"/);
+    assert.match(html, /data-label="ビルドを再実行"/);
+    assert.match(html, /data-label="テストを再実行"/);
+    assert.ok(SIMPLE_WORKFLOW_ACTIONS.some((item) => item.commandId === 'unitTestRunner.quickCheckCurrentFunction'));
+    assert.ok(SIMPLE_WORKFLOW_ACTIONS.some((item) => item.commandId === 'unitTestRunner.openGeneratedTestSource'));
+    assert.ok(SIMPLE_WORKFLOW_ACTIONS.some((item) => item.commandId === 'unitTestRunner.runBuildProbe'));
+    assert.ok(SIMPLE_WORKFLOW_ACTIONS.some((item) => item.commandId === 'unitTestRunner.runTests'));
+    assert.ok(SIMPLE_SECONDARY_ACTIONS.some((item) => item.commandId === 'unitTestRunner.runFullGateForCurrentFunction'));
+  });
+
+  it('emphasizes only the current simple workflow action', () => {
     const state: WorkflowState = {
       settingsReady: true,
       functionName: 'Control_Update',
       outputWorkspace: 'D:\\unit-test-output\\Control_Update',
       completedStepIds: ['settings'],
     };
-    const steps = buildWorkflowStepViews(state, EMPTY_REPORT_AVAILABILITY);
 
-    const html = renderWorkflowHtml({} as never, state, settings, steps, OPTIONAL_WORKFLOW_ACTIONS);
+    const html = renderState(state);
+    const quickButton = html.match(/<button class="[^"]*"[^>]*>Quick Checkを実行<\/button>/)?.[0] ?? '';
+    const buildButton = html.match(/<button class="[^"]*"[^>]*>ビルドを実行<\/button>/)?.[0] ?? '';
 
-    assert.match(html, /data-default-mode="simple"/);
-    assert.match(html, /id="simplePanel" class="panel-view simple-panel"/);
-    assert.match(html, /id="fullPanel" class="panel-view full-panel hidden"/);
-    assert.match(html, /4ステップで実行/);
-    assert.match(html, /Quick Check/);
-    assert.match(html, /テストソースを開く・修正/);
-    assert.match(html, /ビルド実行/);
-    assert.match(html, /テスト実行/);
-    assert.match(html, /Full Gateへ進む/);
-    assert.match(html, /従来パネルを表示/);
-    assert.match(html, /現在の状態/);
-    assert.ok(SIMPLE_WORKFLOW_ACTIONS.some((action) => action.commandId === 'unitTestRunner.quickCheckCurrentFunction'));
-    assert.ok(SIMPLE_WORKFLOW_ACTIONS.some((action) => action.commandId === 'unitTestRunner.openGeneratedTestSource'));
-    assert.ok(SIMPLE_WORKFLOW_ACTIONS.some((action) => action.commandId === 'unitTestRunner.runBuildProbe'));
-    assert.ok(SIMPLE_WORKFLOW_ACTIONS.some((action) => action.commandId === 'unitTestRunner.runTests'));
-    assert.ok(SIMPLE_SECONDARY_ACTIONS.some((action) => action.commandId === 'unitTestRunner.runFullGateForCurrentFunction'));
+    assert.match(quickButton, /class="[^"]*primary/);
+    assert.doesNotMatch(buildButton, /class="[^"]*primary/);
+  });
+
+  it('applies the same status and repeat-label policy to the detailed panel', () => {
+    const state: WorkflowState = {
+      settingsReady: true,
+      functionName: 'Control_Update',
+      outputWorkspace: 'D:\\unit-test-output\\Control_Update',
+      completedStepIds: ['settings', 'analyze', 'reviewDossier'],
+    };
+
+    const html = renderState(state);
+
+    assert.match(html, /現在関数の解析を再実行/);
+    assert.match(html, /data-label="現在関数の解析を再実行"/);
+    assert.match(html, /次の操作/);
+    assert.match(html, /未実施/);
+    assert.doesNotMatch(html, /現在の推奨/);
+
+    const completedDossier = html.match(
+      /<section class="step done">[\s\S]*?<h3>3\. function_dossier\.md 確認<\/h3>[\s\S]*?<\/section>/,
+    )?.[0] ?? '';
+    assert.ok(completedDossier);
+    assert.doesNotMatch(completedDossier, /保存済みとして確定/);
+  });
+
+  it('renders the approved display terminology and keeps data labels aligned', () => {
+    const state: WorkflowState = {
+      settingsReady: true,
+      functionName: 'Control_Update',
+      outputWorkspace: 'D:\\unit-test-output\\Control_Update',
+      completedStepIds: ['settings'],
+    };
+
+    const html = renderState(state);
+
+    assert.match(html, />簡易<\/button>/);
+    assert.match(html, />詳細<\/button>/);
+    assert.match(html, />詳細パネルを表示<\/button>/);
+    assert.doesNotMatch(html, /従来/);
+    assert.doesNotMatch(html, /現在の推奨/);
+
+    for (const match of html.matchAll(/<button[^>]*data-label="([^"]+)"[^>]*>([^<]+)<\/button>/g)) {
+      assert.equal(match[1], match[2]);
+    }
   });
 });

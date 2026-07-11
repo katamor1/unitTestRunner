@@ -1,0 +1,35 @@
+name: Export Dependency Policy Workspace
+
+on:
+  push:
+    branches:
+      - feature/dependency-policy-dispatcher
+    paths:
+      - .github/workflows/export-dependency-policy-workspace.yml
+  pull_request:
+    branches:
+      - feature/header-reference-build-workspace
+    paths:
+      - .github/workflows/export-dependency-policy-workspace.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/dependency-policy-dispatcher
+          fetch-depth: 0
+      - name: Archive repository including Git metadata
+        shell: bash
+        run: tar -czf "$RUNNER_TEMP/full-repo.tgz" .
+      - name: Upload repository archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-policy-repository
+          path: ${{ runner.temp }}/full-repo.tgz
+          retention-days: 1
