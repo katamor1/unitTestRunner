@@ -218,7 +218,7 @@ Move Quick command handlers into `commands/quickCommands.ts`, use the core outpu
 
 Because the resolver and Python analyzer currently implement C identifiers rather than C++ overload/member identity, restrict v1 editor menu/activation conditions to `editorLangId == c`. Document C++ as unsupported instead of advertising a false contract.
 
-- [ ] **Step 4: Run manifest, compile, and unit tests**
+- [x] **Step 4: Run manifest, compile, and unit tests**
 
 Add `@vscode/test-electron`, an `npm run test:extension-host` script, and an Extension Host smoke test that awaits activation, asserts `extension.isActive`, enumerates expected commands, and deactivates without error.
 
@@ -230,7 +230,7 @@ cd vscode/extension && npm run test:extension-host
 
 Expected: manifest entrypoint contract passes, activation succeeds, and no duplicate command exists.
 
-Local manifest, compile, and unit-test coverage passed. The Extension Host harness was compiled, but its runtime launch requires a display server unavailable in the Linux execution environment; the Windows `vscode-activation` job remains the required completion evidence.
+Local manifest, compile, and unit-test coverage passed. The Extension Host harness was compiled locally but required a display server unavailable in the Linux execution environment; the Windows `vscode-activation` job subsequently passed in GitHub Actions run `29155678869`.
 
 - [x] **Step 5: Commit**
 
@@ -275,11 +275,11 @@ Select `path.win32` for drive/UNC values and `path.posix` for POSIX-rooted value
 - Build the absolute-source assertion from `relative_to(workspace)` rather than joining an absolute path to `out_dir`.
 - Decorate the `cmd.exe` execution test with `@unittest.skipUnless(os.name == "nt", "Windows command-shell contract")` and retain a platform-neutral encoding-unit test.
 
-- [ ] **Step 4: Run on Linux and Windows CI**
+- [x] **Step 4: Run on Linux and Windows CI**
 
 Expected: the five current TypeScript path failures pass on both platforms; the Windows-only Python test skips only on non-Windows.
 
-Linux verification passed. Windows verification remains pending on the recovery PR.
+Linux verification passed. Windows verification passed on recovery PR #7 in GitHub Actions run `29155678869`.
 
 - [x] **Step 5: Commit**
 
@@ -383,7 +383,7 @@ Run `discover-projects`, `map-source`, and `analyze-function --phase design` aga
 
 Upload test logs only on failure. Do not convert failed tests into `continue-on-error`.
 
-- [ ] **Step 5: Run the workflow on a recovery PR**
+- [x] **Step 5: Run the workflow on a recovery PR**
 
 Expected: all five jobs execute even if one fails; after Tasks 1-5, all are GREEN.
 
@@ -519,15 +519,18 @@ Then confirm:
 - [x] No command ID is registered more than once.
 - [x] Default fixture host compile/link succeeds without an unresolved external.
 - [x] A failed, timed-out, blocked, inconclusive, or cancelled execution does not return exit 0.
-- [ ] All GitHub Actions jobs ran and are GREEN.
+- [x] All GitHub Actions jobs ran and are GREEN.
 - [x] The verification record states exact pass/skip counts and operating system.
 
 Verification record (2026-07-11, Linux 6.12.47 x86_64, Python 3.12.13, Node 24.14.0, npm 11.9.0):
 
 - `compileall` passed for `src` and `tests`.
-- Python discovery ran 274 tests: all passed, with 2 expected platform skips.
+- Python discovery ran 276 tests: all passed, with 2 expected platform skips.
 - VS Code compilation and unit tests ran 51 tests: all passed, with 0 skips.
 - The public CLI fixture E2E compiled and linked the generated host test binary without an unresolved external and preserved product-tree hashes.
 - The negative execution fixture returned a nonzero CLI and JSON exit code; table-driven coverage confirms nonzero results for failed, timed-out, blocked, inconclusive, cancelled, error, and unknown terminal states.
 - `unit_test_runner --help` exited 0, `dependency_rewriter.py` is tracked, and the exactly-once command-manifest test passed.
-- Windows path and Extension Host runtime verification remains pending until the branch is pushed and all five GitHub Actions jobs run.
+- Recovery PR #7 GitHub Actions run `29155678869` passed all five independent Windows jobs: source integrity, Python tests, VS Code unit tests, VS Code Extension Host activation, and VC6 fixture smoke.
+- The Windows runner was Microsoft Windows Server 2025 `10.0.26100`; the Python job used Python 3.12.10 and the VS Code jobs used Node 20.20.2.
+- Windows Python discovery ran 276 tests successfully. VS Code unit tests ran 51 tests: 51 passed and 0 failed. Extension Host activation completed successfully.
+- The initial Windows runs exposed and fixed shell-glob test discovery, 8.3 temporary-path comparison, and invalid-PID `WinError 87` test portability defects before the GREEN gate was recorded.
