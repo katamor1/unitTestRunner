@@ -1,1 +1,24 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://unit-test-runner.local/schemas/latest_evidence_pointer.schema.json","title":"Latest Evidence Pointer","allOf":[{"$ref":"common.schema.json"},{"type":"object","properties":{"artifact_kind":{"const":"latest_evidence_pointer"},"schema_version":{"const":"1.0.0"}}}]}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unit-test-runner.local/schemas/latest_evidence_pointer.schema.json",
+  "title": "Latest Evidence Pointer",
+  "allOf": [
+    {
+      "$ref": "common.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "artifact_kind": {
+          "const": "latest_evidence_pointer"
+        },
+        "schema_version": {
+          "const": "1.0.0"
+        },
+        "data": {
+          "$ref": "common.schema.json#/$defs/reservedData"
+        }
+      }
+    }
+  ]
+}

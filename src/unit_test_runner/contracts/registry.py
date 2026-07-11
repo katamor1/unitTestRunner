@@ -24,7 +24,7 @@ _CONTRACTS = tuple(
         current_version=CURRENT_CONTRACT_VERSION,
         schema_resource=f"{kind.value}.schema.json",
         compatible_source_versions=("0.1",),
-        semantic_validator="test_spec" if kind is ArtifactKind.TEST_SPEC else "common",
+        semantic_validator=kind.value,
     )
     for kind in ArtifactKind
 )

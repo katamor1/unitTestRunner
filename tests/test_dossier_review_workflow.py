@@ -275,7 +275,21 @@ class DossierReviewWorkflowTests(unittest.TestCase):
                 mode=ContractMode.COMPATIBLE,
             )
             self.assertTrue(loaded_dossier.migrated)
-            self.assertEqual((), loaded_dossier.violations)
+            self.assertIn(
+                ("missing_provenance", "$.subject.source_sha256", "blocking"),
+                {
+                    (item.code, item.json_path, item.severity)
+                    for item in loaded_dossier.violations
+                },
+            )
+            self.assertNotIn(
+                "0" * 64,
+                json.dumps(loaded_dossier.payload, sort_keys=True),
+            )
+            self.assertNotIn(
+                "invalid_relative_path",
+                {item.code for item in loaded_dossier.violations},
+            )
             self.assertEqual("src/control.c", final_dossier["target"]["source"])
             self.assertEqual("Control_Update", final_dossier["target"]["function"])
             self.assertIn("defines", final_dossier["build_context"])

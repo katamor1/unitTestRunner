@@ -13,50 +13,3559 @@
     "extensions"
   ],
   "properties": {
-    "artifact_kind": {"type": "string", "minLength": 1},
+    "artifact_kind": {
+      "type": "string",
+      "minLength": 1
+    },
     "schema_version": {
       "type": "string",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
     },
-    "producer": {"$ref": "#/$defs/producer"},
-    "subject": {"$ref": "#/$defs/subject"},
-    "data": {"type": "object"},
-    "extensions": {"type": "object"}
+    "producer": {
+      "$ref": "#/$defs/producer"
+    },
+    "subject": {
+      "$ref": "#/$defs/subject"
+    },
+    "data": {
+      "type": "object"
+    },
+    "extensions": {
+      "type": "object"
+    }
   },
   "$defs": {
     "sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
+    "nullableSha256": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^\\S+$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nullablePath": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/relativePath"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stringArray": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "nonEmptyStringArray": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "idArray": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/identifier"
+      },
+      "uniqueItems": true
+    },
+    "pathArray": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/relativePath"
+      }
+    },
+    "opaqueRecord": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "openMap": {
+      "type": "object"
+    },
     "producer": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version", "commit"],
+      "required": [
+        "name",
+        "version",
+        "commit"
+      ],
       "properties": {
-        "name": {"type": "string", "minLength": 1},
-        "version": {"type": "string", "minLength": 1},
-        "commit": {"type": "string", "minLength": 1}
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commit": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "subject": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["function_id", "source_path", "source_sha256"],
+      "required": [
+        "function_id",
+        "source_path",
+        "source_sha256"
+      ],
       "properties": {
-        "function_id": {"type": "string", "minLength": 1},
-        "source_path": {"type": "string", "minLength": 1},
-        "source_sha256": {"$ref": "#/$defs/sha256"}
+        "function_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "source_path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
       }
     },
     "artifact_reference": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["artifact_kind", "path", "sha256"],
+      "required": [
+        "artifact_kind",
+        "path",
+        "sha256"
+      ],
       "properties": {
-        "artifact_kind": {"type": "string", "minLength": 1},
-        "path": {"type": "string", "minLength": 1},
-        "sha256": {"$ref": "#/$defs/sha256"}
+        "artifact_kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
       }
+    },
+    "warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "line_number": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "column": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "line_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "related_artifact_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "related_item": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "related_test_case_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "related_coverage_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "related_condition_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "related_file": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/relativePath"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "related_action_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "related_symbol": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "related_stub_name": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "related_artifact": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dsw_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "project_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "configuration": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "library_candidate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "sourcePath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        }
+      }
+    },
+    "sourceHash": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "functionStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "status"
+      ],
+      "properties": {
+        "function_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "dossierFunction": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "name",
+        "status"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_path": {
+          "$ref": "#/$defs/nullablePath"
+        }
+      }
+    },
+    "typeInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "raw",
+        "normalized",
+        "base_type",
+        "qualifiers",
+        "pointer_level",
+        "is_function_pointer",
+        "is_array",
+        "array_dimensions",
+        "confidence"
+      ],
+      "properties": {
+        "raw": {
+          "type": "string",
+          "minLength": 1
+        },
+        "normalized": {
+          "type": "string",
+          "minLength": 1
+        },
+        "base_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "qualifiers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "storage_class": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pointer_level": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "is_const_pointer": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_struct": {
+          "type": "boolean"
+        },
+        "is_union": {
+          "type": "boolean"
+        },
+        "is_enum": {
+          "type": "boolean"
+        },
+        "is_typedef_like": {
+          "type": "boolean"
+        },
+        "is_function_pointer": {
+          "type": "boolean"
+        },
+        "is_array": {
+          "type": "boolean"
+        },
+        "array_dimensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    "evidenceFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "file_kind",
+        "sha256",
+        "required",
+        "description"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "file_kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/nullableSha256"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "executionReviewItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_kind",
+        "related_test_case_id",
+        "description",
+        "suggested_action",
+        "severity"
+      ],
+      "properties": {
+        "item_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "item_kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "related_test_case_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "suggested_action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "error",
+            "blocking"
+          ]
+        }
+      }
+    },
+    "testResultSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "passed",
+        "failed",
+        "skipped",
+        "inconclusive",
+        "assertion_failures",
+        "parser_confidence",
+        "crashed",
+        "not_run",
+        "started",
+        "completed"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "passed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "inconclusive": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assertion_failures": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parser_confidence": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "crashed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_run": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "started": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "testCaseExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "test_case_id",
+        "generated_function_name",
+        "status",
+        "exit_related",
+        "assertions",
+        "related_coverage_ids",
+        "review_required",
+        "evidence",
+        "warnings"
+      ],
+      "properties": {
+        "test_case_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "generated_function_name": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "unknown",
+            "passed",
+            "failed",
+            "skipped",
+            "inconclusive",
+            "crashed",
+            "timeout",
+            "not_run",
+            "not_found_in_output"
+          ]
+        },
+        "exit_related": {
+          "type": "boolean"
+        },
+        "assertions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "related_coverage_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
+          "uniqueItems": true
+        },
+        "review_required": {
+          "type": "boolean"
+        },
+        "evidence": {
+          "type": "string"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    "snapshotArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_kind",
+        "path",
+        "sha256",
+        "schema_version",
+        "exists"
+      ],
+      "properties": {
+        "artifact_kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/nullableSha256"
+        },
+        "schema_version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exists": {
+          "type": "boolean"
+        }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot_id",
+        "function_name",
+        "source_path",
+        "source_sha256",
+        "build_context_hash",
+        "created_at",
+        "artifacts"
+      ],
+      "properties": {
+        "snapshot_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "function_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_path": {
+          "$ref": "#/$defs/nullablePath"
+        },
+        "source_sha256": {
+          "$ref": "#/$defs/nullableSha256"
+        },
+        "build_context_hash": {
+          "$ref": "#/$defs/nullableSha256"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "artifacts": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/snapshotArtifact"
+          }
+        }
+      }
+    },
+    "dossierArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "artifact_kind",
+        "path",
+        "exists",
+        "sha256",
+        "schema_version",
+        "produced_by_item",
+        "required_level",
+        "stale_candidate",
+        "modified_at",
+        "warnings"
+      ],
+      "properties": {
+        "artifact_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "artifact_kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "sha256": {
+          "$ref": "#/$defs/nullableSha256"
+        },
+        "schema_version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "produced_by_item": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required_level": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stale_candidate": {
+          "type": "boolean"
+        },
+        "modified_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    "dossierReviewItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "review_id",
+        "category",
+        "title",
+        "description",
+        "related_artifacts",
+        "related_test_cases",
+        "severity",
+        "suggested_reviewer_role",
+        "done"
+      ],
+      "properties": {
+        "review_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "related_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
+          "uniqueItems": true
+        },
+        "related_test_cases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
+          "uniqueItems": true
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "error",
+            "blocking"
+          ]
+        },
+        "suggested_reviewer_role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "done": {
+          "type": "boolean"
+        }
+      }
+    },
+    "dossierReadiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mvp_level",
+        "ready_for_review",
+        "ready_for_harness_generation",
+        "ready_for_build_probe",
+        "ready_for_execution",
+        "evidence_ready",
+        "blocked",
+        "blocked_reasons",
+        "quality_score"
+      ],
+      "properties": {
+        "mvp_level": {
+          "enum": [
+            "unknown",
+            "analysis",
+            "mvp1_analysis_only",
+            "mvp2_test_design",
+            "mvp3_build_probe",
+            "mvp4_execution_evidence"
+          ]
+        },
+        "ready_for_review": {
+          "type": "boolean"
+        },
+        "ready_for_harness_generation": {
+          "type": "boolean"
+        },
+        "ready_for_build_probe": {
+          "type": "boolean"
+        },
+        "ready_for_execution": {
+          "type": "boolean"
+        },
+        "evidence_ready": {
+          "type": "boolean"
+        },
+        "blocked": {
+          "type": "boolean"
+        },
+        "blocked_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "quality_score": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "suiteEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry_id",
+        "enabled",
+        "tags",
+        "function",
+        "workspace",
+        "dossier",
+        "test_execution_report",
+        "registered_at"
+      ],
+      "properties": {
+        "entry_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "function": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "source",
+            "project",
+            "configuration"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source": {
+              "$ref": "#/$defs/relativePath"
+            },
+            "project": {
+              "type": "string"
+            },
+            "configuration": {
+              "type": "string"
+            }
+          }
+        },
+        "workspace": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "dossier": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "test_execution_report": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "registered_at": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "suiteRunResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry_id",
+        "function",
+        "workspace",
+        "execution_status",
+        "green_status",
+        "executed",
+        "total_tests",
+        "passed_tests",
+        "failed_tests",
+        "inconclusive_tests",
+        "unresolved_review_count",
+        "report_path"
+      ],
+      "properties": {
+        "entry_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "function": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workspace": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "execution_status": {
+          "enum": [
+            "not_run",
+            "blocked",
+            "passed",
+            "failed",
+            "timeout",
+            "inconclusive",
+            "error"
+          ]
+        },
+        "green_status": {
+          "enum": [
+            "green",
+            "not_green"
+          ]
+        },
+        "executed": {
+          "type": "boolean"
+        },
+        "total_tests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "passed_tests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed_tests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "inconclusive_tests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unresolved_review_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "report_path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "error": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "reconciledCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "test_case_id",
+        "reuse_status",
+        "previous_coverage_ids",
+        "current_coverage_ids",
+        "previous_candidate_ids",
+        "current_candidate_ids",
+        "preserved_fields",
+        "updated_fields",
+        "review_required_fields",
+        "reason",
+        "confidence"
+      ],
+      "properties": {
+        "test_case_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "reuse_status": {
+          "enum": [
+            "reusable",
+            "needs_update",
+            "obsolete",
+            "blocked",
+            "new_required"
+          ]
+        },
+        "previous_coverage_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
+          "uniqueItems": true
+        },
+        "current_coverage_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
+          "uniqueItems": true
+        },
+        "previous_candidate_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
+          "uniqueItems": true
+        },
+        "current_candidate_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
+          "uniqueItems": true
+        },
+        "preserved_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "updated_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "review_required_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confidence": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    "regressionCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "test_case_id",
+        "selection_status",
+        "priority",
+        "reasons",
+        "related_changes",
+        "review_required"
+      ],
+      "properties": {
+        "test_case_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "selection_status": {
+          "enum": [
+            "selected",
+            "skipped_no_impact",
+            "blocked",
+            "new_required"
+          ]
+        },
+        "priority": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "related_changes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "review_required": {
+          "type": "boolean"
+        }
+      }
+    },
+    "inputRequestData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace",
+        "dsw",
+        "source",
+        "function",
+        "configuration",
+        "project",
+        "out"
+      ],
+      "properties": {
+        "workspace": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "dsw": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "source": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "function": {
+          "type": "string",
+          "minLength": 1
+        },
+        "configuration": {
+          "type": "string",
+          "minLength": 1
+        },
+        "project": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "out": {
+          "$ref": "#/$defs/relativePath"
+        }
+      }
+    },
+    "dswDiscoveryData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "status",
+        "workspaces",
+        "warnings"
+      ],
+      "properties": {
+        "command": {
+          "const": "discover-projects"
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "warning",
+            "error"
+          ]
+        },
+        "workspaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    "sourceMembershipData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "status",
+        "source",
+        "matches",
+        "candidate_projects",
+        "warnings"
+      ],
+      "properties": {
+        "command": {
+          "const": "map-source"
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "multiple_matches",
+            "not_found"
+          ]
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "input",
+            "absolute"
+          ],
+          "properties": {
+            "input": {
+              "type": "string",
+              "minLength": 1
+            },
+            "absolute": {
+              "$ref": "#/$defs/relativePath"
+            }
+          }
+        },
+        "matches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "candidate_projects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    "projectMembershipData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project_membership"
+      ],
+      "properties": {
+        "project_membership": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        }
+      }
+    },
+    "buildContextData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace_root",
+        "defines",
+        "include_dirs",
+        "compiler_options",
+        "forced_includes",
+        "precompiled_header",
+        "unresolved_macros"
+      ],
+      "properties": {
+        "workspace_root": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "defines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "include_dirs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
+        },
+        "compiler_options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "forced_includes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
+        },
+        "precompiled_header": {
+          "type": "object"
+        },
+        "unresolved_macros": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "link_libraries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "library_dirs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
+        },
+        "link_context_warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        },
+        "project": {
+          "type": "string",
+          "minLength": 1
+        },
+        "configuration": {
+          "type": "string",
+          "minLength": 1
+        },
+        "build_context": {
+          "$ref": "#/$defs/openMap"
+        }
+      }
+    },
+    "sourceDigestData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "masking",
+        "preprocessor",
+        "token_summary",
+        "warnings",
+        "tokens"
+      ],
+      "properties": {
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "encoding",
+            "newline",
+            "sha256",
+            "line_count",
+            "warnings"
+          ],
+          "properties": {
+            "path": {
+              "$ref": "#/$defs/relativePath"
+            },
+            "encoding": {
+              "type": "string",
+              "minLength": 1
+            },
+            "newline": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "line_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/warning"
+              }
+            }
+          }
+        },
+        "masking": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "masked_source_path",
+            "masked_ranges"
+          ],
+          "properties": {
+            "masked_source_path": {
+              "$ref": "#/$defs/nullablePath"
+            },
+            "masked_ranges": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/opaqueRecord"
+              }
+            }
+          }
+        },
+        "preprocessor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "includes",
+            "macros",
+            "directives"
+          ],
+          "properties": {
+            "includes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/opaqueRecord"
+              }
+            },
+            "macros": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/opaqueRecord"
+              }
+            },
+            "directives": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/opaqueRecord"
+              }
+            }
+          }
+        },
+        "token_summary": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        },
+        "tokens": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        }
+      }
+    },
+    "functionLocationData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "function",
+        "warnings"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/sourcePath"
+        },
+        "function": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "status",
+            "selected_candidate",
+            "candidates",
+            "candidate_count"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "enum": [
+                "found",
+                "multiple_candidates",
+                "malformed",
+                "not_found"
+              ]
+            },
+            "selected_candidate": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/opaqueRecord"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/opaqueRecord"
+              }
+            },
+            "candidate_count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    "functionSignatureData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "function",
+        "warnings"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/sourceHash"
+        },
+        "function": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "status",
+            "style",
+            "confidence",
+            "signature_range",
+            "header_text_raw",
+            "header_text_normalized",
+            "storage_class",
+            "calling_convention",
+            "return_type",
+            "parameters",
+            "takes_no_parameters"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "enum": [
+                "parsed",
+                "partial",
+                "malformed"
+              ]
+            },
+            "style": {
+              "enum": [
+                "ansi",
+                "knr",
+                "unknown"
+              ]
+            },
+            "confidence": {
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            "signature_range": {
+              "$ref": "#/$defs/opaqueRecord"
+            },
+            "header_text_raw": {
+              "type": "string"
+            },
+            "header_text_normalized": {
+              "type": "string"
+            },
+            "storage_class": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "calling_convention": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "return_type": {
+              "$ref": "#/$defs/typeInfo"
+            },
+            "parameters": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/opaqueRecord"
+              }
+            },
+            "takes_no_parameters": {
+              "type": "boolean"
+            }
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    "globalAccessData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "function",
+        "file_scope_declarations",
+        "local_declarations",
+        "parameter_accesses",
+        "global_accesses",
+        "unresolved_identifiers",
+        "side_effect_candidates",
+        "warnings"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/sourceHash"
+        },
+        "function": {
+          "$ref": "#/$defs/functionStatus"
+        },
+        "file_scope_declarations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "local_declarations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "parameter_accesses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "global_accesses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "unresolved_identifiers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "side_effect_candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    "callReportData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "function",
+        "calls",
+        "stub_candidates",
+        "side_effect_candidates",
+        "unresolved_calls",
+        "warnings"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/sourceHash"
+        },
+        "function": {
+          "$ref": "#/$defs/functionStatus"
+        },
+        "calls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "stub_candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "side_effect_candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "unresolved_calls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    "coverageDesignData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "function",
+        "branches",
+        "switches",
+        "loops",
+        "ternaries",
+        "return_paths",
+        "condition_expressions",
+        "coverage_items",
+        "warnings"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/sourceHash"
+        },
+        "function": {
+          "$ref": "#/$defs/functionStatus"
+        },
+        "branches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "switches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "loops": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "ternaries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "return_paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "condition_expressions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "coverage_items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    "boundaryCandidatesData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "function",
+        "input_candidates",
+        "state_candidates",
+        "stub_return_candidates",
+        "equivalence_classes",
+        "boundary_groups",
+        "coverage_links",
+        "warnings"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/sourceHash"
+        },
+        "function": {
+          "$ref": "#/$defs/functionStatus"
+        },
+        "input_candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "state_candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "stub_return_candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "equivalence_classes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "boundary_groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "coverage_links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    "dependencyPolicyData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "function",
+        "dependencies",
+        "external_objects",
+        "warnings"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/sourcePath"
+        },
+        "function": {
+          "$ref": "#/$defs/functionStatus"
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "external_objects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "harnessSkeletonReportData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "function",
+        "output_root",
+        "generation_policy",
+        "generated_files",
+        "stub_skeletons",
+        "test_skeletons",
+        "unresolved_placeholders",
+        "build_hints",
+        "warnings",
+        "dependency_dispatches"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/sourcePath"
+        },
+        "function": {
+          "$ref": "#/$defs/functionStatus"
+        },
+        "output_root": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "generation_policy": {
+          "$ref": "#/$defs/opaqueRecord"
+        },
+        "generated_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "stub_skeletons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "test_skeletons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "unresolved_placeholders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "build_hints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        },
+        "dependency_dispatches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        }
+      }
+    },
+    "buildWorkspaceReportData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "function",
+        "output_root",
+        "copied_files",
+        "referenced_files",
+        "generated_build_files",
+        "compile_units",
+        "link_units",
+        "include_dirs",
+        "defines",
+        "compiler_options",
+        "build_commands",
+        "diagnostics",
+        "link_libraries",
+        "library_dirs"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/sourcePath"
+        },
+        "function": {
+          "$ref": "#/$defs/functionStatus"
+        },
+        "output_root": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "copied_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "referenced_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "generated_build_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "compile_units": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "link_units": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
+        },
+        "include_dirs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "defines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "compiler_options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "build_commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "link_libraries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "library_dirs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
+        }
+      }
+    },
+    "buildProbeReportData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "function",
+        "executed",
+        "exit_code",
+        "started_at",
+        "finished_at",
+        "duration_ms",
+        "commands",
+        "diagnostics",
+        "missing_includes",
+        "unresolved_symbols",
+        "pch_issues",
+        "vc6_compatibility_issues",
+        "log_files"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/sourcePath"
+        },
+        "function": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "status"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "enum": [
+                "not_run",
+                "environment_missing",
+                "succeeded",
+                "failed"
+              ]
+            }
+          }
+        },
+        "executed": {
+          "type": "boolean"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "missing_includes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "unresolved_symbols": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "pch_issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "vc6_compatibility_issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "log_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
+        }
+      }
+    },
+    "buildCompletionPlanData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "function",
+        "policy",
+        "completion_actions",
+        "include_completion_candidates",
+        "stub_completion_candidates",
+        "pch_completion_candidates",
+        "compatibility_feedback_items",
+        "manual_action_items",
+        "warnings"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/sourcePath"
+        },
+        "function": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "status"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "enum": [
+                "no_action_needed",
+                "planned",
+                "manual_action_required"
+              ]
+            }
+          }
+        },
+        "policy": {
+          "$ref": "#/$defs/opaqueRecord"
+        },
+        "completion_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "include_completion_candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "stub_completion_candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "pch_completion_candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "compatibility_feedback_items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "manual_action_items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    "buildCompletionIterationData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "function",
+        "iterations",
+        "final_build_probe_status",
+        "final_diagnostics_summary",
+        "stop_reason",
+        "next_recommended_action",
+        "warnings"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/sourcePath"
+        },
+        "function": {
+          "$ref": "#/$defs/functionStatus"
+        },
+        "iterations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "final_build_probe_status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "final_diagnostics_summary": {
+          "$ref": "#/$defs/opaqueRecord"
+        },
+        "stop_reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "next_recommended_action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    "buildCompletionHistoryData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "iterations"
+      ],
+      "properties": {
+        "iterations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        }
+      }
+    },
+    "testExecutionReportData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "function",
+        "executed",
+        "executable",
+        "command",
+        "command_result",
+        "parsed_result",
+        "case_results",
+        "unresolved_review_items",
+        "evidence_files",
+        "warnings",
+        "policy"
+      ],
+      "properties": {
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "$ref": "#/$defs/nullablePath"
+            }
+          }
+        },
+        "function": {
+          "$ref": "#/$defs/functionStatus"
+        },
+        "executed": {
+          "type": "boolean"
+        },
+        "executable": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaqueRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "command": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaqueRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "command_result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaqueRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parsed_result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/testResultSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "case_results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/testCaseExecution"
+          }
+        },
+        "unresolved_review_items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/executionReviewItem"
+          }
+        },
+        "evidence_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidenceFile"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        },
+        "policy": {
+          "$ref": "#/$defs/opaqueRecord"
+        }
+      }
+    },
+    "testResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "case_results"
+      ],
+      "properties": {
+        "summary": {
+          "$ref": "#/$defs/testResultSummary"
+        },
+        "case_results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/testCaseExecution"
+          }
+        }
+      }
+    },
+    "evidenceManifestData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "function",
+        "workspace_root",
+        "created_at",
+        "source_files",
+        "generated_files",
+        "build_reports",
+        "test_reports",
+        "logs",
+        "unresolved_items",
+        "summary"
+      ],
+      "properties": {
+        "function": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workspace_root": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "created_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidenceFile"
+          }
+        },
+        "generated_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidenceFile"
+          }
+        },
+        "build_reports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidenceFile"
+          }
+        },
+        "test_reports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidenceFile"
+          }
+        },
+        "logs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidenceFile"
+          }
+        },
+        "unresolved_items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/executionReviewItem"
+          }
+        },
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "build_probe_status",
+            "test_execution_status",
+            "total_tests",
+            "passed_tests",
+            "failed_tests",
+            "inconclusive_tests",
+            "unresolved_review_count",
+            "ready_for_review"
+          ],
+          "properties": {
+            "build_probe_status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "test_execution_status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "total_tests": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "passed_tests": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "failed_tests": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "inconclusive_tests": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unresolved_review_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "ready_for_review": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "functionDossierData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "project_membership",
+        "build_context",
+        "function",
+        "test_design",
+        "diagnostics"
+      ],
+      "properties": {
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "function",
+            "configuration",
+            "project"
+          ],
+          "properties": {
+            "source": {
+              "$ref": "#/$defs/relativePath"
+            },
+            "function": {
+              "type": "string",
+              "minLength": 1
+            },
+            "configuration": {
+              "type": "string"
+            },
+            "project": {
+              "type": "string"
+            }
+          }
+        },
+        "project_membership": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "build_context": {
+          "type": "object"
+        },
+        "function": {
+          "$ref": "#/$defs/dossierFunction"
+        },
+        "test_design": {
+          "type": "object"
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {}
+        },
+        "workspace_root": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "created_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifact_index": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dossierArtifact"
+          }
+        },
+        "summaries": {
+          "type": "object"
+        },
+        "traceability": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "review_items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dossierReviewItem"
+          }
+        },
+        "unresolved_items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "next_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "readiness": {
+          "$ref": "#/$defs/dossierReadiness"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        },
+        "source_digest": {
+          "$ref": "#/$defs/openMap"
+        },
+        "function_location": {
+          "$ref": "#/$defs/openMap"
+        },
+        "function_signature": {
+          "$ref": "#/$defs/openMap"
+        },
+        "global_access": {
+          "$ref": "#/$defs/openMap"
+        },
+        "call_report": {
+          "$ref": "#/$defs/openMap"
+        },
+        "dependency_policy": {
+          "$ref": "#/$defs/openMap"
+        },
+        "coverage_design": {
+          "$ref": "#/$defs/openMap"
+        },
+        "boundary_equivalence_candidates": {
+          "$ref": "#/$defs/openMap"
+        },
+        "test_case_design": {
+          "$ref": "#/$defs/openMap"
+        },
+        "harness_skeleton": {
+          "$ref": "#/$defs/openMap"
+        },
+        "build_workspace": {
+          "$ref": "#/$defs/openMap"
+        },
+        "build_probe": {
+          "$ref": "#/$defs/openMap"
+        },
+        "build_completion": {
+          "$ref": "#/$defs/openMap"
+        },
+        "test_execution": {
+          "$ref": "#/$defs/openMap"
+        },
+        "evidence": {
+          "$ref": "#/$defs/openMap"
+        }
+      }
+    },
+    "dossierManifestData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_index",
+        "readiness"
+      ],
+      "properties": {
+        "artifact_index": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dossierArtifact"
+          }
+        },
+        "readiness": {
+          "$ref": "#/$defs/dossierReadiness"
+        }
+      }
+    },
+    "changeImpactData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "function",
+        "previous_snapshot",
+        "current_snapshot",
+        "source_changes",
+        "interface_changes",
+        "dependency_changes",
+        "coverage_changes",
+        "test_design_impacts",
+        "regression_recommendation",
+        "warnings"
+      ],
+      "properties": {
+        "function": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "status"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "enum": [
+                "no_change_detected",
+                "changed",
+                "incompatible_change"
+              ]
+            }
+          }
+        },
+        "previous_snapshot": {
+          "$ref": "#/$defs/snapshot"
+        },
+        "current_snapshot": {
+          "$ref": "#/$defs/snapshot"
+        },
+        "source_changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "interface_changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "dependency_changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "coverage_changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "test_design_impacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "regression_recommendation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaqueRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    "testCaseReconciliationData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "function",
+        "preserved_test_cases",
+        "updated_test_cases",
+        "obsolete_test_cases",
+        "blocked_test_cases",
+        "new_test_case_candidates",
+        "manual_merge_items",
+        "warnings"
+      ],
+      "properties": {
+        "function": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "status"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "const": "completed"
+            }
+          }
+        },
+        "preserved_test_cases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reconciledCase"
+          }
+        },
+        "updated_test_cases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reconciledCase"
+          }
+        },
+        "obsolete_test_cases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reconciledCase"
+          }
+        },
+        "blocked_test_cases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reconciledCase"
+          }
+        },
+        "new_test_case_candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reconciledCase"
+          }
+        },
+        "manual_merge_items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    "regressionSelectionData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "function",
+        "selected_test_cases",
+        "skipped_test_cases",
+        "new_required_test_cases",
+        "blocked_test_cases",
+        "selection_reason_summary",
+        "warnings"
+      ],
+      "properties": {
+        "function": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "status"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "const": "completed"
+            }
+          }
+        },
+        "selected_test_cases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/regressionCase"
+          }
+        },
+        "skipped_test_cases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/regressionCase"
+          }
+        },
+        "new_required_test_cases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/regressionCase"
+          }
+        },
+        "blocked_test_cases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/regressionCase"
+          }
+        },
+        "selection_reason_summary": {
+          "type": "string"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        }
+      }
+    },
+    "suiteManifestData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "suite_id",
+        "source_root",
+        "dsw_path",
+        "entries"
+      ],
+      "properties": {
+        "suite_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "source_root": {
+          "$ref": "#/$defs/nullablePath"
+        },
+        "dsw_path": {
+          "$ref": "#/$defs/nullablePath"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/suiteEntry"
+          }
+        }
+      }
+    },
+    "suiteRunReportData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "suite_id",
+        "selector",
+        "policy",
+        "summary",
+        "results"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "suite_run_completed",
+            "suite_run_failed"
+          ]
+        },
+        "suite_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "selector": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "all"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "tag"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "tag"
+                },
+                "tag": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "entry_ids"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "entry_id"
+                },
+                "entry_ids": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/identifier"
+                  },
+                  "uniqueItems": true
+                }
+              }
+            }
+          ]
+        },
+        "policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "run_tests",
+            "dry_run",
+            "timeout_seconds",
+            "fail_fast",
+            "require_green"
+          ],
+          "properties": {
+            "run_tests": {
+              "type": "boolean"
+            },
+            "dry_run": {
+              "type": "boolean"
+            },
+            "timeout_seconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "fail_fast": {
+              "type": "boolean"
+            },
+            "require_green": {
+              "type": "boolean"
+            }
+          }
+        },
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "total",
+            "green",
+            "not_green",
+            "executed",
+            "failed"
+          ],
+          "properties": {
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "green": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "not_green": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "executed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "failed": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/suiteRunResult"
+          }
+        }
+      }
+    },
+    "promptPackData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "function_dossier"
+      ],
+      "properties": {
+        "function_dossier": {
+          "$ref": "#/$defs/opaqueRecord"
+        }
+      }
+    },
+    "quickSummaryData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "phase",
+        "output_root",
+        "target",
+        "link_resolution",
+        "steps",
+        "diagnostics",
+        "reports"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phase": {
+          "enum": [
+            "analysis",
+            "design",
+            "harness",
+            "build",
+            "execution"
+          ]
+        },
+        "output_root": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "function",
+            "configuration",
+            "project"
+          ],
+          "properties": {
+            "source": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/relativePath"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "function": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "configuration": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "project": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "link_resolution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "library_count",
+            "linked_function_count",
+            "warning_count",
+            "warnings"
+          ],
+          "properties": {
+            "library_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "linked_function_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "warning_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "warnings": {
+              "type": "array",
+              "items": {}
+            }
+          }
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        },
+        "diagnostics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "count",
+            "items"
+          ],
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "items": {
+              "type": "array",
+              "items": {}
+            }
+          }
+        },
+        "reports": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/relativePath"
+          }
+        }
+      }
+    },
+    "reservedData": {
+      "not": {}
     }
   }
 }
