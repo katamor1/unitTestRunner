@@ -35,10 +35,18 @@ jobs:
             "tests\test_link_only_library_calls.py"
           )
           foreach ($test in $tests) {
-            Write-Host "=== $test ==="
-            py $test
+            "=== $test ===" | Tee-Object -FilePath feature-test.log -Append
+            py $test *>&1 | Tee-Object -FilePath feature-test.log -Append
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
+
+      - name: Upload feature test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: feature-test-log
+          path: feature-test.log
+          if-no-files-found: warn
 
       - name: Run full Python suite for baseline comparison
         continue-on-error: true
