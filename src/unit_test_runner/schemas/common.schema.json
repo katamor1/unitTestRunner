@@ -854,6 +854,8 @@
         "schema_version",
         "produced_by_item",
         "required_level",
+        "contract_status",
+        "contract_violations",
         "stale_candidate",
         "modified_at",
         "warnings"
@@ -893,6 +895,51 @@
         "required_level": {
           "type": "string",
           "minLength": 1
+        },
+        "contract_status": {
+          "enum": [
+            "valid",
+            "missing",
+            "parse_error",
+            "schema_error",
+            "unsupported_version",
+            "stale"
+          ]
+        },
+        "contract_violations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "json_path",
+              "message",
+              "severity"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "json_path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              },
+              "severity": {
+                "enum": [
+                  "info",
+                  "warning",
+                  "error",
+                  "blocking"
+                ]
+              }
+            }
+          }
         },
         "stale_candidate": {
           "type": "boolean"

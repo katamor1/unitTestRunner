@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+from unit_test_runner.contracts.models import ContractViolation
 
 
 def _path_text(path: Path | None) -> str | None:
@@ -59,6 +61,15 @@ class DossierArtifact:
     schema_version: str | None
     produced_by_item: str
     required_level: str
+    contract_status: Literal[
+        "valid",
+        "missing",
+        "parse_error",
+        "schema_error",
+        "unsupported_version",
+        "stale",
+    ]
+    contract_violations: list[ContractViolation]
     stale_candidate: bool = False
     modified_at: str | None = None
     warnings: list[DossierWarning] = field(default_factory=list)
@@ -73,6 +84,16 @@ class DossierArtifact:
             "schema_version": self.schema_version,
             "produced_by_item": self.produced_by_item,
             "required_level": self.required_level,
+            "contract_status": self.contract_status,
+            "contract_violations": [
+                {
+                    "code": item.code,
+                    "json_path": item.json_path,
+                    "message": item.message,
+                    "severity": item.severity,
+                }
+                for item in self.contract_violations
+            ],
             "stale_candidate": self.stale_candidate,
             "modified_at": self.modified_at,
             "warnings": [item.to_dict() for item in self.warnings],

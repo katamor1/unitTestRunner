@@ -15,12 +15,12 @@ def write_harness_report(output_root: Path, report: HarnessSkeletonReport) -> di
     reports_dir.mkdir(parents=True, exist_ok=True)
     json_path = reports_dir / "harness_skeleton_report.json"
     markdown_path = reports_dir / "harness_skeleton_report.md"
-    payload = _localized_report_payload(report)
+    payload = report.to_dict()
     json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     markdown_path.write_text(render_harness_markdown(report), encoding="utf-8")
-    _record_report_file(output_root, report, json_path, "report")
+    _record_report_file(output_root, report, json_path, "report", hash_file=False)
     _record_report_file(output_root, report, markdown_path, "report")
-    json_path.write_text(json.dumps(_localized_report_payload(report), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    json_path.write_text(json.dumps(report.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return {"json": json_path, "markdown": markdown_path}
 
 
@@ -97,16 +97,26 @@ def _localized_report_payload(report: HarnessSkeletonReport) -> dict[str, Any]:
     return payload
 
 
-def _record_report_file(output_root: Path, report: HarnessSkeletonReport, path: Path, kind: str) -> None:
+def _record_report_file(
+    output_root: Path,
+    report: HarnessSkeletonReport,
+    path: Path,
+    kind: str,
+    *,
+    hash_file: bool = True,
+) -> None:
     relative = path.relative_to(output_root)
-    if any(item.path == relative for item in report.generated_files):
-        return
+    digest = sha256_file(path) if hash_file else None
+    for item in report.generated_files:
+        if item.path == relative:
+            item.sha256 = digest
+            return
     report.generated_files.append(
         GeneratedFile(
             path=relative,
             file_kind=kind,
             generated_from=["harness_skeleton_report"],
-            sha256=sha256_file(path),
+            sha256=digest,
             overwrite=True,
             review_required=False,
         )

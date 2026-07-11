@@ -24,7 +24,13 @@ def write_build_reports(output_root: Path, workspace: BuildWorkspaceReport, prob
     probe_json.write_text(json.dumps(probe.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     probe_md.write_text(render_probe_markdown(probe), encoding="utf-8")
     for path, kind in [(workspace_json, "report"), (workspace_md, "report"), (probe_json, "report"), (probe_md, "report")]:
-        _record_build_file(output_root, workspace, path, kind)
+        _record_build_file(
+            output_root,
+            workspace,
+            path,
+            kind,
+            hash_file=path != workspace_json,
+        )
     workspace_json.write_text(json.dumps(workspace.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return {"workspace_json": workspace_json, "workspace_markdown": workspace_md, "probe_json": probe_json, "probe_markdown": probe_md}
 
@@ -120,8 +126,20 @@ def _write_debug_dsp(output_root: Path, report: BuildWorkspaceReport) -> None:
         _record_build_file(output_root, report, options_path, "vc6_cpp_response")
 
 
-def _record_build_file(output_root: Path, report: BuildWorkspaceReport, path: Path, kind: str) -> None:
+def _record_build_file(
+    output_root: Path,
+    report: BuildWorkspaceReport,
+    path: Path,
+    kind: str,
+    *,
+    hash_file: bool = True,
+) -> None:
     relative = path.relative_to(output_root)
-    if any(item.workspace_path == relative for item in report.generated_build_files):
-        return
-    report.generated_build_files.append(WorkspaceFile(relative, kind, sha256=sha256_file(path), generated=True, required=True, exists=path.exists()))
+    digest = sha256_file(path) if hash_file else None
+    for item in report.generated_build_files:
+        if item.workspace_path == relative:
+            item.sha256 = digest
+            item.exists = path.exists()
+            item.required = hash_file
+            return
+    report.generated_build_files.append(WorkspaceFile(relative, kind, sha256=digest, generated=True, required=hash_file, exists=path.exists()))
