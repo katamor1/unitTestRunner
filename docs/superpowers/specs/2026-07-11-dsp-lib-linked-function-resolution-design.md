@@ -15,6 +15,7 @@ UnitTestRunnerが生成する関数単体テストでは、対象関数から呼
 - 永続シンボルキャッシュ
 - 対応DLLのビルド時存在検証
 - COFF解析に失敗したライブラリを根拠とするスタブ除外
+- `.lib` と `/libpath:` 以外のLINK32オプションを完全再現すること
 
 ## 確定した方針
 
@@ -108,21 +109,21 @@ class LinkContext:
 3. `/libpath:` ディレクトリ
 4. 環境変数 `LIB` の各ディレクトリ
 
-`/libpath:` 自体もマクロ展開し、実在ディレクトリだけを生成リンク設定へ引き継ぐ。
+環境変数 `LIB` はWindows形式のセミコロン区切りとして扱う。`/libpath:` 自体もマクロ展開し、実在ディレクトリだけを生成リンク設定へ引き継ぐ。
 
 #### 3.2 直接依存プロジェクト
 
-DSWの依存関係から、選択中プロジェクトの直接依存だけを記載順に取得する。依存プロジェクトでは、対象プロジェクトと同じ platform/configuration 名の構成だけを選択する。
+DSWの依存関係から、選択中プロジェクトの直接依存だけを記載順に取得する。依存先の依存先は探索しない。
 
-対応構成がない場合は `dependency_configuration_not_found` を記録し、その依存プロジェクトをリンク提供元に使わない。
+依存プロジェクトでは、対象プロジェクトと同じ platform と短いconfiguration名を大文字小文字を区別せず比較し、一致する構成だけを選択する。対応構成がない場合は `dependency_configuration_not_found` を記録し、その依存プロジェクトをリンク提供元に使わない。
 
-依存プロジェクト出力 `.lib` は次の優先順位で候補化する。
+依存プロジェクト出力 `.lib` は次の優先順位で解決する。
 
 1. `/implib:"...lib"`
 2. `/out:"...lib"` が `.lib` を指す場合
 3. `Output_Dir/ProjectName.lib`
 
-マクロ展開後、実在する候補が1つだけなら採用する。候補が0件なら `link_library_not_found`、複数なら `dependency_library_output_ambiguous` を記録し、スタブ除外には使わない。
+優先順位は候補集合ではなく段階的フォールバックとして扱う。上位段階で実在する候補が一意に解決できたら、下位段階は評価しない。各段階で実在候補が複数ある場合は `dependency_library_output_ambiguous` を記録して採用しない。全段階で候補が0件なら `link_library_not_found` を記録する。
 
 #### 3.3 マクロ展開
 
@@ -167,9 +168,10 @@ ${ENV_VAR}
 
 1. 第1リンカーメンバーから公開シンボルを読む。
 2. 第2リンカーメンバーが有効なら追加情報を読む。
-3. import objectメンバーを解析する。
-4. リンカーメンバーが欠落または破損している場合だけ、通常COFF objectのシンボル表を走査する。
-5. どの方法でも信頼できる索引を作れなければ `scan_status = failed` とする。
+3. リンカーメンバーが指すメンバーのヘッダーを確認し、通常COFF objectかimport objectかを判定する。
+4. import objectメンバーを解析する。
+5. リンカーメンバーが欠落または破損している場合だけ、通常COFF objectのシンボル表を走査する。
+6. どの方法でも信頼できる索引を作れなければ `scan_status = failed` とする。
 
 通常の大規模ライブラリで全object走査を避け、Quick Checkの応答時間を維持する。
 
@@ -246,6 +248,8 @@ DSW/DSP解析
 
 リンク判定をハーネス生成直前やリンク失敗後に遅延させない。`call_report.json`、テスト設計、生成スタブを最初から一貫させる。
 
+既存呼び出し元との互換性を保つため、`analyze_calls` のリンクコンテキスト引数は省略可能とし、省略時は従来どおりライブラリ照合なしで解析する。
+
 ### 2. 判定順
 
 呼び出し先分類は次の順とする。
@@ -263,11 +267,11 @@ macro_like
 
 ### 3. 提供元モデル
 
-`FunctionCall` に以下を追加する。
+`FunctionCall` にデフォルト値付きで以下を追加する。
 
 ```python
-link_provider: LinkProvider | None
-link_providers: list[LinkProvider]
+link_provider: LinkProvider | None = None
+link_providers: list[LinkProvider] = field(default_factory=list)
 ```
 
 ```python
@@ -295,13 +299,22 @@ JSON例。
     "link_order": 0,
     "project_name": "ProductCore"
   },
-  "link_providers": []
+  "link_providers": [
+    {
+      "library": "C:/product/lib/ProductCore.lib",
+      "symbol": "_ProductCalc@8",
+      "provider_kind": "static_library",
+      "source": "explicit_link32",
+      "link_order": 0,
+      "project_name": "ProductCore"
+    }
+  ]
 }
 ```
 
 ### 4. 複数提供元
 
-同じ正規化関数名が複数ライブラリに存在する場合は、最終リンク順で最初の提供元を `link_provider` にする。全提供元を `link_providers` に保持し、`multiple_library_symbol_providers` 警告を記録する。
+同じ正規化関数名が複数ライブラリに存在する場合は、最終リンク順で最初の提供元を `link_provider` にする。`link_providers` は主提供元を含む全提供元をリンク順で保持し、`multiple_library_symbol_providers` 警告を記録する。
 
 1つ以上の提供元を確認できれば `linked_library_function` とし、スタブ候補から除外する。archiveの遅延取り込みを考慮し、複数提供元だけを根拠に重複定義エラーとは判定しない。
 
