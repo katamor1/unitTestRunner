@@ -137,7 +137,8 @@ class CliWorkflowTests(unittest.TestCase):
             probe = run_cli("build-probe", "--dossier", str(dossier_path), "--dry-run")
             probe_result = json.loads(probe.stdout)
             self.assertTrue(probe_result["dry_run"])
-            self.assertIn(str(out_dir / "extracted" / "src" / "control.c"), probe_result["command"])
+            extracted_source = (out_dir / "extracted" / "src" / "control.c").resolve()
+            self.assertIn(str(extracted_source), probe_result["command"])
             self.assertTrue((out_dir / "generated" / "build" / "Makefile").exists())
             self.assertTrue((out_dir / "reports" / "build_probe.log").exists())
 

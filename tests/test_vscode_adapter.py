@@ -8,6 +8,18 @@ EXTENSION_ROOT = REPO_ROOT / "vscode" / "extension"
 
 
 class VscodeAdapterTests(unittest.TestCase):
+    def test_node_test_script_uses_cross_platform_discovery(self):
+        manifest = json.loads(
+            (EXTENSION_ROOT / "package.json").read_text(encoding="utf-8")
+        )
+
+        test_script = manifest["scripts"]["test"]
+        self.assertEqual(
+            "npm run compile && node ./scripts/run-unit-tests.cjs",
+            test_script,
+        )
+        self.assertNotIn("*", test_script)
+
     def test_extension_manifest_declares_thin_cli_adapter_commands_and_settings(self):
         package_json = EXTENSION_ROOT / "package.json"
         manifest = json.loads(package_json.read_text(encoding="utf-8"))

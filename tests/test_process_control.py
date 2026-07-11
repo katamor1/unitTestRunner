@@ -9,6 +9,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -33,6 +34,10 @@ def process_exists(pid: int) -> bool:
         return False
     except PermissionError:
         return True
+    except OSError as error:
+        if getattr(error, "winerror", None) == 87:
+            return False
+        raise
 
 
 def wait_for_exit(pids: list[int], timeout: float = 5.0) -> bool:
@@ -45,6 +50,13 @@ def wait_for_exit(pids: list[int], timeout: float = 5.0) -> bool:
 
 
 class ProcessControlTests(unittest.TestCase):
+    def test_process_exists_treats_windows_invalid_pid_as_exited(self):
+        invalid_pid = OSError(22, "The parameter is incorrect")
+        invalid_pid.winerror = 87
+
+        with mock.patch("os.kill", side_effect=invalid_pid):
+            self.assertFalse(process_exists(999999))
+
     def test_preserves_output_and_return_code_for_normal_completion(self):
         result = run_process_tree(
             [
