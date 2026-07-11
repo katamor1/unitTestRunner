@@ -11,6 +11,7 @@ from typing import Any
 
 from unit_test_runner.encoding import decode_bytes_auto
 from unit_test_runner.harness.c90_writer import sha256_file
+from unit_test_runner.process_control import run_process_tree
 
 from .build_models import (
     BuildCommand,
@@ -557,7 +558,13 @@ def _build_probe_report(output_root: Path, source_path: Path, function_name: str
         return BuildProbeReport(source_path, function_name, "environment_missing", False, None, [], [diagnostic], [], [], [], [], [])
     started = datetime.now(timezone.utc)
     start_tick = time.monotonic()
-    completed = subprocess.run([_cmd_exe(), "/c", "build.bat"], cwd=output_root / "build", stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout_seconds, check=False)
+    completed = run_process_tree(
+        [_cmd_exe(), "/c", "build.bat"],
+        cwd=output_root / "build",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout_seconds=timeout_seconds,
+    )
     duration_ms = int((time.monotonic() - start_tick) * 1000)
     finished = datetime.now(timezone.utc)
     log_path = output_root / "logs" / "build.log"
@@ -565,9 +572,15 @@ def _build_probe_report(output_root: Path, source_path: Path, function_name: str
         log_text = decode_bytes_auto(log_path.read_bytes())
     else:
         log_text = _decode_process_output(completed.stdout)
-        log_path.write_text(log_text, encoding="utf-8")
+    if completed.timed_out:
+        log_text += f"\nCommand timed out after {timeout_seconds} seconds. Process tree terminated.\n"
+    log_path.write_text(log_text, encoding="utf-8")
     parsed = parse_build_log(log_text, stub_candidates)
-    status = "succeeded" if completed.returncode == 0 else "failed"
+    diagnostics = list(parsed.diagnostics)
+    if completed.timed_out:
+        diagnostics.append(BuildDiagnostic("build_probe_timeout", "error", f"Build probe timed out after {timeout_seconds} seconds; the process tree was terminated.", None, None, None))
+    exit_code = 124 if completed.timed_out else (completed.returncode if completed.returncode is not None else 1)
+    status = "succeeded" if exit_code == 0 else "failed"
     return BuildProbeReport(
         source_path=source_path,
         function_name=function_name,

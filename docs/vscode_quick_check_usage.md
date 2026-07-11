@@ -65,4 +65,4 @@ Quick Check は `analyze-function` を軽量 profile で呼び出す。
 1. 実装中は Quick Check を反復実行する。
 2. `quick_summary.md` と必要な詳細レポートだけを見る。
 3. レビューへ出す前に `Full Gate for Current Function` を実行する。
-4. Full Gate 後は従来の Workflow パネルで review checklist、unresolved items、next actions、build/test/evidence を確認する。
+4. Full Gate 後は Workflow パネルの詳細表示で review checklist、unresolved items、next actions、build/test/evidence を確認する。
