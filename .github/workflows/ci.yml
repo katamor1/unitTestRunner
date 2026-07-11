@@ -23,12 +23,24 @@ jobs:
           py -m unittest discover -s tests -p "test_*.py" *>&1 | Tee-Object -FilePath python-test.log
           exit $LASTEXITCODE
 
-      - name: Upload Python test log
+      - name: Run base Python tests for comparison
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          git worktree add base-worktree 7f050f4ccfcd09a1c2446604fdfb7ffe116abb15
+          Push-Location base-worktree
+          py -m unittest discover -s tests -p "test_*.py" *>&1 | Tee-Object -FilePath ..\base-python-test.log
+          Pop-Location
+
+      - name: Upload Python test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: python-test-log
-          path: python-test.log
+          name: python-test-logs
+          path: |
+            python-test.log
+            base-python-test.log
           if-no-files-found: warn
 
       - name: Set up Node
