@@ -19,6 +19,21 @@
           "$ref": "common.schema.json#/$defs/latestRunPointerData"
         }
       }
+    },
+    {
+      "properties": {
+        "data": {
+          "properties": {
+            "execution_report": {
+              "properties": {
+                "path": {
+                  "pattern": "^runs/[^/]+/test_execution_report\\.json$"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

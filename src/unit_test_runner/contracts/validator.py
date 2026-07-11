@@ -13,7 +13,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 from referencing import Registry, Resource
 
-from .kinds import ArtifactKind, ContractMode
+from .kinds import ArtifactKind, ContractMode, RunOutcome
 from .migrations import migrate_payload
 from .models import ContractViolation, LoadedArtifact
 from .path_policy import iter_contract_path_values, path_policy_for
@@ -387,6 +387,10 @@ def _nested_hash_violations(value: Any, path: str = "$") -> list[ContractViolati
                 key == "sha256"
                 and child is None
                 and bool(value.get("required"))
+                and not (
+                    value.get("exists") is False
+                    and value.get("integrity_status") == "missing"
+                )
             ):
                 violations.append(
                     ContractViolation(
@@ -978,7 +982,7 @@ def _suite_result_is_green(result: Mapping[str, Any]) -> bool:
     )
 
 
-def _execution_semantic_violations(
+def _execution_count_semantic_violations(
     payload: Mapping[str, Any],
 ) -> list[ContractViolation]:
     data = payload.get("data")
@@ -998,6 +1002,115 @@ def _execution_semantic_violations(
             )
         ]
     return []
+
+
+def _test_execution_report_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    violations = _execution_count_semantic_violations(payload)
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return violations
+    function = data.get("function")
+    status = function.get("status") if isinstance(function, Mapping) else None
+    canonical = {outcome.value for outcome in RunOutcome}
+    if isinstance(status, str) and status not in canonical:
+        violations.append(
+            ContractViolation(
+                "invalid_run_outcome",
+                "$.data.function.status",
+                f"Execution status must be a canonical RunOutcome; received {status!r}.",
+                "blocking",
+            )
+        )
+    return violations
+
+
+def _evidence_manifest_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    summary = data.get("summary")
+    if not isinstance(summary, Mapping):
+        return []
+    violations: list[ContractViolation] = []
+    status = summary.get("test_execution_status")
+    canonical = {outcome.value for outcome in RunOutcome}
+    if isinstance(status, str) and status not in canonical:
+        violations.append(
+            ContractViolation(
+                "invalid_run_outcome",
+                "$.data.summary.test_execution_status",
+                f"Execution status must be a canonical RunOutcome; received {status!r}.",
+                "blocking",
+            )
+        )
+    total = summary.get("total_tests")
+    passed = summary.get("passed_tests")
+    failed = summary.get("failed_tests")
+    inconclusive = summary.get("inconclusive_tests")
+    counts = (total, passed, failed, inconclusive)
+    if all(isinstance(value, int) for value in counts):
+        accounted = passed + failed + inconclusive
+        if accounted > total:
+            violations.append(
+                ContractViolation(
+                    "inconsistent_summary",
+                    "$.data.summary.total_tests",
+                    "Outcome counts cannot exceed total_tests.",
+                    "blocking",
+                )
+            )
+    green_counts_are_consistent = (
+        isinstance(total, int)
+        and isinstance(passed, int)
+        and isinstance(failed, int)
+        and isinstance(inconclusive, int)
+        and total > 0
+        and passed == total
+        and failed == 0
+        and inconclusive == 0
+    )
+    if summary.get("test_green") is True and (
+        status != RunOutcome.PASSED.value or not green_counts_are_consistent
+    ):
+        violations.append(
+            ContractViolation(
+                "inconsistent_summary",
+                "$.data.summary.test_green",
+                "test_green requires a non-empty passed outcome with every test passed and no failed or inconclusive tests.",
+                "blocking",
+            )
+        )
+    if summary.get("ready_for_review") is True:
+        evidence_items = [
+            item
+            for field in (
+                "source_files",
+                "generated_files",
+                "build_reports",
+                "test_reports",
+                "logs",
+            )
+            for item in (data.get(field) or [])
+            if isinstance(item, Mapping) and item.get("required") is True
+        ]
+        if any(
+            item.get("exists") is not True
+            or item.get("integrity_status") != "valid"
+            for item in evidence_items
+        ):
+            violations.append(
+                ContractViolation(
+                    "inconsistent_readiness",
+                    "$.data.summary.ready_for_review",
+                    "ready_for_review requires every required evidence file to exist with valid integrity.",
+                    "blocking",
+                )
+            )
+    return violations
 
 
 def _test_spec_semantic_violations(
@@ -1411,9 +1524,9 @@ _ARTIFACT_SEMANTIC_VALIDATORS: dict[
     ArtifactKind.BUILD_COMPLETION_PLAN.value: _build_completion_semantic_violations,
     ArtifactKind.BUILD_COMPLETION_ITERATION.value: _no_artifact_semantic_violations,
     ArtifactKind.BUILD_COMPLETION_HISTORY.value: _no_artifact_semantic_violations,
-    ArtifactKind.TEST_EXECUTION_REPORT.value: _execution_semantic_violations,
-    ArtifactKind.TEST_RESULT.value: _execution_semantic_violations,
-    ArtifactKind.EVIDENCE_MANIFEST.value: _execution_semantic_violations,
+    ArtifactKind.TEST_EXECUTION_REPORT.value: _test_execution_report_semantic_violations,
+    ArtifactKind.TEST_RESULT.value: _execution_count_semantic_violations,
+    ArtifactKind.EVIDENCE_MANIFEST.value: _evidence_manifest_semantic_violations,
     ArtifactKind.FUNCTION_DOSSIER.value: _dossier_semantic_violations,
     ArtifactKind.DOSSIER_MANIFEST.value: _dossier_semantic_violations,
     ArtifactKind.STATE_SETUP_REFLECTION.value: _state_setup_semantic_violations,

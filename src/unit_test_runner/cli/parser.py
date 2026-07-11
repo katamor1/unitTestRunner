@@ -152,11 +152,13 @@ def build_parser() -> argparse.ArgumentParser:
     run_tests.add_argument("--run", action="store_true")
     run_tests.add_argument("--dry-run", action="store_true")
     run_tests.add_argument("--timeout", type=int, default=60)
+    run_tests.add_argument("--run-id")
     run_tests.add_argument("--allow-placeholder-tests", action="store_true")
     run_tests.add_argument("--treat-placeholder-as-inconclusive", action="store_true", default=True)
 
     evidence = subcommands.add_parser("prepare-evidence", help="Regenerate evidence manifest and package from a generated workspace.")
     evidence.add_argument("--workspace", required=True)
+    evidence.add_argument("--run-id")
     evidence.add_argument("--out")
 
     finalize = subcommands.add_parser("finalize-dossier", help="Finalize function dossier and review workflow artifacts from a generated workspace.")

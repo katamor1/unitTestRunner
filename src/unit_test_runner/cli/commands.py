@@ -16,7 +16,10 @@ from unit_test_runner.build_completion.completion_models import BuildCompletionI
 from unit_test_runner.build_completion.completion_report_writer import write_completion_reports
 from unit_test_runner.c_analyzer import list_functions
 from unit_test_runner.dsw_parser import discover_dsw_workspaces, parse_dsw as parse_dsw_workspace
-from unit_test_runner.execution import prepare_test_execution_evidence
+from unit_test_runner.execution import (
+    prepare_evidence_from_existing_run,
+    prepare_test_execution_evidence,
+)
 from unit_test_runner.path_utils import normalize_relative
 from unit_test_runner.reanalysis import (
     reconcile_test_case_reports,
@@ -818,8 +821,14 @@ def handle_run_tests(args: argparse.Namespace) -> CLIResult:
         timeout_seconds=args.timeout,
         allow_placeholder_tests=args.allow_placeholder_tests,
         treat_placeholder_as_inconclusive=args.treat_placeholder_as_inconclusive,
+        run_id=getattr(args, "run_id", None),
     )
-    payload = _evidence_payload(workspace, report, manifest)
+    payload = _evidence_payload(
+        workspace,
+        report,
+        manifest,
+        evidence_paths=getattr(manifest, "evidence_paths", None),
+    )
     status, exit_code = legacy_execution_exit(report.status, report.executed)
     return CLIResult(
         status=status,
@@ -870,8 +879,14 @@ def _split_tags(value: str) -> list[str]:
 
 def handle_prepare_evidence(args: argparse.Namespace) -> CLIResult:
     workspace = _existing_dir(args.workspace, "workspace", args.command)
-    report, manifest = prepare_test_execution_evidence(workspace, run_tests=False, dry_run=True)
-    payload = _evidence_payload(workspace, report, manifest)
+    try:
+        paths, report, manifest = prepare_evidence_from_existing_run(
+            workspace,
+            run_id=getattr(args, "run_id", None),
+        )
+    except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError) as exc:
+        raise CLIError(str(exc), EXIT_INPUT_ERROR, args.command) from exc
+    payload = _evidence_payload(workspace, report, manifest, evidence_paths=paths)
     return CLIResult(
         status="evidence_prepared",
         exit_code=EXIT_OK,
@@ -934,19 +949,54 @@ def _dossier_payload(workspace: Path, dossier, out: Path | None = None) -> dict[
     }
 
 
-def _evidence_payload(workspace: Path, report, manifest) -> dict[str, Any]:
-    return {
-        "test_execution": {
-            "json": str(workspace / "reports" / "test_execution_report.json"),
-            "markdown": str(workspace / "reports" / "test_execution_report.md"),
-            "result_json": str(workspace / "reports" / "test_result.json"),
-            "result_csv": str(workspace / "reports" / "test_result.csv"),
+def _evidence_payload(
+    workspace: Path,
+    report,
+    manifest,
+    *,
+    evidence_paths=None,
+) -> dict[str, Any]:
+    execution_json = workspace / "reports" / "test_execution_report.json"
+    result_json = workspace / "reports" / "test_result.json"
+    result_csv = workspace / "reports" / "test_result.csv"
+    execution_payload: dict[str, Any] = {
+        "json": str(execution_json),
+        "markdown": str(workspace / "reports" / "test_execution_report.md"),
+        "result_json": str(result_json),
+        "result_csv": str(result_csv),
+        "status": report.status,
+        "executed": report.executed,
+    }
+    if evidence_paths is not None:
+        source_run_id = evidence_paths.source_run_id
+        execution_json = (
+            workspace / "runs" / source_run_id / "test_execution_report.json"
+        )
+        execution_payload = {
+            "run_id": source_run_id,
+            "json": str(execution_json),
+            "result_json": str(execution_json.with_name("test_result.json")),
+            "result_csv": str(execution_json.with_name("test_result.csv")),
             "status": report.status,
             "executed": report.executed,
-        },
+        }
+    manifest_path = (
+        evidence_paths.evidence_manifest
+        if evidence_paths is not None
+        else workspace / "reports" / "evidence_manifest.json"
+    )
+    package_path = (
+        evidence_paths.evidence_package
+        if evidence_paths is not None
+        else workspace / "reports" / "evidence_package.md"
+    )
+    evidence_id = evidence_paths.evidence_id if evidence_paths is not None else None
+    return {
+        "test_execution": execution_payload,
         "evidence": {
-            "manifest_json": str(workspace / "reports" / "evidence_manifest.json"),
-            "package_markdown": str(workspace / "reports" / "evidence_package.md"),
+            "evidence_id": evidence_id,
+            "manifest_json": str(manifest_path),
+            "package_markdown": str(package_path),
             "status": manifest.summary.test_execution_status,
         },
     }
