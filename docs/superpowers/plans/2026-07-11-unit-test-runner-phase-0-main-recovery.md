@@ -190,11 +190,11 @@ Verification record (2026-07-11, Linux, Python 3.12.13, Node 24.14.0):
 - Produces: `registerQuickCommands(registry, dependencies): void`
 - Invariant: every `package.json` command ID is registered exactly once by `extension.activate()`.
 
-- [ ] **Step 1: Write an exactly-once command manifest test**
+- [x] **Step 1: Write an exactly-once command manifest test**
 
 Parse `package.json`, collect command IDs, inject a recording registry into `registerUnitTestRunnerCommands`, and assert a count of one for every ID. Include `openGeneratedTestSource`, which is currently registered twice.
 
-- [ ] **Step 2: Write top-level Quick profile tests**
+- [x] **Step 2: Write top-level Quick profile tests**
 
 Invoke the actual Quick command handler with each profile and assert phases:
 
@@ -206,7 +206,7 @@ build-dry-run -> build
 
 The test must fail if the handler overwrites the selected profile.
 
-- [ ] **Step 3: Move Quick handlers under the core activation path**
+- [x] **Step 3: Move Quick handlers under the core activation path**
 
 Set:
 
@@ -230,7 +230,9 @@ cd vscode/extension && npm run test:extension-host
 
 Expected: manifest entrypoint contract passes, activation succeeds, and no duplicate command exists.
 
-- [ ] **Step 5: Commit**
+Local manifest, compile, and unit-test coverage passed. The Extension Host harness was compiled, but its runtime launch requires a display server unavailable in the Linux execution environment; the Windows `vscode-activation` job remains the required completion evidence.
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add vscode/extension/package.json vscode/extension/src tests/test_vscode_adapter.py
@@ -260,15 +262,15 @@ export function isPathInside(candidate: string, root: string): boolean;
 export function resolveReportedPath(value: string, workspace: string): string;
 ```
 
-- [ ] **Step 1: Add drive, UNC, POSIX, and mixed-separator tests**
+- [x] **Step 1: Add drive, UNC, POSIX, and mixed-separator tests**
 
 Use explicit `C:\\work`, `\\\\server\\share`, and `/work` cases. Test behavior, not the host OS result.
 
-- [ ] **Step 2: Implement dialect selection**
+- [x] **Step 2: Implement dialect selection**
 
 Select `path.win32` for drive/UNC values and `path.posix` for POSIX-rooted values. Resolve a relative report path against the workspace; retain an already absolute reported path.
 
-- [ ] **Step 3: Correct platform-specific Python tests**
+- [x] **Step 3: Correct platform-specific Python tests**
 
 - Build the absolute-source assertion from `relative_to(workspace)` rather than joining an absolute path to `out_dir`.
 - Decorate the `cmd.exe` execution test with `@unittest.skipUnless(os.name == "nt", "Windows command-shell contract")` and retain a platform-neutral encoding-unit test.
@@ -277,7 +279,9 @@ Select `path.win32` for drive/UNC values and `path.posix` for POSIX-rooted value
 
 Expected: the five current TypeScript path failures pass on both platforms; the Windows-only Python test skips only on non-Windows.
 
-- [ ] **Step 5: Commit**
+Linux verification passed. Windows verification remains pending on the recovery PR.
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add vscode/extension/src tests/test_cli_entry_point_contract.py tests/test_build_output_encoding.py
@@ -305,7 +309,7 @@ git commit -m "fix: make Windows path contracts platform independent"
 - Generated `target_invocation.h` must include the header that defines a typedef used in its public prototype.
 - Bare `UTR RUN` without OK/FAILED/SKIPPED remains inconclusive.
 
-- [ ] **Step 1: Preserve aggregate declarations in generated tests**
+- [x] **Step 1: Preserve aggregate declarations in generated tests**
 
 Add the minimal shared type-classification result in `harness/type_bridge.py`, distinguishing scalar, aggregate, pointer, and unresolved types. For a known aggregate value parameter, generate:
 
@@ -315,19 +319,19 @@ gbl_input prm = {0};
 
 Do not emit assignment from `TBD_VALID_INT_VALUE`.
 
-- [ ] **Step 2: Include typedef-defining headers in the public target bridge**
+- [x] **Step 2: Include typedef-defining headers in the public target bridge**
 
 When `DWORD` or another resolved typedef appears in `target_invocation.h`, include the same verified product header in the header, not only in `target_invocation.c`.
 
-- [ ] **Step 3: Complete user-facing localization**
+- [x] **Step 3: Complete user-facing localization**
 
 Add the missing stable translation for the generated-test approval warning. Keep machine enum fields unchanged; localize only render output.
 
-- [ ] **Step 4: Update the stale bare-RUN parser test**
+- [x] **Step 4: Update the stale bare-RUN parser test**
 
 Change the expected result to `inconclusive`/low confidence and add a companion `UTR RUN` + `UTR OK` case that is passed.
 
-- [ ] **Step 5: Run focused and full Python tests**
+- [x] **Step 5: Run focused and full Python tests**
 
 ```bash
 PYTHONPATH=src python -m unittest \
@@ -340,7 +344,7 @@ PYTHONPATH=src python -m unittest discover -s tests -p "test_*.py" -v
 
 Expected on Windows: all tests pass. Expected on non-Windows: only explicitly Windows-native tests skip.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/unit_test_runner/harness src/unit_test_runner/reports tests
@@ -359,7 +363,7 @@ git commit -m "fix: align generated type and runner contracts"
 
 **Interfaces:** Five independent jobs: `source-integrity`, `python-tests`, `vscode-tests`, `vscode-activation`, and `fixture-smoke`.
 
-- [ ] **Step 1: Split the current sequential job**
+- [x] **Step 1: Split the current sequential job**
 
 Ensure Python failure does not skip Node setup/tests. Give every job a distinct required-check name.
 
@@ -367,23 +371,23 @@ The `vscode-activation` job installs dependencies and runs `npm run test:extensi
 
 Add `workflow_dispatch` alongside push/pull_request. After pushing the recovery PR, verify repository Actions are enabled/approved and all five checks are created; the GitHub connector returned no workflow run for current merge commit `ec85f0f`, so “workflow file exists” is not sufficient evidence.
 
-- [ ] **Step 2: Add source-integrity checks**
+- [x] **Step 2: Add source-integrity checks**
 
 Run `git ls-files`, `git check-ignore --no-index`, Python `compileall`, and TypeScript compile. Assert all imported local modules are tracked.
 
-- [ ] **Step 3: Add a non-executing fixture smoke**
+- [x] **Step 3: Add a non-executing fixture smoke**
 
 Run `discover-projects`, `map-source`, and `analyze-function --phase design` against `tests/fixtures/vc6_project`; assert the CLI envelope is valid and generated paths exist.
 
-- [ ] **Step 4: Preserve full logs and test counts**
+- [x] **Step 4: Preserve full logs and test counts**
 
 Upload test logs only on failure. Do not convert failed tests into `continue-on-error`.
 
 - [ ] **Step 5: Run the workflow on a recovery PR**
 
-Expected: all four jobs execute even if one fails; after Tasks 1-5, all are GREEN.
+Expected: all five jobs execute even if one fails; after Tasks 1-5, all are GREEN.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add .github/workflows/ci.yml tests/test_ci_contract.py tests/test_repository_source_tracking.py
@@ -417,23 +421,23 @@ class ObjectDefinition:
 def find_file_scope_object_definitions(source_text: str) -> list[ObjectDefinition]: ...
 ```
 
-- [ ] **Step 1: Reproduce the `g_error_code` link failure**
+- [x] **Step 1: Reproduce the `g_error_code` link failure**
 
 Add a fixture test in which a header declares `extern int g_error_code;` and the target function assigns to it. Assert that an assignment is not an object definition and that the generated fixture defines the object exactly once.
 
-- [ ] **Step 2: Add true-definition edge cases**
+- [x] **Step 2: Add true-definition edge cases**
 
 Cover `int g;`, `int g = 1;`, `static int g;`, arrays, brace initializers, declarations inside functions, comments, and macros. Only brace-depth-zero object declarations count.
 
-- [ ] **Step 3: Implement and share the finder**
+- [x] **Step 3: Implement and share the finder**
 
 Replace `_target_source_defines_name()` and dependency-policy definition scanning with the shared file-scope finder. Do not use a name-plus-assignment regex.
 
-- [ ] **Step 4: Add default fixture host build E2E**
+- [x] **Step 4: Add default fixture host build E2E**
 
 Run the public CLI over `tests/fixtures/vc6_project` through `analyze-function --phase build`, then run `build-probe --toolchain verification --run`. Assert successful compile/link, one generated `g_error_code` definition, no fixture conflict/missing diagnostic, and unchanged product-tree hashes.
 
-- [ ] **Step 5: Run and commit**
+- [x] **Step 5: Run and commit**
 
 ```bash
 PYTHONPATH=src python -m unittest \
@@ -473,19 +477,19 @@ def legacy_execution_exit(
 
 This is the immediate v0.1 safety fix. Phase 1 replaces it with the versioned outcome envelope and granular codes.
 
-- [ ] **Step 1: Write table-driven status/exit tests**
+- [x] **Step 1: Write table-driven status/exit tests**
 
 Assert both process return code and JSON `exit_code` for `passed`, `failed`, `timed_out`, `blocked`, `inconclusive`, `cancelled`, and `planned` cases.
 
-- [ ] **Step 2: Promote report status in `handle_run_tests()`**
+- [x] **Step 2: Promote report status in `handle_run_tests()`**
 
 Remove unconditional `EXIT_OK`. Never infer PASS merely from `executed=True`.
 
-- [ ] **Step 3: Add a negative E2E assertion**
+- [x] **Step 3: Add a negative E2E assertion**
 
 Use the current fixture with unresolved/TBD expectations and assert its internal failed status produces a nonzero CLI result. Do not claim this fixture is a valid GREEN test; Phase 2 adds the reviewed-oracle GREEN E2E.
 
-- [ ] **Step 4: Run and commit**
+- [x] **Step 4: Run and commit**
 
 ```bash
 PYTHONPATH=src python -m unittest \
@@ -509,11 +513,21 @@ cd vscode/extension && npm ci && npm test
 
 Then confirm:
 
-- [ ] `git status --short` contains only intended changes.
-- [ ] `git ls-files src/unit_test_runner/build/dependency_rewriter.py` returns the file.
-- [ ] `python -m unit_test_runner --help` exits 0.
-- [ ] No command ID is registered more than once.
-- [ ] Default fixture host compile/link succeeds without an unresolved external.
-- [ ] A failed, timed-out, blocked, inconclusive, or cancelled execution does not return exit 0.
+- [x] `git status --short` contains only intended changes.
+- [x] `git ls-files src/unit_test_runner/build/dependency_rewriter.py` returns the file.
+- [x] `python -m unit_test_runner --help` exits 0.
+- [x] No command ID is registered more than once.
+- [x] Default fixture host compile/link succeeds without an unresolved external.
+- [x] A failed, timed-out, blocked, inconclusive, or cancelled execution does not return exit 0.
 - [ ] All GitHub Actions jobs ran and are GREEN.
-- [ ] The verification record states exact pass/skip counts and operating system.
+- [x] The verification record states exact pass/skip counts and operating system.
+
+Verification record (2026-07-11, Linux 6.12.47 x86_64, Python 3.12.13, Node 24.14.0, npm 11.9.0):
+
+- `compileall` passed for `src` and `tests`.
+- Python discovery ran 274 tests: all passed, with 2 expected platform skips.
+- VS Code compilation and unit tests ran 51 tests: all passed, with 0 skips.
+- The public CLI fixture E2E compiled and linked the generated host test binary without an unresolved external and preserved product-tree hashes.
+- The negative execution fixture returned a nonzero CLI and JSON exit code; table-driven coverage confirms nonzero results for failed, timed-out, blocked, inconclusive, cancelled, error, and unknown terminal states.
+- `unit_test_runner --help` exited 0, `dependency_rewriter.py` is tracked, and the exactly-once command-manifest test passed.
+- Windows path and Extension Host runtime verification remains pending until the branch is pushed and all five GitHub Actions jobs run.
