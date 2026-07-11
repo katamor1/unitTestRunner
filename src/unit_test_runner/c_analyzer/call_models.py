@@ -28,6 +28,26 @@ class CallAnalyzerWarning:
         return value
 
 
+@dataclass(frozen=True)
+class LinkProvider:
+    library: Path
+    symbol: str
+    provider_kind: str
+    source: str
+    link_order: int
+    project_name: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "library": path_text(self.library),
+            "symbol": self.symbol,
+            "provider_kind": self.provider_kind,
+            "source": self.source,
+            "link_order": self.link_order,
+            "project_name": self.project_name,
+        }
+
+
 @dataclass
 class ReturnUsage:
     usage_kind: str
@@ -86,6 +106,8 @@ class FunctionCall:
     confidence: str = "medium"
     evidence: str = ""
     warnings: list[CallAnalyzerWarning] = field(default_factory=list)
+    link_provider: LinkProvider | None = None
+    link_providers: list[LinkProvider] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -101,6 +123,8 @@ class FunctionCall:
             "confidence": self.confidence,
             "evidence": self.evidence,
             "warnings": [warning.to_dict() for warning in self.warnings],
+            "link_provider": self.link_provider.to_dict() if self.link_provider else None,
+            "link_providers": [provider.to_dict() for provider in self.link_providers],
         }
 
 
