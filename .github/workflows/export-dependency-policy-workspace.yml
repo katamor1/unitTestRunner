@@ -6,6 +6,11 @@ on:
       - feature/dependency-policy-dispatcher
     paths:
       - .github/workflows/export-dependency-policy-workspace.yml
+  pull_request:
+    branches:
+      - feature/header-reference-build-workspace
+    paths:
+      - .github/workflows/export-dependency-policy-workspace.yml
 
 permissions:
   contents: read
