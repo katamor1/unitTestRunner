@@ -144,7 +144,7 @@ class CliWorkflowTests(unittest.TestCase):
 
             design = run_cli("generate-test-design", "--dossier", str(dossier_path))
             self.assertEqual(
-                str(out_dir / "reports" / "test_case_design.csv"),
+                str((out_dir / "reports" / "test_case_design.csv").resolve()),
                 json.loads(design.stdout)["test_case_design"],
             )
 
