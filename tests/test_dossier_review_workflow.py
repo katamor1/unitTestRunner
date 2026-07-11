@@ -15,6 +15,7 @@ VC6_FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "vc6_project"
 sys.path.insert(0, str(SRC_ROOT))
 
 from unit_test_runner.dossier import analyze_function_workflow
+from unit_test_runner.contracts import ArtifactKind, ContractMode, load_artifact
 from unit_test_runner.dossier.dossier_models import DossierNextAction, DossierUnresolvedItem
 from unit_test_runner.dossier.finalizer import finalize_function_dossier, prepare_review_from_dossier
 from unit_test_runner.reports.next_actions_markdown import render_next_actions_markdown
@@ -268,8 +269,13 @@ class DossierReviewWorkflowTests(unittest.TestCase):
 
             final_dossier_path = out_dir / "reports" / "function_dossier.json"
             final_dossier = json.loads(final_dossier_path.read_text(encoding="utf-8"))
-            required = set(json.loads((REPO_ROOT / "schemas" / "function_dossier.schema.json").read_text(encoding="utf-8"))["required"])
-            self.assertLessEqual(required, set(final_dossier))
+            loaded_dossier = load_artifact(
+                final_dossier_path,
+                expected_kind=ArtifactKind.FUNCTION_DOSSIER,
+                mode=ContractMode.COMPATIBLE,
+            )
+            self.assertTrue(loaded_dossier.migrated)
+            self.assertEqual((), loaded_dossier.violations)
             self.assertEqual("src/control.c", final_dossier["target"]["source"])
             self.assertEqual("Control_Update", final_dossier["target"]["function"])
             self.assertIn("defines", final_dossier["build_context"])

@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://unit-test-runner.local/schemas/test_execution_report.schema.json","title":"Test Execution Report","allOf":[{"$ref":"common.schema.json"},{"type":"object","properties":{"artifact_kind":{"const":"test_execution_report"},"schema_version":{"const":"1.0.0"}}}]}

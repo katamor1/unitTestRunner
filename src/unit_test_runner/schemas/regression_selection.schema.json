@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://unit-test-runner.local/schemas/regression_selection.schema.json","title":"Regression Selection","allOf":[{"$ref":"common.schema.json"},{"type":"object","properties":{"artifact_kind":{"const":"regression_selection"},"schema_version":{"const":"1.0.0"}}}]}
