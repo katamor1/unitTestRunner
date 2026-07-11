@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 from unit_test_runner.dossier.dossier_models import DossierNextAction, DossierUnresolvedItem
 
-from .japanese import ja_label, md_cell, md_label_cell
+from .japanese import ja_label, ja_text, md_cell, md_label_cell
 
 
 _MD_REPORTS_BY_ARTIFACT = {
@@ -57,7 +57,7 @@ def render_next_actions_markdown(
         related_ids = action.related_unresolved_items or []
         related_items = [unresolved_by_id[item_id] for item_id in related_ids if item_id in unresolved_by_id]
         related = ", ".join(related_ids) if related_ids else "-"
-        detail = action.description or related
+        detail = ja_text(action.description) or related
         if related != "-" and related not in detail:
             detail = f"{related}: {detail}"
         links = _links_for_action(action, related_items, artifact_links, function_name)

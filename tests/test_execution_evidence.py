@@ -67,7 +67,7 @@ UTR ASSERT EQ_INT: test_Control_Update.c:120 actual_return
         self.assertEqual("passed", cases["TC_Control_Update_001"]["status"])
         self.assertEqual("failed", cases["TC_Control_Update_002"]["status"])
 
-    def test_runner_output_parser_treats_generated_clean_cases_as_passed(self):
+    def test_runner_output_parser_treats_bare_run_markers_as_inconclusive(self):
         parsed = parse_runner_output(
             """
 UTR RUN TC_Control_Update_001
@@ -77,7 +77,27 @@ UTR RUN TC_Control_Update_002
         payload = parsed.to_dict()
 
         self.assertEqual(2, payload["summary"]["total"])
+        self.assertEqual(0, payload["summary"]["passed"])
+        self.assertEqual(2, payload["summary"]["inconclusive"])
+        self.assertEqual("low", payload["summary"]["parser_confidence"])
+        cases = {case["test_case_id"]: case for case in payload["case_results"]}
+        self.assertEqual("inconclusive", cases["TC_Control_Update_001"]["status"])
+        self.assertEqual("inconclusive", cases["TC_Control_Update_002"]["status"])
+
+    def test_runner_output_parser_requires_ok_markers_for_passed_cases(self):
+        parsed = parse_runner_output(
+            """
+UTR RUN TC_Control_Update_001
+UTR OK TC_Control_Update_001
+UTR RUN TC_Control_Update_002
+UTR OK TC_Control_Update_002
+"""
+        )
+        payload = parsed.to_dict()
+
+        self.assertEqual(2, payload["summary"]["total"])
         self.assertEqual(2, payload["summary"]["passed"])
+        self.assertEqual(0, payload["summary"]["inconclusive"])
         cases = {case["test_case_id"]: case for case in payload["case_results"]}
         self.assertEqual("passed", cases["TC_Control_Update_001"]["status"])
         self.assertEqual("passed", cases["TC_Control_Update_002"]["status"])
