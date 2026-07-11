@@ -12,10 +12,17 @@ import { defaultSourceRootFromWorkspaceFolders, readAdapterSettingsFromObject } 
 import { buildSettingsViewModel } from '../config/settingsViewModel';
 import { validateSettings } from '../config/validation';
 import { resolveFunctionNameFromText } from '../functionTarget/regexFunctionResolver';
+import { pathDialect } from '../platform/pathDialect';
 import { resolveReportPaths } from '../reports/reportPathResolver';
 import { commandRequiresConfirmation } from '../safety/confirmation';
 import { readSuiteViewModel } from '../suite/suiteViewModel';
 import { renderSettings } from '../workflow/settingsPanelRenderer';
+
+
+function basename(value: string | undefined): string {
+  const candidate = value ?? '';
+  return pathDialect(candidate).basename(candidate);
+}
 import {
   completeAwaitingSaveIfMatches,
   createInitialWorkflowState,
@@ -146,15 +153,15 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     const missingHtml = renderSettings(missing);
     const warningHtml = renderSettings(warning);
 
-    assert.match(readyHtml, /<details class="settings">/);
-    assert.doesNotMatch(readyHtml, /<details class="settings" open>/);
+    assert.match(readyHtml, /<details id="unitTestRunnerSettings" class="settings">/);
+    assert.doesNotMatch(readyHtml, /<details id="unitTestRunnerSettings" class="settings" open>/);
     assert.match(readyHtml, /<summary class="settings-summary">/);
     assert.match(readyHtml, /設定を表示/);
     assert.match(readyHtml, /data-setting-kind="pickFile"/);
 
-    assert.match(missingHtml, /<details class="settings" open>/);
+    assert.match(missingHtml, /<details id="unitTestRunnerSettings" class="settings" open>/);
     assert.match(missingHtml, /未設定の必須項目があります。/);
-    assert.match(warningHtml, /<details class="settings" open>/);
+    assert.match(warningHtml, /<details id="unitTestRunnerSettings" class="settings" open>/);
     assert.match(warningHtml, /本番リポジトリへ生成物が混入/);
   });
 
@@ -353,27 +360,27 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
       'C:\\work\\out\\Control_Update',
     );
 
-    assert.equal(path.basename(parsed.functionDossierMd ?? ''), 'function_dossier.md');
-    assert.equal(path.basename(parsed.reviewChecklistMd ?? ''), 'review_checklist.md');
-    assert.equal(path.basename(topLevel.functionDossierMd ?? ''), 'top_level_dossier.md');
-    assert.equal(path.basename(topLevel.testCaseDesignMd ?? ''), 'top_level_design.md');
-    assert.equal(path.basename(topLevel.testCaseDesignJson ?? ''), 'top_level_design.json');
-    assert.equal(path.basename(topLevel.testCaseDesignCsv ?? ''), 'top_level_design.csv');
-    assert.equal(path.basename(fallback.nextActionsMd ?? ''), 'next_actions.md');
-    assert.equal(path.basename(direct.unresolvedItemsMd ?? ''), 'unresolved_items.md');
-    assert.equal(path.basename(direct.testCaseDesignMd ?? ''), 'test_case_design.md');
-    assert.equal(path.basename(direct.testCaseDesignJson ?? ''), 'test_case_design.json');
-    assert.equal(path.basename(direct.changeImpactReportMd ?? ''), 'change_impact_report.md');
-    assert.equal(path.basename(direct.regressionSelectionCsv ?? ''), 'regression_selection.csv');
-    assert.equal(path.basename(directStep19.changeImpactReportMd ?? ''), 'custom_change.md');
-    assert.equal(path.basename(directStep19.regressionSelectionCsv ?? ''), 'custom_regression.csv');
+    assert.equal(basename(parsed.functionDossierMd), 'function_dossier.md');
+    assert.equal(basename(parsed.reviewChecklistMd), 'review_checklist.md');
+    assert.equal(basename(topLevel.functionDossierMd), 'top_level_dossier.md');
+    assert.equal(basename(topLevel.testCaseDesignMd), 'top_level_design.md');
+    assert.equal(basename(topLevel.testCaseDesignJson), 'top_level_design.json');
+    assert.equal(basename(topLevel.testCaseDesignCsv), 'top_level_design.csv');
+    assert.equal(basename(fallback.nextActionsMd), 'next_actions.md');
+    assert.equal(basename(direct.unresolvedItemsMd), 'unresolved_items.md');
+    assert.equal(basename(direct.testCaseDesignMd), 'test_case_design.md');
+    assert.equal(basename(direct.testCaseDesignJson), 'test_case_design.json');
+    assert.equal(basename(direct.changeImpactReportMd), 'change_impact_report.md');
+    assert.equal(basename(direct.regressionSelectionCsv), 'regression_selection.csv');
+    assert.equal(basename(directStep19.changeImpactReportMd), 'custom_change.md');
+    assert.equal(basename(directStep19.regressionSelectionCsv), 'custom_regression.csv');
   });
 
   it('warns when CLI JSON omits report paths and uses conventional paths', () => {
     const parsed = parseCliResult(JSON.stringify({ status: 'ok', data: {} }), '', 'C:\\work\\out\\Control_Update');
 
     assert.ok(parsed.warnings.some((warning) => warning.includes('レポートパス')));
-    assert.equal(path.basename(parsed.reports.functionDossierMd ?? ''), 'function_dossier.md');
+    assert.equal(basename(parsed.reports.functionDossierMd), 'function_dossier.md');
   });
 
   it('formats nonzero CLI JSON with environment diagnostics for panel errors', () => {

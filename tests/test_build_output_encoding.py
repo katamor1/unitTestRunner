@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,7 @@ from unit_test_runner.build.build_workspace_generator import generate_build_work
 from unit_test_runner.build_probe import build_probe
 from unit_test_runner.dossier import analyze_function_workflow
 from unit_test_runner.encoding import decode_bytes_auto
+from unit_test_runner.process_control import ProcessTreeRunResult
 
 
 class BuildOutputEncodingTests(unittest.TestCase):
@@ -46,6 +48,7 @@ class BuildOutputEncodingTests(unittest.TestCase):
         self.assertIn("設定.h", decoded)
         self.assertNotIn("\ufffd", decoded)
 
+    @unittest.skipUnless(os.name == "nt", "Windows command-shell contract")
     def test_workspace_build_probe_decodes_cp932_redirected_build_log(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             out_dir, reports = self.prepare_analysis(temp_dir)
@@ -54,10 +57,10 @@ class BuildOutputEncodingTests(unittest.TestCase):
             def fake_run(*args, **kwargs):
                 build_dir = Path(kwargs["cwd"])
                 (build_dir.parent / "logs" / "build.log").write_bytes(diagnostic_log.encode("cp932"))
-                return subprocess.CompletedProcess(args[0], 2, stdout=b"")
+                return ProcessTreeRunResult(2, b"", None, False)
 
             with mock.patch("unit_test_runner.build.build_workspace_generator.shutil.which", return_value="tool.exe"):
-                with mock.patch("unit_test_runner.build.build_workspace_generator.subprocess.run", side_effect=fake_run):
+                with mock.patch("unit_test_runner.build.build_workspace_generator.run_process_tree", side_effect=fake_run):
                     _report, probe = generate_build_workspace(
                         reports["build_context"],
                         reports["source_digest"],

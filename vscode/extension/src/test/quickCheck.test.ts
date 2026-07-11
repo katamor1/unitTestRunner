@@ -128,8 +128,8 @@ describe('UnitTestRunner quick check adapter core', () => {
   it('resolves quick summary report paths from fallback and CLI JSON', () => {
     const workspace = 'D:\\unit-test-output\\_quick\\src_control_Control_Update_deadbeef';
     const fallback = resolveReportPaths(workspace);
-    assert.equal(fallback.quickSummaryMd, path.join(workspace, 'reports', 'quick_summary.md'));
-    assert.equal(fallback.quickSummaryJson, path.join(workspace, 'reports', 'quick_summary.json'));
+    assert.equal(fallback.quickSummaryMd, path.win32.join(workspace, 'reports', 'quick_summary.md'));
+    assert.equal(fallback.quickSummaryJson, path.win32.join(workspace, 'reports', 'quick_summary.json'));
 
     const parsed = parseCliResult(
       JSON.stringify({
