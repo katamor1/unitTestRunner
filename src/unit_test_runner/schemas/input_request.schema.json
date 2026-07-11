@@ -1,1 +1,24 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://unit-test-runner.local/schemas/input_request.schema.json","title":"Input Request","allOf":[{"$ref":"common.schema.json"},{"type":"object","properties":{"artifact_kind":{"const":"input_request"},"schema_version":{"const":"1.0.0"}}}]}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unit-test-runner.local/schemas/input_request.schema.json",
+  "title": "Input Request",
+  "allOf": [
+    {
+      "$ref": "common.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "artifact_kind": {
+          "const": "input_request"
+        },
+        "schema_version": {
+          "const": "1.0.0"
+        },
+        "data": {
+          "$ref": "common.schema.json#/$defs/inputRequestData"
+        }
+      }
+    }
+  ]
+}

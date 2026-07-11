@@ -203,6 +203,7 @@ jobs:
           & $python -m unit_test_runner --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $contractCheck = @'
+          import json
           from importlib import resources
           from unit_test_runner.contracts import ArtifactKind
 
@@ -212,8 +213,19 @@ jobs:
               for kind in ArtifactKind
               if not root.joinpath(f"{kind.value}.schema.json").is_file()
           ]
-          assert root.joinpath("common.schema.json").is_file()
+          common = json.loads(
+              root.joinpath("common.schema.json").read_text(encoding="utf-8")
+          )
+          assert common["additionalProperties"] is False
           assert not missing, missing
+          for kind in ArtifactKind:
+              schema = json.loads(
+                  root.joinpath(f"{kind.value}.schema.json").read_text(
+                      encoding="utf-8"
+                  )
+              )
+              overlay = schema["allOf"][-1]
+              assert "data" in overlay["properties"], kind.value
           '@
           $contractCheck | & $python -
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

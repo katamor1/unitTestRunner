@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from datetime import datetime
 from functools import lru_cache
 from importlib import resources
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -15,6 +16,7 @@ from referencing import Registry, Resource
 from .kinds import ArtifactKind, ContractMode
 from .migrations import migrate_payload
 from .models import ContractViolation, LoadedArtifact
+from .path_policy import iter_contract_path_values, path_policy_for
 from .registry import ContractDefinition, get_contract
 
 
@@ -41,9 +43,13 @@ def validate_payload(
         violations.append(_schema_violation(error))
 
     if not any(item.code == "unsupported_version" for item in violations):
-        violations.extend(_common_semantic_violations(payload))
-        if contract.semantic_validator == "test_spec":
-            violations.extend(_test_spec_semantic_violations(payload))
+        violations.extend(_common_semantic_violations(kind, payload))
+        violations.extend(
+            _artifact_semantic_violations(
+                contract.semantic_validator,
+                payload,
+            )
+        )
     return _deduplicate_violations(violations)
 
 
@@ -85,6 +91,22 @@ def load_artifact(
         )
 
     source_version = str(decoded.get("schema_version") or "")
+    decoded_kind = decoded.get("artifact_kind")
+    if decoded_kind is not None and decoded_kind != expected_kind.value:
+        return LoadedArtifact(
+            kind=expected_kind,
+            source_version=source_version,
+            current_version=contract.current_version,
+            payload=dict(decoded),
+            migrated=False,
+            violations=(
+                ContractViolation(
+                    "artifact_kind_mismatch",
+                    "$.artifact_kind",
+                    f"Expected {expected_kind.value}; received {decoded_kind!r}.",
+                ),
+            ),
+        )
     migrated = False
     payload = decoded
     if source_version != contract.current_version:
@@ -207,9 +229,15 @@ def _json_path(parts: Iterable[Any]) -> str:
 
 
 def _common_semantic_violations(
+    kind: ArtifactKind,
     payload: Mapping[str, Any],
 ) -> list[ContractViolation]:
     violations: list[ContractViolation] = []
+    builtin_payload = {
+        key: value
+        for key, value in payload.items()
+        if key != "extensions"
+    }
     subject = payload.get("subject")
     if isinstance(subject, Mapping):
         source_path = subject.get("source_path")
@@ -221,7 +249,210 @@ def _common_semantic_violations(
                     "source_path must be a normalized relative path without '..'.",
                 )
             )
-    violations.extend(_duplicate_id_violations(payload))
+    violations.extend(_duplicate_id_violations(builtin_payload))
+    violations.extend(_provenance_violations(kind, payload))
+    violations.extend(_nested_path_violations(kind, builtin_payload))
+    violations.extend(_nested_hash_violations(builtin_payload))
+    violations.extend(_subject_consistency_violations(payload))
+    return violations
+
+
+def _provenance_violations(
+    kind: ArtifactKind,
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    violations: list[ContractViolation] = []
+    required_paths: list[tuple[str, Any]] = []
+    producer = payload.get("producer")
+    if isinstance(producer, Mapping) and not producer.get("commit"):
+        violations.append(
+            ContractViolation(
+                "missing_provenance",
+                "$.producer.commit",
+                "A verified producer commit is required.",
+                "blocking",
+            )
+        )
+    subject = payload.get("subject")
+    if isinstance(subject, Mapping):
+        if not subject.get("source_path"):
+            violations.append(
+                ContractViolation(
+                    "missing_provenance",
+                    "$.subject.source_path",
+                    "A verified source path is required.",
+                    "blocking",
+                )
+            )
+        if not subject.get("function_id"):
+            violations.append(
+                ContractViolation(
+                    "missing_identity",
+                    "$.subject.function_id",
+                    "A verified function identity is required.",
+                    "blocking",
+                )
+            )
+        required_paths.append(("$.subject.source_sha256", subject.get("source_sha256")))
+    if kind is ArtifactKind.TEST_SPEC:
+        data = payload.get("data")
+        if isinstance(data, Mapping):
+            source = data.get("source")
+            function = data.get("function")
+            if isinstance(source, Mapping):
+                required_paths.append(("$.data.source.sha256", source.get("sha256")))
+            if isinstance(function, Mapping):
+                required_paths.append(
+                    (
+                        "$.data.function.signature_sha256",
+                        function.get("signature_sha256"),
+                    )
+                )
+    for json_path, value in required_paths:
+        if value is None or value == "0" * 64:
+            violations.append(
+                ContractViolation(
+                    "missing_provenance",
+                    json_path,
+                    "A verified SHA-256 provenance value is required.",
+                    "blocking",
+                )
+            )
+    extensions = payload.get("extensions")
+    migration = extensions.get("migration") if isinstance(extensions, Mapping) else None
+    path_migrations = (
+        migration.get("path_migrations") if isinstance(migration, Mapping) else None
+    )
+    if isinstance(path_migrations, list):
+        for item in path_migrations:
+            if not isinstance(item, Mapping) or item.get("verified") is not False:
+                continue
+            json_path = item.get("json_path")
+            if not isinstance(json_path, str):
+                continue
+            violations.append(
+                ContractViolation(
+                    "missing_provenance",
+                    json_path,
+                    "The legacy path has no verified workspace-relative mapping.",
+                    "blocking",
+                )
+            )
+    return violations
+
+
+def _nested_path_violations(
+    kind: ArtifactKind,
+    value: Any,
+) -> list[ContractViolation]:
+    violations: list[ContractViolation] = []
+    path_policy = path_policy_for(kind)
+    for path_value in iter_contract_path_values(value, path_policy):
+        if path_value.value and not _is_relative_contract_path(path_value.value):
+            violations.append(
+                ContractViolation(
+                    "invalid_relative_path",
+                    path_value.json_path,
+                    f"{path_value.field_name} must contain normalized relative contract paths.",
+                )
+            )
+    return violations
+
+
+def _nested_hash_violations(value: Any, path: str = "$") -> list[ContractViolation]:
+    violations: list[ContractViolation] = []
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            child_path = f"{path}.{key}"
+            is_hash = key == "sha256" or key.endswith("_sha256") or key.endswith("_hash")
+            if is_hash and isinstance(child, str):
+                if child == "0" * 64:
+                    violations.append(
+                        ContractViolation(
+                            "missing_provenance",
+                            child_path,
+                            "An all-zero SHA-256 is not known provenance.",
+                            "blocking",
+                        )
+                    )
+                elif not re.fullmatch(r"[0-9a-f]{64}", child):
+                    violations.append(
+                        ContractViolation(
+                            "invalid_hash",
+                            child_path,
+                            "SHA-256 values must be 64 lowercase hexadecimal characters.",
+                        )
+                    )
+            if (
+                key == "sha256"
+                and child is None
+                and bool(value.get("required"))
+            ):
+                violations.append(
+                    ContractViolation(
+                        "missing_provenance",
+                        child_path,
+                        "A required evidence file must have a verified SHA-256.",
+                        "blocking",
+                    )
+                )
+            violations.extend(_nested_hash_violations(child, child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            violations.extend(_nested_hash_violations(child, f"{path}[{index}]"))
+    return violations
+
+
+def _subject_consistency_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    subject = payload.get("subject")
+    data = payload.get("data")
+    if not isinstance(subject, Mapping) or not isinstance(data, Mapping):
+        return []
+    violations: list[ContractViolation] = []
+    source = data.get("source")
+    if isinstance(source, Mapping):
+        source_path = source.get("path")
+        if source_path and source_path != subject.get("source_path"):
+            violations.append(
+                ContractViolation(
+                    "invalid_reference",
+                    "$.data.source.path",
+                    "Data source path must match the artifact subject.",
+                )
+            )
+        source_sha256 = source.get("sha256")
+        if source_sha256 and source_sha256 != subject.get("source_sha256"):
+            violations.append(
+                ContractViolation(
+                    "invalid_reference",
+                    "$.data.source.sha256",
+                    "Data source SHA-256 must match the artifact subject.",
+                )
+            )
+    target = data.get("target")
+    if isinstance(target, Mapping):
+        target_source = target.get("source")
+        if target_source and target_source != subject.get("source_path"):
+            violations.append(
+                ContractViolation(
+                    "invalid_reference",
+                    "$.data.target.source",
+                    "Dossier target source must match the artifact subject.",
+                )
+            )
+    function = data.get("function")
+    if isinstance(function, Mapping):
+        function_id = function.get("function_id")
+        if function_id and function_id != subject.get("function_id"):
+            violations.append(
+                ContractViolation(
+                    "invalid_reference",
+                    "$.data.function.function_id",
+                    "Data function_id must match the artifact subject.",
+                )
+            )
     return violations
 
 
@@ -235,6 +466,25 @@ def _duplicate_id_violations(value: Any, path: str = "$") -> list[ContractViolat
         return violations
 
     identifier_keys = (
+        "artifact_id",
+        "entry_id",
+        "snapshot_id",
+        "action_id",
+        "candidate_id",
+        "class_id",
+        "group_id",
+        "condition_id",
+        "branch_id",
+        "case_id",
+        "switch_id",
+        "loop_id",
+        "ternary_id",
+        "return_id",
+        "placeholder_id",
+        "hint_id",
+        "command_id",
+        "review_id",
+        "call_id",
         "edge_id",
         "link_id",
         "test_case_id",
@@ -256,6 +506,8 @@ def _duplicate_id_violations(value: Any, path: str = "$") -> list[ContractViolat
         identifiers = [record[primary_key] for record in records]
         seen: set[Any] = set()
         for identifier in identifiers:
+            if isinstance(identifier, (Mapping, list, set)):
+                continue
             if identifier in seen:
                 violations.append(
                     ContractViolation(
@@ -268,6 +520,484 @@ def _duplicate_id_violations(value: Any, path: str = "$") -> list[ContractViolat
     for index, child in enumerate(value):
         violations.extend(_duplicate_id_violations(child, f"{path}[{index}]"))
     return violations
+
+
+def _artifact_semantic_violations(
+    semantic_hook: str,
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    validator = _ARTIFACT_SEMANTIC_VALIDATORS.get(semantic_hook)
+    if validator is None:
+        return [
+            ContractViolation(
+                "missing_semantic_validator",
+                "$.artifact_kind",
+                f"No semantic validator is registered for {semantic_hook}.",
+                "blocking",
+            )
+        ]
+    return validator(payload)
+
+
+def semantic_validator_names() -> frozenset[str]:
+    return frozenset(_ARTIFACT_SEMANTIC_VALIDATORS)
+
+
+def _no_artifact_semantic_violations(
+    _payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    return []
+
+
+def _call_report_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    calls = data.get("calls")
+    call_ids = {
+        str(item["call_id"])
+        for item in calls or []
+        if isinstance(item, Mapping) and item.get("call_id")
+    }
+    violations: list[ContractViolation] = []
+    stub_candidates = data.get("stub_candidates")
+    if isinstance(stub_candidates, list):
+        for item_index, item in enumerate(stub_candidates):
+            if not isinstance(item, Mapping):
+                continue
+            for reference_index, reference in enumerate(item.get("related_calls") or []):
+                if str(reference) not in call_ids:
+                    violations.append(
+                        ContractViolation(
+                            "invalid_reference",
+                            f"$.data.stub_candidates[{item_index}].related_calls[{reference_index}]",
+                            f"Unknown call_id reference: {reference}",
+                        )
+                    )
+    side_effects = data.get("side_effect_candidates")
+    if isinstance(side_effects, list):
+        for index, item in enumerate(side_effects):
+            if not isinstance(item, Mapping):
+                continue
+            reference = item.get("call_id")
+            if reference and str(reference) not in call_ids:
+                violations.append(
+                    ContractViolation(
+                        "invalid_reference",
+                        f"$.data.side_effect_candidates[{index}].call_id",
+                        f"Unknown call_id reference: {reference}",
+                    )
+                )
+    unresolved = data.get("unresolved_calls")
+    if isinstance(unresolved, list):
+        for index, item in enumerate(unresolved):
+            if not isinstance(item, Mapping):
+                continue
+            reference = item.get("call_id")
+            if reference and str(reference) not in call_ids:
+                violations.append(
+                    ContractViolation(
+                        "invalid_reference",
+                        f"$.data.unresolved_calls[{index}].call_id",
+                        f"Unknown call_id reference: {reference}",
+                    )
+                )
+    return violations
+
+
+def _coverage_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    id_fields = {
+        "branches": "branch_id",
+        "switches": "switch_id",
+        "loops": "loop_id",
+        "ternaries": "ternary_id",
+        "return_paths": "return_id",
+        "condition_expressions": "condition_id",
+    }
+    target_ids: set[str] = set()
+    for collection_name, id_field in id_fields.items():
+        collection = data.get(collection_name)
+        if isinstance(collection, list):
+            target_ids.update(
+                str(item[id_field])
+                for item in collection
+                if isinstance(item, Mapping) and item.get(id_field)
+            )
+            if collection_name == "switches":
+                for switch in collection:
+                    if not isinstance(switch, Mapping):
+                        continue
+                    target_ids.update(
+                        str(case["case_id"])
+                        for case in switch.get("cases") or []
+                        if isinstance(case, Mapping) and case.get("case_id")
+                    )
+    violations: list[ContractViolation] = []
+    coverage_items = data.get("coverage_items")
+    if isinstance(coverage_items, list):
+        for index, item in enumerate(coverage_items):
+            if not isinstance(item, Mapping):
+                continue
+            target_id = item.get("target_id")
+            if target_id and str(target_id) not in target_ids:
+                violations.append(
+                    ContractViolation(
+                        "invalid_reference",
+                        f"$.data.coverage_items[{index}].target_id",
+                        f"Unknown coverage target_id: {target_id}",
+                    )
+                )
+    return violations
+
+
+def _boundary_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    candidate_ids: set[str] = set()
+    for collection_name in (
+        "input_candidates",
+        "state_candidates",
+        "stub_return_candidates",
+    ):
+        collection = data.get(collection_name)
+        if isinstance(collection, list):
+            candidate_ids.update(
+                str(item["candidate_id"])
+                for item in collection
+                if isinstance(item, Mapping) and item.get("candidate_id")
+            )
+    violations: list[ContractViolation] = []
+    for collection_name in ("boundary_groups", "coverage_links"):
+        collection = data.get(collection_name)
+        if not isinstance(collection, list):
+            continue
+        for item_index, item in enumerate(collection):
+            if not isinstance(item, Mapping):
+                continue
+            for reference_index, reference in enumerate(item.get("candidate_ids") or item.get("candidates") or []):
+                if str(reference) not in candidate_ids:
+                    violations.append(
+                        ContractViolation(
+                            "invalid_reference",
+                            f"$.data.{collection_name}[{item_index}].candidate_ids[{reference_index}]"
+                            if "candidate_ids" in item
+                            else f"$.data.{collection_name}[{item_index}].candidates[{reference_index}]",
+                            f"Unknown candidate_id reference: {reference}",
+                        )
+                    )
+    return violations
+
+
+def _build_completion_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    actions = data.get("completion_actions")
+    action_ids = {
+        str(item["action_id"])
+        for item in actions or []
+        if isinstance(item, Mapping) and item.get("action_id")
+    }
+    violations: list[ContractViolation] = []
+    reference_fields = (
+        ("include_completion_candidates", "selected_action_id"),
+        ("pch_completion_candidates", "action_id"),
+        ("warnings", "related_action_id"),
+    )
+    for collection_name, reference_field in reference_fields:
+        collection = data.get(collection_name)
+        if not isinstance(collection, list):
+            continue
+        for index, item in enumerate(collection):
+            if not isinstance(item, Mapping):
+                continue
+            reference = item.get(reference_field)
+            if reference and str(reference) not in action_ids:
+                violations.append(
+                    ContractViolation(
+                        "invalid_reference",
+                        f"$.data.{collection_name}[{index}].{reference_field}",
+                        f"Unknown action_id reference: {reference}",
+                    )
+                )
+    return violations
+
+
+def _partition_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    partition_names = (
+        "preserved_test_cases",
+        "updated_test_cases",
+        "obsolete_test_cases",
+        "new_test_case_candidates",
+        "selected_test_cases",
+        "skipped_test_cases",
+        "new_required_test_cases",
+        "blocked_test_cases",
+    )
+    seen: set[str] = set()
+    violations: list[ContractViolation] = []
+    for partition_name in partition_names:
+        partition = data.get(partition_name)
+        if not isinstance(partition, list):
+            continue
+        for index, item in enumerate(partition):
+            if not isinstance(item, Mapping) or not item.get("test_case_id"):
+                continue
+            test_case_id = str(item["test_case_id"])
+            if test_case_id in seen:
+                violations.append(
+                    ContractViolation(
+                        "duplicate_id",
+                        f"$.data.{partition_name}[{index}].test_case_id",
+                        f"test_case_id appears in multiple partitions: {test_case_id}",
+                    )
+                )
+            seen.add(test_case_id)
+    manual_items = data.get("manual_merge_items")
+    if isinstance(manual_items, list):
+        for index, item in enumerate(manual_items):
+            if not isinstance(item, Mapping):
+                continue
+            reference = item.get("test_case_id")
+            if reference and str(reference) not in seen:
+                violations.append(
+                    ContractViolation(
+                        "invalid_reference",
+                        f"$.data.manual_merge_items[{index}].test_case_id",
+                        f"Unknown test_case_id reference: {reference}",
+                    )
+                )
+    return violations
+
+
+def _dossier_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    artifact_index = data.get("artifact_index")
+    artifact_ids = {
+        str(reference)
+        for item in artifact_index or []
+        if isinstance(item, Mapping)
+        for reference in (item.get("artifact_id"), item.get("artifact_kind"))
+        if reference
+    }
+    violations: list[ContractViolation] = []
+    for collection_name in ("review_items", "unresolved_items"):
+        collection = data.get(collection_name)
+        if not isinstance(collection, list):
+            continue
+        for item_index, item in enumerate(collection):
+            if not isinstance(item, Mapping):
+                continue
+            references = item.get("related_artifacts")
+            if not isinstance(references, list):
+                continue
+            for reference_index, reference in enumerate(references):
+                if str(reference) not in artifact_ids:
+                    violations.append(
+                        ContractViolation(
+                            "invalid_reference",
+                            f"$.data.{collection_name}[{item_index}].related_artifacts[{reference_index}]",
+                            f"Unknown artifact_id reference: {reference}",
+                        )
+                    )
+    unresolved = data.get("unresolved_items")
+    unresolved_ids = {
+        str(item["item_id"])
+        for item in unresolved or []
+        if isinstance(item, Mapping) and item.get("item_id")
+    }
+    actions = data.get("next_actions")
+    if isinstance(actions, list):
+        for action_index, action in enumerate(actions):
+            if not isinstance(action, Mapping):
+                continue
+            for reference_index, reference in enumerate(
+                action.get("related_unresolved_items") or []
+            ):
+                if str(reference) not in unresolved_ids:
+                    violations.append(
+                        ContractViolation(
+                            "invalid_reference",
+                            f"$.data.next_actions[{action_index}].related_unresolved_items[{reference_index}]",
+                            f"Unknown unresolved item reference: {reference}",
+                        )
+                    )
+    return violations
+
+
+def _suite_run_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    selector = data.get("selector")
+    selected_ids: set[str] | None = None
+    if isinstance(selector, Mapping) and selector.get("kind") == "entry_id":
+        selected_ids = {str(item) for item in selector.get("entry_ids") or []}
+    violations: list[ContractViolation] = []
+    results = data.get("results")
+    result_by_id: dict[str, Mapping[str, Any]] = {}
+    if selected_ids is not None and isinstance(results, list):
+        for index, result in enumerate(results):
+            if not isinstance(result, Mapping):
+                continue
+            entry_id = result.get("entry_id")
+            if entry_id:
+                result_by_id[str(entry_id)] = result
+            if entry_id and str(entry_id) not in selected_ids:
+                violations.append(
+                    ContractViolation(
+                        "invalid_reference",
+                        f"$.data.results[{index}].entry_id",
+                        f"Result entry_id was not selected: {entry_id}",
+                    )
+                )
+    elif isinstance(results, list):
+        result_by_id = {
+            str(result["entry_id"]): result
+            for result in results
+            if isinstance(result, Mapping) and result.get("entry_id")
+        }
+    if isinstance(results, list):
+        for index, result in enumerate(results):
+            if not isinstance(result, Mapping):
+                continue
+            if "not_run_tests" not in result:
+                violations.append(
+                    ContractViolation(
+                        "missing_provenance",
+                        f"$.data.results[{index}].not_run_tests",
+                        "Legacy suite output did not preserve the not-run test count.",
+                        "blocking",
+                    )
+                )
+            is_green = _suite_result_is_green(result)
+            if (result.get("green_status") == "green") != is_green:
+                violations.append(
+                    ContractViolation(
+                        "inconsistent_green_status",
+                        f"$.data.results[{index}].green_status",
+                        "GREEN requires executed, nonempty, coherent passed counts and zero failure, inconclusive, not-run, unresolved, or error evidence.",
+                    )
+                )
+    if data.get("outcome") == "passed":
+        if selected_ids is None:
+            selected_results = list(result_by_id.values())
+            complete = bool(selected_results) or not results
+        else:
+            complete = selected_ids.issubset(result_by_id)
+            selected_results = [
+                result_by_id[entry_id]
+                for entry_id in selected_ids
+                if entry_id in result_by_id
+            ]
+        if not complete or any(
+            result.get("green_status") != "green"
+            or not _suite_result_is_green(result)
+            for result in selected_results
+        ):
+            violations.append(
+                ContractViolation(
+                    "inconsistent_suite_outcome",
+                    "$.data.outcome",
+                    "A passed suite outcome requires every selected result to be GREEN and passed.",
+                )
+            )
+    summary = data.get("summary")
+    if isinstance(summary, Mapping):
+        total = summary.get("total")
+        green = summary.get("green")
+        not_green = summary.get("not_green")
+        if all(isinstance(item, int) for item in (total, green, not_green)):
+            if green + not_green != total:
+                violations.append(
+                    ContractViolation(
+                        "inconsistent_summary",
+                        "$.data.summary",
+                        "green + not_green must equal total.",
+                    )
+                )
+    return violations
+
+
+def _suite_result_is_green(result: Mapping[str, Any]) -> bool:
+    count_fields = (
+        "total_tests",
+        "passed_tests",
+        "failed_tests",
+        "inconclusive_tests",
+        "not_run_tests",
+    )
+    counts = {field: result.get(field) for field in count_fields}
+    if not all(
+        isinstance(value, int) and not isinstance(value, bool)
+        for value in counts.values()
+    ):
+        return False
+    coherent = counts["total_tests"] == sum(
+        counts[field]
+        for field in (
+            "passed_tests",
+            "failed_tests",
+            "inconclusive_tests",
+            "not_run_tests",
+        )
+    )
+    return (
+        result.get("executed") is True
+        and counts["total_tests"] > 0
+        and coherent
+        and result.get("outcome") == "passed"
+        and not result.get("error")
+        and counts["failed_tests"] == 0
+        and counts["inconclusive_tests"] == 0
+        and counts["not_run_tests"] == 0
+        and result.get("unresolved_review_count") == 0
+    )
+
+
+def _execution_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    summary = data.get("summary") or data.get("parsed_result")
+    case_results = data.get("case_results")
+    if not isinstance(summary, Mapping) or not isinstance(case_results, list):
+        return []
+    total = summary.get("total")
+    if isinstance(total, int) and total != len(case_results):
+        return [
+            ContractViolation(
+                "inconsistent_summary",
+                "$.data.summary.total" if "summary" in data else "$.data.parsed_result.total",
+                "Summary total must equal the number of case results.",
+            )
+        ]
+    return []
 
 
 def _test_spec_semantic_violations(
@@ -354,6 +1084,286 @@ def _test_spec_semantic_violations(
     return violations
 
 
+def _timestamp_violation(value: Any, path: str) -> list[ContractViolation]:
+    if not isinstance(value, str):
+        return []
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = None
+    if parsed is not None and parsed.tzinfo is not None:
+        return []
+    return [
+        ContractViolation(
+            "invalid_timestamp",
+            path,
+            "Timestamp must be an ISO-8601 value with an explicit UTC offset.",
+        )
+    ]
+
+
+def _review_decisions_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    violations: list[ContractViolation] = []
+    decisions = data.get("decisions")
+    if isinstance(decisions, list):
+        for index, decision in enumerate(decisions):
+            if isinstance(decision, Mapping):
+                violations.extend(
+                    _timestamp_violation(
+                        decision.get("decided_at"),
+                        f"$.data.decisions[{index}].decided_at",
+                    )
+                )
+    return violations
+
+
+def _state_setup_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    setups = data.get("state_setups")
+    if not isinstance(setups, list):
+        return []
+    violations: list[ContractViolation] = []
+    for index, setup in enumerate(setups):
+        if not isinstance(setup, Mapping):
+            continue
+        method = setup.get("setup_method_hint")
+        invalid = False
+        if method == "fixture_pointer":
+            invalid = not setup.get("fixture_declarations") or not setup.get(
+                "setup_statements"
+            )
+        elif method == "not_directly_accessible":
+            invalid = not bool(setup.get("review_required"))
+        if invalid:
+            violations.append(
+                ContractViolation(
+                    "invalid_state_setup",
+                    f"$.data.state_setups[{index}]",
+                    f"State setup method {method!r} lacks its required review or fixture evidence.",
+                )
+            )
+    return violations
+
+
+def _reanalysis_snapshot_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    violations = _timestamp_violation(data.get("created_at"), "$.data.created_at")
+    producer = payload.get("producer")
+    if (
+        isinstance(producer, Mapping)
+        and data.get("producer_version")
+        and data.get("producer_version") != producer.get("version")
+    ):
+        violations.append(
+            ContractViolation(
+                "invalid_reference",
+                "$.data.producer_version",
+                "Snapshot producer_version must match the envelope producer version.",
+            )
+        )
+    versions = data.get("contract_versions")
+    if isinstance(versions, Mapping):
+        for name, version in versions.items():
+            try:
+                kind = ArtifactKind(str(name))
+            except ValueError:
+                violations.append(
+                    ContractViolation(
+                        "invalid_reference",
+                        f"$.data.contract_versions.{name}",
+                        f"Unknown artifact contract: {name}",
+                    )
+                )
+                continue
+            if version != get_contract(kind).current_version:
+                violations.append(
+                    ContractViolation(
+                        "unsupported_version",
+                        f"$.data.contract_versions.{name}",
+                        f"Unsupported {name} contract version: {version}",
+                    )
+                )
+    return violations
+
+
+def _expected_artifact_reference_violations(
+    payload: Mapping[str, Any],
+    field: str,
+    expected_kind: ArtifactKind,
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    reference = data.get(field)
+    if not isinstance(reference, Mapping):
+        return []
+    actual = reference.get("artifact_kind")
+    if actual == expected_kind.value:
+        return []
+    return [
+        ContractViolation(
+            "invalid_reference",
+            f"$.data.{field}.artifact_kind",
+            f"{field} must reference {expected_kind.value}; received {actual!r}.",
+        )
+    ]
+
+
+def _latest_run_pointer_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    violations = _expected_artifact_reference_violations(
+        payload,
+        "execution_report",
+        ArtifactKind.TEST_EXECUTION_REPORT,
+    )
+    if isinstance(data, Mapping):
+        violations.extend(_timestamp_violation(data.get("updated_at"), "$.data.updated_at"))
+    return violations
+
+
+def _latest_evidence_pointer_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    violations = _expected_artifact_reference_violations(
+        payload,
+        "evidence_manifest",
+        ArtifactKind.EVIDENCE_MANIFEST,
+    )
+    if isinstance(data, Mapping):
+        violations.extend(_timestamp_violation(data.get("updated_at"), "$.data.updated_at"))
+    return violations
+
+
+def _latest_suite_run_pointer_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    violations = _expected_artifact_reference_violations(
+        payload,
+        "suite_run_report",
+        ArtifactKind.SUITE_RUN_REPORT,
+    )
+    if isinstance(data, Mapping):
+        violations.extend(_timestamp_violation(data.get("updated_at"), "$.data.updated_at"))
+    return violations
+
+
+def _evidence_source_run_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    violations = _expected_artifact_reference_violations(
+        payload,
+        "execution_report",
+        ArtifactKind.TEST_EXECUTION_REPORT,
+    )
+    if isinstance(data, Mapping):
+        violations.extend(_timestamp_violation(data.get("created_at"), "$.data.created_at"))
+    return violations
+
+
+def _dsw_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    workspaces = data.get("workspaces")
+    if not isinstance(workspaces, list):
+        return []
+    violations: list[ContractViolation] = []
+    workspace_paths: set[str] = set()
+    for workspace_index, workspace in enumerate(workspaces):
+        if not isinstance(workspace, Mapping):
+            continue
+        dsw_path = workspace.get("dsw_path")
+        if isinstance(dsw_path, str):
+            if dsw_path in workspace_paths:
+                violations.append(
+                    ContractViolation(
+                        "duplicate_id",
+                        "$.data.workspaces",
+                        f"Duplicate dsw_path: {dsw_path}",
+                    )
+                )
+            workspace_paths.add(dsw_path)
+        projects = workspace.get("projects")
+        names: set[str] = set()
+        if isinstance(projects, list):
+            for project_index, project in enumerate(projects):
+                if not isinstance(project, Mapping):
+                    continue
+                name = project.get("name")
+                if isinstance(name, str):
+                    if name in names:
+                        violations.append(
+                            ContractViolation(
+                                "duplicate_id",
+                                f"$.data.workspaces[{workspace_index}].projects",
+                                f"Duplicate project name: {name}",
+                            )
+                        )
+                    names.add(name)
+                if (
+                    project.get("dsp_path")
+                    and project.get("dsp_path_normalized")
+                    != project.get("dsp_path")
+                ):
+                    violations.append(
+                        ContractViolation(
+                            "invalid_reference",
+                            f"$.data.workspaces[{workspace_index}].projects[{project_index}].dsp_path_normalized",
+                            "dsp_path_normalized must match dsp_path.",
+                        )
+                    )
+        dependencies = workspace.get("dependencies")
+        if isinstance(dependencies, list):
+            for dependency_index, dependency in enumerate(dependencies):
+                if not isinstance(dependency, Mapping):
+                    continue
+                for field in ("from_project", "to_project"):
+                    reference = dependency.get(field)
+                    if reference and str(reference) not in names:
+                        violations.append(
+                            ContractViolation(
+                                "invalid_reference",
+                                f"$.data.workspaces[{workspace_index}].dependencies[{dependency_index}].{field}",
+                                f"Unknown DSW project reference: {reference}",
+                            )
+                        )
+    warnings = data.get("warnings")
+    if isinstance(warnings, list):
+        for index, warning in enumerate(warnings):
+            if not isinstance(warning, Mapping):
+                continue
+            dsw_path = warning.get("dsw_path")
+            if dsw_path and str(dsw_path) not in workspace_paths:
+                violations.append(
+                    ContractViolation(
+                        "invalid_reference",
+                        f"$.data.warnings[{index}].dsw_path",
+                        f"Unknown warning workspace: {dsw_path}",
+                    )
+                )
+    return violations
+
+
 def _is_relative_contract_path(value: str) -> bool:
     normalized = value.replace("\\", "/")
     windows = PureWindowsPath(value)
@@ -374,3 +1384,50 @@ def _deduplicate_violations(
     for item in violations:
         unique[(item.code, item.json_path, item.message, item.severity)] = item
     return tuple(unique.values())
+
+
+_ARTIFACT_SEMANTIC_VALIDATORS: dict[
+    str,
+    Callable[[Mapping[str, Any]], list[ContractViolation]],
+] = {
+    ArtifactKind.CLI_RESULT.value: _no_artifact_semantic_violations,
+    ArtifactKind.INPUT_REQUEST.value: _no_artifact_semantic_violations,
+    ArtifactKind.DSW_DISCOVERY.value: _dsw_semantic_violations,
+    ArtifactKind.SOURCE_MEMBERSHIP.value: _no_artifact_semantic_violations,
+    ArtifactKind.PROJECT_MEMBERSHIP.value: _no_artifact_semantic_violations,
+    ArtifactKind.BUILD_CONTEXT.value: _no_artifact_semantic_violations,
+    ArtifactKind.SOURCE_DIGEST.value: _no_artifact_semantic_violations,
+    ArtifactKind.FUNCTION_LOCATION.value: _no_artifact_semantic_violations,
+    ArtifactKind.FUNCTION_SIGNATURE.value: _no_artifact_semantic_violations,
+    ArtifactKind.GLOBAL_ACCESS.value: _no_artifact_semantic_violations,
+    ArtifactKind.CALL_REPORT.value: _call_report_semantic_violations,
+    ArtifactKind.COVERAGE_DESIGN.value: _coverage_semantic_violations,
+    ArtifactKind.BOUNDARY_CANDIDATES.value: _boundary_semantic_violations,
+    ArtifactKind.DEPENDENCY_POLICY.value: _no_artifact_semantic_violations,
+    ArtifactKind.TEST_SPEC.value: _test_spec_semantic_violations,
+    ArtifactKind.HARNESS_SKELETON_REPORT.value: _no_artifact_semantic_violations,
+    ArtifactKind.BUILD_WORKSPACE_REPORT.value: _no_artifact_semantic_violations,
+    ArtifactKind.BUILD_PROBE_REPORT.value: _no_artifact_semantic_violations,
+    ArtifactKind.BUILD_COMPLETION_PLAN.value: _build_completion_semantic_violations,
+    ArtifactKind.BUILD_COMPLETION_ITERATION.value: _no_artifact_semantic_violations,
+    ArtifactKind.BUILD_COMPLETION_HISTORY.value: _no_artifact_semantic_violations,
+    ArtifactKind.TEST_EXECUTION_REPORT.value: _execution_semantic_violations,
+    ArtifactKind.TEST_RESULT.value: _execution_semantic_violations,
+    ArtifactKind.EVIDENCE_MANIFEST.value: _execution_semantic_violations,
+    ArtifactKind.FUNCTION_DOSSIER.value: _dossier_semantic_violations,
+    ArtifactKind.DOSSIER_MANIFEST.value: _dossier_semantic_violations,
+    ArtifactKind.STATE_SETUP_REFLECTION.value: _state_setup_semantic_violations,
+    ArtifactKind.REVIEW_DECISIONS.value: _review_decisions_semantic_violations,
+    ArtifactKind.CHANGE_IMPACT.value: _no_artifact_semantic_violations,
+    ArtifactKind.TEST_CASE_RECONCILIATION.value: _partition_semantic_violations,
+    ArtifactKind.REGRESSION_SELECTION.value: _partition_semantic_violations,
+    ArtifactKind.REANALYSIS_SNAPSHOT.value: _reanalysis_snapshot_semantic_violations,
+    ArtifactKind.SUITE_MANIFEST.value: _no_artifact_semantic_violations,
+    ArtifactKind.SUITE_RUN_REPORT.value: _suite_run_semantic_violations,
+    ArtifactKind.LATEST_RUN_POINTER.value: _latest_run_pointer_semantic_violations,
+    ArtifactKind.LATEST_EVIDENCE_POINTER.value: _latest_evidence_pointer_semantic_violations,
+    ArtifactKind.LATEST_SUITE_RUN_POINTER.value: _latest_suite_run_pointer_semantic_violations,
+    ArtifactKind.EVIDENCE_SOURCE_RUN.value: _evidence_source_run_semantic_violations,
+    ArtifactKind.PROMPT_PACK.value: _no_artifact_semantic_violations,
+    ArtifactKind.QUICK_SUMMARY.value: _no_artifact_semantic_violations,
+}

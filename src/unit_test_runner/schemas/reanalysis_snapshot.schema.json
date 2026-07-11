@@ -1,1 +1,24 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://unit-test-runner.local/schemas/reanalysis_snapshot.schema.json","title":"Reanalysis Snapshot","allOf":[{"$ref":"common.schema.json"},{"type":"object","properties":{"artifact_kind":{"const":"reanalysis_snapshot"},"schema_version":{"const":"1.0.0"}}}]}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unit-test-runner.local/schemas/reanalysis_snapshot.schema.json",
+  "title": "Reanalysis Snapshot",
+  "allOf": [
+    {
+      "$ref": "common.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "artifact_kind": {
+          "const": "reanalysis_snapshot"
+        },
+        "schema_version": {
+          "const": "1.0.0"
+        },
+        "data": {
+          "$ref": "common.schema.json#/$defs/reanalysisSnapshotData"
+        }
+      }
+    }
+  ]
+}
