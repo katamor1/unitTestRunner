@@ -365,6 +365,7 @@ def handle_generate_harness_skeleton(args: argparse.Namespace) -> CLIResult:
         _existing_file(args.test_case_design, "test-case-design", args.command),
         Path(args.out),
         overwrite=args.overwrite,
+        dependency_policy_path=_existing_file(args.dependency_policy, "dependency-policy", args.command) if args.dependency_policy else None,
     )
     payload = {
         "harness_skeleton": {

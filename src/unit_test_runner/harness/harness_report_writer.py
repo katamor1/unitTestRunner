@@ -47,6 +47,15 @@ def render_harness_markdown(report: HarnessSkeletonReport) -> str:
         lines.append(
             f"| {item['stub_name']} | {item['original_function_name']} | {capabilities} | {', '.join(item['related_call_ids'])} |"
         )
+    lines.extend(["", "## 依存関係ディスパッチ", "| 呼び出し先 | ディスパッチャ | スタブ実体 | 既定モード | real可否 |", "|---|---|---|---|---|"])
+    if payload.get("dependency_dispatches"):
+        for item in payload["dependency_dispatches"]:
+            lines.append(
+                f"| {item['callee']} | {item['dispatcher_name']} | {item['stub_invoke_name']} | "
+                f"{item['default_mode']} | {'はい' if item['real_available'] else 'いいえ'} |"
+            )
+    else:
+        lines.append("| なし | | | | |")
     lines.extend(["", "## テストひな形", "| テストケース | 関数 | プレースホルダ数 |", "|---|---|---|"])
     for item in payload["test_skeletons"]:
         lines.append(f"| {item['test_case_id']} | {item['generated_function_name']} | {item['placeholder_count']} |")
