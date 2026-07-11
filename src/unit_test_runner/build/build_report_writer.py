@@ -48,6 +48,17 @@ def render_workspace_markdown(report: BuildWorkspaceReport) -> str:
     ]
     for unit in report.compile_units:
         lines.append(f"| {unit.source_file.as_posix()} | {unit.object_file.as_posix()} | {'はい' if unit.required else 'いいえ'} |")
+    lines.extend(["", "## リンクライブラリ", "| 順序 | ライブラリ | 根拠 | プロジェクト | 解析状態 |", "|---|---|---|---|---|"])
+    if report.link_libraries:
+        for item in report.link_libraries:
+            lines.append(
+                f"| {item.link_order} | {md_cell(item.path.as_posix())} | {md_label_cell(item.source)} | "
+                f"{md_cell(item.project_name or '')} | {md_label_cell(item.scan_status or '')} |"
+            )
+    else:
+        lines.append("|  | なし |  |  |  |")
+    lines.extend(["", "## library path"])
+    lines.extend([f"- `{item.as_posix()}`" for item in report.library_dirs] or ["- なし"])
     lines.extend(["", "## includeディレクトリ", "| パス | 根拠 | 存在 |", "|---|---|---|"])
     for item in report.include_dirs:
         lines.append(f"| {item.raw} | {md_label_cell(item.source)} | {'はい' if item.exists else 'いいえ'} |")
