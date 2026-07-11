@@ -3,11 +3,12 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  test:
+  source-integrity:
+    name: Source integrity
     runs-on: windows-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,14 +17,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Verify tracked Python sources
-        run: |
-          git ls-files --error-unmatch src/unit_test_runner/build/dependency_rewriter.py
-          py -m compileall -q src
-
-      - name: Run Python tests
-        run: py -m unittest discover -s tests -p "test_*.py"
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -36,6 +29,133 @@ jobs:
         working-directory: vscode/extension
         run: npm ci
 
+      - name: Verify tracked Python sources
+        run: |
+          git ls-files --error-unmatch src/unit_test_runner/build/dependency_rewriter.py
+          if ($LASTEXITCODE -ne 0) { throw "dependency_rewriter.py is not tracked" }
+          git check-ignore --no-index -q src/unit_test_runner/build/dependency_rewriter.py
+          if ($LASTEXITCODE -eq 0) { throw "Python build package source is ignored" }
+          py -m compileall -q src tests
+          py -m unittest tests.test_repository_source_tracking -v
+
+      - name: Compile VS Code extension
+        working-directory: vscode/extension
+        run: npm.cmd run compile
+
+  python-tests:
+    name: Python tests
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run Python tests
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP "python-tests.log"
+          & py -m unittest discover -s tests -p "test_*.py" -v *>&1 | Tee-Object -FilePath $log
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) { exit $testExit }
+
+      - name: Upload Python failure log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-test-failure
+          path: ${{ runner.temp }}\python-tests.log
+
+  vscode-tests:
+    name: VS Code unit tests
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: vscode/extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: vscode/extension
+        run: npm ci
+
       - name: Run VS Code extension tests
         working-directory: vscode/extension
-        run: npm.cmd test
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP "vscode-tests.log"
+          & npm.cmd test *>&1 | Tee-Object -FilePath $log
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) { exit $testExit }
+
+      - name: Upload VS Code unit-test failure log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-unit-test-failure
+          path: ${{ runner.temp }}\vscode-tests.log
+
+  vscode-activation:
+    name: VS Code Extension Host activation
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: vscode/extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: vscode/extension
+        run: npm ci
+
+      - name: Run Extension Host smoke test
+        working-directory: vscode/extension
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP "vscode-activation.log"
+          & npm.cmd run test:extension-host *>&1 | Tee-Object -FilePath $log
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) { exit $testExit }
+
+      - name: Upload Extension Host failure log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-activation-failure
+          path: ${{ runner.temp }}\vscode-activation.log
+
+  fixture-smoke:
+    name: VC6 fixture smoke
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run fixture smoke
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP "fixture-smoke.log"
+          & py -m unittest tests.test_fixture_cli_smoke -v *>&1 | Tee-Object -FilePath $log
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) { exit $testExit }
+
+      - name: Upload fixture-smoke failure log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixture-smoke-failure
+          path: ${{ runner.temp }}\fixture-smoke.log
