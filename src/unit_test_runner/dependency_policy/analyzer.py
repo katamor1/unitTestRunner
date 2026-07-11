@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from unit_test_runner.encoding import decode_bytes_auto
+from unit_test_runner.c_analyzer.object_definition_finder import find_file_scope_object_definitions
 from unit_test_runner.c_analyzer.masker import mask_source_text
 
 from .models import (
@@ -419,21 +420,13 @@ def _find_declaration_header(symbol: str, headers: list[Path], root: Path) -> Pa
 
 def _find_object_definitions(symbol: str, sources: list[Path]) -> list[Path]:
     result: list[Path] = []
-    pattern = re.compile(rf"^\s*(?!extern\b|EXTERN\b|typedef\b|static\b)[^;(){{}}\n]*\b{re.escape(symbol)}\b\s*(?:\[[^\]]*\])?\s*(?:=[^;]*)?;")
     for source in sources:
         try:
-            lines = decode_bytes_auto(source.read_bytes()).splitlines()
+            text = decode_bytes_auto(source.read_bytes())
         except OSError:
             continue
-        depth = 0
-        found = False
-        for line in lines:
-            if depth == 0 and pattern.match(line):
-                found = True
-                break
-            depth += line.count("{") - line.count("}")
-            depth = max(0, depth)
-        if found:
+        definitions = find_file_scope_object_definitions(text)
+        if any(item.name == symbol and item.storage_class != "static" for item in definitions):
             result.append(source.resolve())
     return _unique_paths(result)
 

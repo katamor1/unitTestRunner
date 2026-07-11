@@ -1,4 +1,5 @@
 import { resolveReportPaths, ReportPaths } from '../reports/reportPathResolver';
+import { resolveReportedPath } from '../platform/pathDialect';
 
 export interface ParsedCliResult {
   status?: string;
@@ -96,28 +97,32 @@ function reportsFromParsed(parsed: Record<string, unknown>, fallback: ReportPath
   if (missing.length > 0) {
     warnings.push(`CLI JSONにレポートパスが含まれていません: ${missing.map(([jsonKey]) => jsonKey).join(', ')}。既定のパスを使います。`);
   }
+  const reportPath = (value: unknown, fallbackValue?: string): string | undefined => {
+    const reported = stringValue(value);
+    return reported ? resolveReportedPath(reported, fallback.workspace) : fallbackValue;
+  };
   return {
     workspace: fallback.workspace,
-    functionDossierMd: stringValue(reportSource.function_dossier_md) ?? fallback.functionDossierMd,
-    reviewChecklistMd: stringValue(reportSource.review_checklist) ?? fallback.reviewChecklistMd,
-    unresolvedItemsMd: stringValue(reportSource.unresolved_items) ?? fallback.unresolvedItemsMd,
-    nextActionsMd: stringValue(reportSource.next_actions) ?? fallback.nextActionsMd,
-    quickSummaryJson: stringValue(reportSource.quick_summary_json) ?? fallback.quickSummaryJson,
-    quickSummaryMd: stringValue(reportSource.quick_summary_md) ?? fallback.quickSummaryMd,
-    testCaseDesignMd: stringValue(reportSource.test_case_design_md) ?? fallback.testCaseDesignMd,
-    testCaseDesignJson: stringValue(reportSource.test_case_design_json) ?? fallback.testCaseDesignJson,
-    testCaseDesignCsv: stringValue(reportSource.test_case_design_csv) ?? fallback.testCaseDesignCsv,
-    functionSignatureJson: stringValue(reportSource.function_signature_json) ?? fallback.functionSignatureJson,
-    globalAccessJson: stringValue(reportSource.global_access_json) ?? fallback.globalAccessJson,
-    callReportJson: stringValue(reportSource.call_report_json) ?? fallback.callReportJson,
-    harnessSkeletonReportJson: stringValue(reportSource.harness_skeleton_report_json) ?? stringValue(objectValue(data.harness_skeleton).json) ?? fallback.harnessSkeletonReportJson,
-    harnessSkeletonReportMd: stringValue(reportSource.harness_skeleton_report_md) ?? stringValue(objectValue(data.harness_skeleton).markdown) ?? fallback.harnessSkeletonReportMd,
-    buildProbeReportMd: stringValue(reportSource.build_probe_report_md) ?? fallback.buildProbeReportMd,
-    testExecutionReportMd: stringValue(reportSource.test_execution_report_md) ?? fallback.testExecutionReportMd,
-    evidencePackageMd: stringValue(reportSource.evidence_package_md) ?? fallback.evidencePackageMd,
-    changeImpactReportMd: stringValue(reportSource.change_impact_report_md) ?? fallback.changeImpactReportMd,
-    testCaseReconciliationReportMd: stringValue(reportSource.test_case_reconciliation_report_md) ?? fallback.testCaseReconciliationReportMd,
-    regressionSelectionCsv: stringValue(reportSource.regression_selection_csv) ?? fallback.regressionSelectionCsv,
+    functionDossierMd: reportPath(reportSource.function_dossier_md, fallback.functionDossierMd),
+    reviewChecklistMd: reportPath(reportSource.review_checklist, fallback.reviewChecklistMd),
+    unresolvedItemsMd: reportPath(reportSource.unresolved_items, fallback.unresolvedItemsMd),
+    nextActionsMd: reportPath(reportSource.next_actions, fallback.nextActionsMd),
+    quickSummaryJson: reportPath(reportSource.quick_summary_json, fallback.quickSummaryJson),
+    quickSummaryMd: reportPath(reportSource.quick_summary_md, fallback.quickSummaryMd),
+    testCaseDesignMd: reportPath(reportSource.test_case_design_md, fallback.testCaseDesignMd),
+    testCaseDesignJson: reportPath(reportSource.test_case_design_json, fallback.testCaseDesignJson),
+    testCaseDesignCsv: reportPath(reportSource.test_case_design_csv, fallback.testCaseDesignCsv),
+    functionSignatureJson: reportPath(reportSource.function_signature_json, fallback.functionSignatureJson),
+    globalAccessJson: reportPath(reportSource.global_access_json, fallback.globalAccessJson),
+    callReportJson: reportPath(reportSource.call_report_json, fallback.callReportJson),
+    harnessSkeletonReportJson: reportPath(reportSource.harness_skeleton_report_json ?? objectValue(data.harness_skeleton).json, fallback.harnessSkeletonReportJson),
+    harnessSkeletonReportMd: reportPath(reportSource.harness_skeleton_report_md ?? objectValue(data.harness_skeleton).markdown, fallback.harnessSkeletonReportMd),
+    buildProbeReportMd: reportPath(reportSource.build_probe_report_md, fallback.buildProbeReportMd),
+    testExecutionReportMd: reportPath(reportSource.test_execution_report_md, fallback.testExecutionReportMd),
+    evidencePackageMd: reportPath(reportSource.evidence_package_md, fallback.evidencePackageMd),
+    changeImpactReportMd: reportPath(reportSource.change_impact_report_md, fallback.changeImpactReportMd),
+    testCaseReconciliationReportMd: reportPath(reportSource.test_case_reconciliation_report_md, fallback.testCaseReconciliationReportMd),
+    regressionSelectionCsv: reportPath(reportSource.regression_selection_csv, fallback.regressionSelectionCsv),
   };
 }
 

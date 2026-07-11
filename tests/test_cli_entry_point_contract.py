@@ -176,8 +176,8 @@ class CliEntryPointContractTests(unittest.TestCase):
             self.assertEqual("src/control.c", payload["data"]["target"]["source"])
             request = json.loads((out_dir / "input" / "request.json").read_text(encoding="utf-8"))
             self.assertEqual("src/control.c", request["source"])
-            self.assertTrue((out_dir / "extracted" / "src" / "control.c").exists())
-            self.assertFalse((out_dir / "extracted" / str(source).replace(":", "")).exists())
+            source_relative = source.relative_to(FIXTURE_ROOT)
+            self.assertTrue((out_dir / "extracted" / source_relative).exists())
 
         self.assertEqual(before, source.read_bytes())
 

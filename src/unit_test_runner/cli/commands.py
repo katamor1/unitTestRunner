@@ -6,7 +6,7 @@ import platform
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from unit_test_runner import __version__
 from unit_test_runner.build_probe import build_probe
@@ -42,7 +42,18 @@ from unit_test_runner.vc6.dsp_parser import parse_dsp as parse_dsp_project
 from unit_test_runner.vc6.source_membership import map_source_membership
 
 from .errors import CLIError
-from .exit_codes import EXIT_BUILD_PROBE_FAILED, EXIT_ENVIRONMENT_WARNING, EXIT_INPUT_ERROR, EXIT_NOT_FOUND, EXIT_OK, EXIT_OUTPUT_ERROR, EXIT_TESTS_FAILED
+from .exit_codes import (
+    EXIT_BUILD_PROBE_FAILED,
+    EXIT_ENVIRONMENT_WARNING,
+    EXIT_INPUT_ERROR,
+    EXIT_INTERNAL_ERROR,
+    EXIT_NOT_FOUND,
+    EXIT_OK,
+    EXIT_OUTPUT_ERROR,
+    EXIT_TESTS_CANCELLED,
+    EXIT_TESTS_FAILED,
+    EXIT_TESTS_TIMED_OUT,
+)
 from .result import CLIResult
 
 
@@ -809,14 +820,48 @@ def handle_run_tests(args: argparse.Namespace) -> CLIResult:
         treat_placeholder_as_inconclusive=args.treat_placeholder_as_inconclusive,
     )
     payload = _evidence_payload(workspace, report, manifest)
+    status, exit_code = legacy_execution_exit(report.status, report.executed)
     return CLIResult(
-        status="test_executed" if report.executed else "evidence_prepared",
-        exit_code=EXIT_OK,
+        status=status,
+        exit_code=exit_code,
         command=args.command,
-        message="Test execution evidence prepared.",
+        message="Test execution evidence prepared with the reported terminal outcome.",
         data=payload,
         legacy_payload=payload,
     )
+
+
+def legacy_execution_exit(
+    status: Literal[
+        "planned",
+        "not_run",
+        "passed",
+        "failed",
+        "blocked",
+        "inconclusive",
+        "cancelled",
+        "timed_out",
+        "timeout",
+        "error",
+    ],
+    executed: bool,
+) -> tuple[str, int]:
+    normalized = "timed_out" if status == "timeout" else status
+    if normalized == "passed" and executed:
+        return "tests_passed", EXIT_OK
+    if normalized == "failed":
+        return "tests_failed", EXIT_TESTS_FAILED
+    if normalized == "timed_out":
+        return "tests_timed_out", EXIT_TESTS_TIMED_OUT
+    if normalized in {"blocked", "inconclusive"}:
+        return "tests_blocked", EXIT_ENVIRONMENT_WARNING
+    if normalized == "cancelled":
+        return "tests_cancelled", EXIT_TESTS_CANCELLED
+    if normalized in {"planned", "not_run"} and not executed:
+        return "evidence_prepared", EXIT_OK
+    if normalized == "error":
+        return "tests_error", EXIT_INTERNAL_ERROR
+    return "tests_error", EXIT_INTERNAL_ERROR
 
 
 def _split_tags(value: str) -> list[str]:

@@ -67,13 +67,21 @@ def _write_target_invocation(
     function_name = function_payload.get("name", "unknown_function")
     source_path = Path(signature.get("source", {}).get("path") or "")
     raw_return_type = hsg._return_type(function_payload)
+    return_info = function_payload.get("return_type") if isinstance(function_payload.get("return_type"), dict) else {}
+    return_bridge_kind = str(return_info.get("bridge_kind") or "unresolved")
     parameters = _signature_parameters_compat(function_payload)
     raw_parameter_list = hsg._signature_parameter_list(parameters)
-    public_return_type = _public_return_type(raw_return_type)
+    public_return_type = _public_return_type(raw_return_type, return_bridge_kind)
     public_parameter_list = _public_parameter_list(parameters)
     public_prototype = f"{public_return_type} Target_Invoke_{sanitize_identifier(function_name)}({public_parameter_list})"
     target_prototype = f"{raw_return_type} {function_name}({raw_parameter_list})"
-    include_block = _include_block(_source_quote_includes(source_path))
+    source_includes = _source_quote_includes(source_path)
+    include_block = _include_block(source_includes)
+    public_include_block = include_block if _public_prototype_needs_headers(
+        raw_return_type,
+        return_bridge_kind,
+        parameters,
+    ) else ""
     if function_payload.get("storage_class") == "static":
         warnings.append(
             HarnessGenerationWarning(
@@ -86,7 +94,7 @@ def _write_target_invocation(
 #ifndef TARGET_INVOCATION_H_
 #define TARGET_INVOCATION_H_
 
-{public_prototype};
+{public_include_block}{public_prototype};
 
 #endif
 """
@@ -137,6 +145,7 @@ def _signature_parameters_compat(function_payload: dict[str, Any]) -> list[dict[
                 "pointer_level": pointer_level,
                 "array_base_type": str(item.get("array_base_type") or item.get("base_type") or type_raw),
                 "array_size": str(item.get("array_size") or "1"),
+                "bridge_kind": str(item.get("bridge_kind") or "unresolved"),
             }
         )
     return result
@@ -151,16 +160,37 @@ def _public_type_for_parameter(parameter: dict[str, Any]) -> str:
     if int(parameter.get("pointer_level") or 0) > 0 or parameter.get("is_array"):
         return "void *"
     raw = _compact_type(parameter.get("type_raw"))
-    return raw if raw in _SCALAR_PUBLIC_TYPES else "int"
+    return raw or "int"
 
 
-def _public_return_type(raw_return_type: str) -> str:
+def _public_return_type(raw_return_type: str, bridge_kind: str = "unresolved") -> str:
     raw = _compact_type(raw_return_type)
     if raw == "void":
         return "void"
     if "*" in raw:
         return "void *"
-    return raw if raw in _SCALAR_PUBLIC_TYPES else "int"
+    if bridge_kind in {"scalar", "aggregate", "unresolved"} and raw:
+        return raw
+    return raw if raw in _SCALAR_PUBLIC_TYPES else (raw or "int")
+
+
+def _public_prototype_needs_headers(
+    raw_return_type: str,
+    return_bridge_kind: str,
+    parameters: list[dict[str, Any]],
+) -> bool:
+    return_type = _compact_type(raw_return_type)
+    if return_type not in {"", "void"} and "*" not in return_type:
+        if return_bridge_kind != "unresolved" or return_type not in _SCALAR_PUBLIC_TYPES:
+            if return_type not in _SCALAR_PUBLIC_TYPES:
+                return True
+    for parameter in parameters:
+        if int(parameter.get("pointer_level") or 0) > 0 or parameter.get("is_array"):
+            continue
+        raw = _compact_type(parameter.get("type_raw"))
+        if raw and raw not in _SCALAR_PUBLIC_TYPES:
+            return True
+    return False
 
 
 def _target_argument_cast(parameter: dict[str, Any]) -> str:

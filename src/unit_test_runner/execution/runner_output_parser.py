@@ -151,6 +151,6 @@ def _summary_from_cases(cases: list[TestCaseExecutionResult], assertion_failures
     completed = passed + failed + skipped + inconclusive
     started = len([case for case in cases if case.status not in {"not_run", "not_found_in_output"}])
     confidence = "medium" if cases else "low"
-    if crashed or any(case.status == "unknown" for case in cases):
+    if crashed or inconclusive or any(case.status == "unknown" for case in cases):
         confidence = "low"
     return TestResultSummary(len(cases), passed, failed, skipped, inconclusive, assertion_failures, confidence, crashed, not_run, started, completed)

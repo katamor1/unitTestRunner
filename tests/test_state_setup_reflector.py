@@ -87,9 +87,9 @@ class StateSetupReflectorTests(unittest.TestCase):
 
             changed = reflect_state_setups(workspace, design, "Shared3")
 
-            self.assertIn(source, changed)
-            self.assertIn(header, changed)
-            self.assertIn(helper_source, changed)
+            self.assertIn(source.resolve(), changed)
+            self.assertIn(header.resolve(), changed)
+            self.assertIn(helper_source.resolve(), changed)
             test_text = source.read_text(encoding="cp932")
             helper_text = helper_source.read_text(encoding="cp932")
             header_text = header.read_text(encoding="cp932")

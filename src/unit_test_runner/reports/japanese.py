@@ -103,6 +103,7 @@ _TEXTS = {
     "Expected return value must be reviewed from specification.": "期待戻り値を仕様から確認してください。",
     "Final human review is still required.": "最終的な人手レビューが必要です。",
     "Generated harness needs manual completion.": "生成ハーネスには手動補完が必要です。",
+    "The generated test cannot be treated as approved until expected values are reviewed.": "生成テストは、期待値レビューが完了するまで承認済みとして扱えません。",
     "Review dossier": "dossierをレビュー",
     "Review expected result": "期待結果を確認",
     "Review function_dossier.md and mark checklist items outside this tool.": "function_dossier.md を確認し、チェック項目の完了判断をツール外で記録してください。",

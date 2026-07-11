@@ -6,9 +6,12 @@ import {
   buildAnalyzeFunctionInvocation,
   buildBuildProbeInvocation,
   buildFinalizeDossierInvocation,
+  buildFullGateAnalyzeInvocation,
   buildGenerateHarnessSkeletonInvocation,
   buildGenerateTestDesignInvocation,
   buildPrepareEvidenceInvocation,
+  buildQuickCheckInvocation,
+  buildQuickOutputWorkspace,
   buildReanalyzeFunctionInvocation,
   buildRunTestsInvocation,
   buildSuiteManifestPath,
@@ -16,8 +19,15 @@ import {
   buildSuiteRunInvocation,
   CliInvocation,
   FunctionTarget,
+  normalizeQuickCheckProfile,
+  QuickCheckProfile,
   relativeSourcePath,
 } from './cli/commandBuilder';
+import {
+  registerUnitTestRunnerCommands,
+  UnitTestRunnerCommandHandlers,
+} from './commands/commandRegistry';
+import { createQuickCommandHandlers } from './commands/quickCommands';
 import { CliResult, runCliInvocation } from './cli/cliRunner';
 import { formatCliFailureMessage, parseCliResult } from './cli/cliResultParser';
 import { DEFAULT_CLI_PATH, resolveCliPath } from './config/bundledCli';
@@ -84,38 +94,187 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   }));
 
+  const quickHandlers = createQuickCommandHandlers({
+    getQuickProfile: () => normalizeQuickCheckProfile(readConfig(context).quickProfile),
+    runQuickCheck: (profile) => quickCheckActiveFunction(context, output, workflowPanel, profile),
+    openGeneratedTestSource: () => openGeneratedTestSource(context),
+    openQuickSummary: () => openQuickSummary(context),
+    runFullGate: () => runFullGateForCurrentFunction(context, output, workflowPanel),
+    showError: (message) => {
+      void vscode.window.showErrorMessage(message);
+    },
+  });
+  const handlers: UnitTestRunnerCommandHandlers = {
+    ...quickHandlers,
+    'unitTestRunner.analyzeCurrentFunction': async () => analyzeActiveFunction(context, output, workflowPanel),
+    'unitTestRunner.analyzeSelectedFunction': async () => analyzeActiveFunction(context, output, workflowPanel),
+    'unitTestRunner.reanalyzeCurrentFunction': async () => reanalyzeActiveFunction(context, output, workflowPanel),
+    'unitTestRunner.finalizeDossier': async () => runWorkspaceCommand(context, output, 'finalize', workflowPanel),
+    'unitTestRunner.openFunctionDossier': async () => openLastReport(context, 'functionDossierMd'),
+    'unitTestRunner.openReviewChecklist': async () => openLastReport(context, 'reviewChecklistMd'),
+    'unitTestRunner.openNextActions': async () => openLastReport(context, 'nextActionsMd'),
+    'unitTestRunner.openChangeImpactReport': async () => openLastReport(context, 'changeImpactReportMd'),
+    'unitTestRunner.openRegressionSelection': async () => openLastReport(context, 'regressionSelectionCsv'),
+    'unitTestRunner.generateTestDesign': async () => runWorkspaceCommand(context, output, 'testDesign', workflowPanel),
+    'unitTestRunner.generateHarnessSkeleton': async () => runWorkspaceCommand(context, output, 'harness', workflowPanel),
+    'unitTestRunner.buildProbeDryRun': async () => runWorkspaceCommand(context, output, 'buildProbeDryRun', workflowPanel),
+    'unitTestRunner.runBuildProbe': async () => runWorkspaceCommand(context, output, 'buildProbeRun', workflowPanel),
+    'unitTestRunner.runTests': async () => runWorkspaceCommand(context, output, 'runTests', workflowPanel),
+    'unitTestRunner.prepareEvidence': async () => runWorkspaceCommand(context, output, 'evidence', workflowPanel),
+    'unitTestRunner.registerCurrentFunctionInSuite': async () => registerActiveFunctionInSuite(context, output, workflowPanel, suitePanel, suiteDashboard),
+    'unitTestRunner.openSuite': async () => suiteDashboard.open(),
+    'unitTestRunner.openSuiteDashboard': async () => suiteDashboard.open(),
+    'unitTestRunner.openSuiteManifest': async () => openSuiteManifest(context),
+    'unitTestRunner.runSelectedSuiteTests': async () => runSuiteCommand(context, output, { selected: true, run: true }, suitePanel, suiteDashboard),
+    'unitTestRunner.runSuiteByTag': async () => runSuiteByTag(context, output, suitePanel, suiteDashboard),
+    'unitTestRunner.runAllSuiteTestsRequireGreen': async () => runSuiteCommand(context, output, { all: true, run: true, requireGreen: true }, suitePanel, suiteDashboard),
+    'unitTestRunner.openSuiteRunReport': async () => openSuiteRunReport(context),
+    'unitTestRunner.openOutputWorkspace': async () => openOutputWorkspace(context),
+    'unitTestRunner.copyLastCommand': async () => copyLastCommand(context),
+    'unitTestRunner.openLastFunctionDossier': async () => openLastReport(context, 'functionDossierMd'),
+  };
+  const commandRegistry = {
+    registerCommand: (command: string, handler: (...args: unknown[]) => unknown) =>
+      vscode.commands.registerCommand(command, (...args: unknown[]) => handler(...args)),
+  };
   context.subscriptions.push(
-    vscode.commands.registerCommand('unitTestRunner.analyzeCurrentFunction', async () => analyzeActiveFunction(context, output, workflowPanel)),
-    vscode.commands.registerCommand('unitTestRunner.analyzeSelectedFunction', async () => analyzeActiveFunction(context, output, workflowPanel)),
-    vscode.commands.registerCommand('unitTestRunner.reanalyzeCurrentFunction', async () => reanalyzeActiveFunction(context, output, workflowPanel)),
-    vscode.commands.registerCommand('unitTestRunner.finalizeDossier', async () => runWorkspaceCommand(context, output, 'finalize', workflowPanel)),
-    vscode.commands.registerCommand('unitTestRunner.openFunctionDossier', async () => openLastReport(context, 'functionDossierMd')),
-    vscode.commands.registerCommand('unitTestRunner.openReviewChecklist', async () => openLastReport(context, 'reviewChecklistMd')),
-    vscode.commands.registerCommand('unitTestRunner.openNextActions', async () => openLastReport(context, 'nextActionsMd')),
-    vscode.commands.registerCommand('unitTestRunner.openChangeImpactReport', async () => openLastReport(context, 'changeImpactReportMd')),
-    vscode.commands.registerCommand('unitTestRunner.openRegressionSelection', async () => openLastReport(context, 'regressionSelectionCsv')),
-    vscode.commands.registerCommand('unitTestRunner.generateTestDesign', async () => runWorkspaceCommand(context, output, 'testDesign', workflowPanel)),
-    vscode.commands.registerCommand('unitTestRunner.generateHarnessSkeleton', async () => runWorkspaceCommand(context, output, 'harness', workflowPanel)),
-    vscode.commands.registerCommand('unitTestRunner.buildProbeDryRun', async () => runWorkspaceCommand(context, output, 'buildProbeDryRun', workflowPanel)),
-    vscode.commands.registerCommand('unitTestRunner.runBuildProbe', async () => runWorkspaceCommand(context, output, 'buildProbeRun', workflowPanel)),
-    vscode.commands.registerCommand('unitTestRunner.runTests', async () => runWorkspaceCommand(context, output, 'runTests', workflowPanel)),
-    vscode.commands.registerCommand('unitTestRunner.prepareEvidence', async () => runWorkspaceCommand(context, output, 'evidence', workflowPanel)),
-    vscode.commands.registerCommand('unitTestRunner.registerCurrentFunctionInSuite', async () => registerActiveFunctionInSuite(context, output, workflowPanel, suitePanel, suiteDashboard)),
-    vscode.commands.registerCommand('unitTestRunner.openSuite', async () => suiteDashboard.open()),
-    vscode.commands.registerCommand('unitTestRunner.openSuiteDashboard', async () => suiteDashboard.open()),
-    vscode.commands.registerCommand('unitTestRunner.openSuiteManifest', async () => openSuiteManifest(context)),
-    vscode.commands.registerCommand('unitTestRunner.runSelectedSuiteTests', async () => runSuiteCommand(context, output, { selected: true, run: true }, suitePanel, suiteDashboard)),
-    vscode.commands.registerCommand('unitTestRunner.runSuiteByTag', async () => runSuiteByTag(context, output, suitePanel, suiteDashboard)),
-    vscode.commands.registerCommand('unitTestRunner.runAllSuiteTestsRequireGreen', async () => runSuiteCommand(context, output, { all: true, run: true, requireGreen: true }, suitePanel, suiteDashboard)),
-    vscode.commands.registerCommand('unitTestRunner.openSuiteRunReport', async () => openSuiteRunReport(context)),
-    vscode.commands.registerCommand('unitTestRunner.openOutputWorkspace', async () => openOutputWorkspace(context)),
-    vscode.commands.registerCommand('unitTestRunner.copyLastCommand', async () => copyLastCommand(context)),
-    vscode.commands.registerCommand('unitTestRunner.openLastFunctionDossier', async () => openLastReport(context, 'functionDossierMd')),
+    ...registerUnitTestRunnerCommands(context, { registry: commandRegistry, handlers }),
   );
 }
 
 export function deactivate(): void {
   // No long-lived process is kept by this thin adapter.
+}
+
+async function quickCheckActiveFunction(
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel,
+  workflowPanel: WorkflowPanelProvider,
+  profile: QuickCheckProfile,
+): Promise<void> {
+  const settings: AdapterSettings = { ...readConfig(context), quickProfile: profile };
+  showValidation(settings);
+  const targetBase = await activeFunctionTarget(context);
+  const outputWorkspace = buildQuickOutputWorkspace(settings, targetBase);
+  const target = { ...targetBase, outputWorkspace };
+  const invocation = buildQuickCheckInvocation(settings, target);
+  const reports = await executeInvocation(
+    context,
+    output,
+    invocation,
+    outputWorkspace,
+    workflowPanel,
+  );
+  const kind: WorkflowCommandKind = profile === 'design'
+    ? 'analyze'
+    : profile === 'harness'
+      ? 'harness'
+      : 'buildProbeDryRun';
+  await recordWorkflowSuccess(context, workflowPanel, {
+    kind,
+    outputWorkspace,
+    functionName: target.functionName,
+    reports,
+  });
+  if (settings.quickAutoOpenSummary && reports.quickSummaryMd) {
+    await openMarkdown(reports.quickSummaryMd);
+  }
+}
+
+async function runFullGateForCurrentFunction(
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel,
+  workflowPanel: WorkflowPanelProvider,
+): Promise<void> {
+  const settings = readConfig(context);
+  showValidation(settings);
+  const target = await activeFunctionTarget(context);
+  const invocation = buildFullGateAnalyzeInvocation(settings, target);
+  const reports = await executeInvocation(
+    context,
+    output,
+    invocation,
+    target.outputWorkspace,
+    workflowPanel,
+  );
+  await recordWorkflowSuccess(context, workflowPanel, {
+    kind: 'analyze',
+    outputWorkspace: target.outputWorkspace,
+    functionName: target.functionName,
+    reports,
+  });
+  if (settings.autoOpenDossier && reports.functionDossierMd) {
+    await openMarkdown(reports.functionDossierMd);
+  }
+}
+
+async function openGeneratedTestSource(context: vscode.ExtensionContext): Promise<void> {
+  const workspace = await lastWorkspace(context);
+  const functionName = await lastFunctionName(context);
+  const candidates = generatedTestSourceCandidates(workspace, functionName);
+  const existing = candidates.find((candidate) => fs.existsSync(candidate));
+  if (existing) {
+    await openReport(existing);
+    return;
+  }
+  const generatedTests = path.join(workspace, 'generated', 'tests');
+  if (fs.existsSync(generatedTests)) {
+    const matches = fs.readdirSync(generatedTests)
+      .filter((name) => /^test_.*\.c$/i.test(name))
+      .map((name) => path.join(generatedTests, name));
+    if (matches.length === 1) {
+      await openReport(matches[0]);
+      return;
+    }
+    if (matches.length > 1) {
+      const selected = await vscode.window.showQuickPick(matches, {
+        placeHolder: '開くテストソースを選択してください。',
+      });
+      if (selected) {
+        await openReport(selected);
+        return;
+      }
+    }
+  }
+  throw new Error(`生成テストソースが見つかりません: ${candidates[0]}`);
+}
+
+async function openQuickSummary(context: vscode.ExtensionContext): Promise<void> {
+  const workspace = await lastWorkspace(context);
+  const report = resolveReportPaths(workspace).quickSummaryMd
+    ?? path.join(workspace, 'reports', 'quick_summary.md');
+  await openReport(report);
+}
+
+async function lastFunctionName(context: vscode.ExtensionContext): Promise<string> {
+  const state = readWorkflowState(context);
+  if (state.functionName) {
+    return state.functionName;
+  }
+  const prompt = await vscode.window.showInputBox({
+    prompt: '生成テストソースを開く関数名を入力してください。',
+    validateInput: (value) => (/^[A-Za-z_]\w*$/.test(value) ? undefined : 'Cの関数識別子を入力してください。'),
+  });
+  if (!prompt) {
+    throw new Error('関数名の指定が必要です。');
+  }
+  return prompt;
+}
+
+function generatedTestSourceCandidates(workspace: string, functionName: string): string[] {
+  const safe = sanitizeIdentifier(functionName);
+  return [
+    path.join(workspace, 'generated', 'tests', `test_${safe}.c`),
+    path.join(workspace, 'generated', 'tests', `test_${functionName}.c`),
+  ];
+}
+
+function sanitizeIdentifier(value: string): string {
+  const sanitized = value.replace(/\W+/g, '_').replace(/^_+|_+$/g, '');
+  if (!sanitized) {
+    return 'item';
+  }
+  return /^\d/.test(sanitized) ? `_${sanitized}` : sanitized;
 }
 
 async function analyzeActiveFunction(context: vscode.ExtensionContext, output: vscode.OutputChannel, workflowPanel: WorkflowPanelProvider): Promise<void> {
@@ -267,6 +426,11 @@ function readRawConfig(): RawSettings {
     vcvarsPath: config.get('vcvarsPath'),
     autoOpenDossier: config.get('autoOpenDossier'),
     finalizeDossierAfterAnalyze: config.get('finalizeDossierAfterAnalyze'),
+    quickProfile: config.get('quickProfile'),
+    quickOutputRoot: config.get('quickOutputRoot'),
+    quickReusePreviousWorkspace: config.get('quickReusePreviousWorkspace'),
+    quickAutoOpenSummary: config.get('quickAutoOpenSummary'),
+    quickAllowExecution: config.get('quickAllowExecution'),
     useJsonOutput: config.get('useJsonOutput'),
     showOutputChannel: config.get('showOutputChannel'),
     runBuildProbeRequiresConfirmation: config.get('runBuildProbeRequiresConfirmation'),

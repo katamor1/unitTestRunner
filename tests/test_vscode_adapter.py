@@ -8,6 +8,18 @@ EXTENSION_ROOT = REPO_ROOT / "vscode" / "extension"
 
 
 class VscodeAdapterTests(unittest.TestCase):
+    def test_node_test_script_uses_cross_platform_discovery(self):
+        manifest = json.loads(
+            (EXTENSION_ROOT / "package.json").read_text(encoding="utf-8")
+        )
+
+        test_script = manifest["scripts"]["test"]
+        self.assertEqual(
+            "npm run compile && node ./scripts/run-unit-tests.cjs",
+            test_script,
+        )
+        self.assertNotIn("*", test_script)
+
     def test_extension_manifest_declares_thin_cli_adapter_commands_and_settings(self):
         package_json = EXTENSION_ROOT / "package.json"
         manifest = json.loads(package_json.read_text(encoding="utf-8"))
@@ -16,6 +28,7 @@ class VscodeAdapterTests(unittest.TestCase):
         self.assertEqual("./dist/extension.js", manifest["main"])
         self.assertIn("onCommand:unitTestRunner.analyzeSelectedFunction", manifest["activationEvents"])
         self.assertIn("onCommand:unitTestRunner.openLastFunctionDossier", manifest["activationEvents"])
+        self.assertIn("onCommand:unitTestRunner.openGeneratedTestSource", manifest["activationEvents"])
 
         commands = {
             command["command"]: command["title"]
@@ -29,8 +42,12 @@ class VscodeAdapterTests(unittest.TestCase):
             "UnitTestRunner: 最後の関数dossierを開く",
             commands["unitTestRunner.openLastFunctionDossier"],
         )
+        self.assertIn("unitTestRunner.openGeneratedTestSource", commands)
         self.assertFalse(any("Analyze Current Function" in title for title in commands.values()))
         self.assertFalse(any("Open Last Function Dossier" in title for title in commands.values()))
+
+        editor_menu = manifest["contributes"]["menus"]["editor/context"]
+        self.assertTrue(all("editorLangId == cpp" not in item["when"] for item in editor_menu))
 
         properties = manifest["contributes"]["configuration"]["properties"]
         for key in (
