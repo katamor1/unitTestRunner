@@ -209,6 +209,8 @@ def valid_function_dossier() -> dict:
                     "schema_version": "1.0.0",
                     "produced_by_item": "analysis",
                     "required_level": "required",
+                    "contract_status": "valid",
+                    "contract_violations": [],
                     "stale_candidate": False,
                     "modified_at": None,
                     "warnings": [],

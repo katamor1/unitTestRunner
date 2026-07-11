@@ -21,6 +21,29 @@ def validate_artifacts(
     for kind in sorted(MVP1_REQUIRED):
         if not by_kind.get(kind) or not by_kind[kind].exists:
             blocked_reasons.append(f"Missing MVP-1 required artifact: {kind}")
+    for artifact in artifacts:
+        if artifact.contract_status not in {
+            "parse_error",
+            "schema_error",
+            "unsupported_version",
+        }:
+            continue
+        blocking = [
+            item
+            for item in artifact.contract_violations
+            if item.severity not in {"info", "warning"}
+        ]
+        if not blocking:
+            blocked_reasons.append(
+                f"Artifact contract {artifact.artifact_kind} is "
+                f"{artifact.contract_status}."
+            )
+        for violation in blocking:
+            blocked_reasons.append(
+                f"Artifact contract {artifact.artifact_kind} is "
+                f"{artifact.contract_status} at {violation.json_path}: "
+                f"{violation.code}: {violation.message}"
+            )
     discovered_names = _function_names(payloads)
     if function_name is None and discovered_names:
         function_name = sorted(discovered_names)[0]
@@ -44,10 +67,6 @@ def validate_artifacts(
                 )
                 warnings.append(warning)
                 _mark_stale(artifacts, kind, warning)
-    if strict_schema_version:
-        versions = {artifact.schema_version for artifact in artifacts if artifact.exists and artifact.schema_version}
-        if len(versions) > 1:
-            warnings.append(DossierWarning("schema_version_mismatch", f"Multiple schema versions found: {sorted(versions)}"))
     return function_name, source_path, warnings, blocked_reasons
 
 
@@ -138,6 +157,8 @@ def _mark_stale(artifacts: list[DossierArtifact], kind: str, warning: DossierWar
     for artifact in artifacts:
         if artifact.artifact_kind == kind:
             artifact.stale_candidate = True
+            if artifact.contract_status == "valid":
+                artifact.contract_status = "stale"
             warning.related_artifact_id = artifact.artifact_id
             artifact.warnings.append(warning)
             return

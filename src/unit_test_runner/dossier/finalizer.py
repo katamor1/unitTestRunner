@@ -26,14 +26,18 @@ def finalize_function_dossier(
     workspace = Path(workspace).resolve()
     policy = policy or DossierGenerationPolicy(require_schema_version_match=strict_schema_version)
     analysis_dossier = _read_existing_dossier(workspace / "reports" / "function_dossier.json")
-    artifacts, payloads, collection_warnings = collect_artifacts(workspace)
+    artifacts, payloads, collection_warnings = collect_artifacts(
+        workspace,
+        strict_schema_version=policy.require_schema_version_match,
+    )
     function_name, source_path, validation_warnings, blocked_reasons = validate_artifacts(
         artifacts,
         payloads,
         function_name,
         strict_schema_version=policy.require_schema_version_match,
     )
-    function_name = function_name or "unknown_function"
+    function_name = function_name or _existing_function_name(analysis_dossier) or "unknown_function"
+    source_path = source_path or _existing_source_path(analysis_dossier)
     summaries = build_summaries(payloads)
     traceability = build_traceability(payloads)
     review_items, unresolved_items = build_review_items(payloads)
@@ -108,6 +112,20 @@ def _dict_field(payload: dict, key: str) -> dict:
 def _list_field(payload: dict, key: str) -> list:
     value = payload.get(key)
     return list(value) if isinstance(value, list) else []
+
+
+def _existing_function_name(payload: dict) -> str | None:
+    function = _dict_field(payload, "function")
+    target = _dict_field(payload, "target")
+    value = function.get("name") or target.get("function")
+    return value if isinstance(value, str) and value else None
+
+
+def _existing_source_path(payload: dict) -> Path | None:
+    target = _dict_field(payload, "target")
+    function = _dict_field(payload, "function")
+    value = target.get("source") or function.get("source_path")
+    return Path(value) if isinstance(value, str) and value else None
 
 
 def _contract_fields(
