@@ -28,7 +28,7 @@ class CiContractTests(unittest.TestCase):
 
         self.assertTrue(workflow.exists())
         text = workflow.read_text(encoding="utf-8")
-        self.assertIn("py -m unittest discover -s tests -p \"test_*.py\"", text)
+        self.assertIn("python -m unittest discover -s tests -p \"test_*.py\"", text)
         self.assertIn("npm.cmd test", text)
         self.assertIn("vscode/extension", text)
 
@@ -59,7 +59,7 @@ class CiContractTests(unittest.TestCase):
         text = workflow.read_text(encoding="utf-8")
         self.assertIn("npm.cmd run test:extension-host", text)
         self.assertIn(
-            "py -m unittest tests.test_fixture_cli_smoke tests.test_vc6_fixture_build_e2e -v",
+            "python -m unittest tests.test_fixture_cli_smoke tests.test_vc6_fixture_build_e2e -v",
             text,
         )
         self.assertIn("uses: actions/upload-artifact@v4", text)
@@ -74,21 +74,23 @@ class CiContractTests(unittest.TestCase):
             "src/unit_test_runner/build/dependency_rewriter.py"
         )
         self.assertIn(tracking, text)
-        self.assertIn("py -m compileall -q src", text)
+        self.assertIn("python -m compileall -q src", text)
         self.assertLess(text.index(tracking), text.index("Run Python tests"))
-        self.assertLess(text.index("py -m compileall -q src"), text.index("Run Python tests"))
+        self.assertLess(text.index("python -m compileall -q src"), text.index("Run Python tests"))
 
     def test_github_actions_installs_runtime_dependencies_and_tests_wheel_contract(self):
         workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
         text = workflow.read_text(encoding="utf-8")
-        self.assertGreaterEqual(text.count("py -m pip install -e ."), 3)
-        self.assertIn("py -m pip wheel --no-deps", text)
-        self.assertIn("py -m venv", text)
+        self.assertGreaterEqual(text.count("python -m pip install -e ."), 3)
+        self.assertIn("python -m pip wheel --no-deps", text)
+        self.assertIn("python -m venv", text)
         self.assertIn("-m unit_test_runner --help", text)
         self.assertIn("unit_test_runner.schemas", text)
         self.assertIn("Select-Object -First 1", text)
         self.assertNotIn("Select-Object -Single", text)
+        self.assertIn('python -m pip install "setuptools>=61" wheel', text)
+        self.assertNotIn("py -m", text)
 
 
 if __name__ == "__main__":
