@@ -6,6 +6,13 @@ on:
       - feature/header-reference-build-workspace
     paths:
       - .github/workflows/export-full-repo-once.yml
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: read
@@ -14,9 +21,10 @@ jobs:
   export:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout feature branch
         uses: actions/checkout@v4
         with:
+          ref: feature/header-reference-build-workspace
           fetch-depth: 0
       - name: Archive repository including Git metadata
         shell: bash
