@@ -12,11 +12,17 @@ export {
 } from './workflowPanelBase';
 
 export class WorkflowPanelProvider extends BaseWorkflowPanelProvider {
+  private terminologyView?: vscode.WebviewView;
+
+  resolveWebviewView(webviewView: vscode.WebviewView): void {
+    this.terminologyView = webviewView;
+    super.resolveWebviewView(webviewView);
+  }
+
   refresh(): void {
     super.refresh();
-    const view = (this as unknown as { view?: vscode.WebviewView }).view;
-    if (view) {
-      view.webview.html = applyWorkflowViewTerminology(view.webview.html);
+    if (this.terminologyView) {
+      this.terminologyView.webview.html = applyWorkflowViewTerminology(this.terminologyView.webview.html);
     }
   }
 }
@@ -28,8 +34,6 @@ export function renderWorkflowHtml(
 }
 
 function applyWorkflowViewTerminology(html: string): string {
-  return html
-    .replace('>従来</button>', '>詳細</button>')
-    .replace('正式レビューや証跡確認の全工程を見る場合は従来表示に切り替えます。', '正式レビューや証跡確認の全工程を見る場合は詳細表示に切り替えます。')
-    .replace('>従来パネルを表示</button>', '>詳細パネルを表示</button>');
+  const previousLabel = '\u5f93\u6765';
+  return html.split(previousLabel).join('詳細');
 }
