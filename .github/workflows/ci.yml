@@ -21,22 +21,22 @@ jobs:
         shell: pwsh
         run: |
           $tests = @(
-            "tests\test_vc6_dsp_link_settings.py",
-            "tests\test_vc6_lib32_link_resolution.py",
-            "tests\test_vc6_coff_archive.py",
-            "tests\test_linked_library_call_analysis.py",
-            "tests\test_linked_library_provider_warnings.py",
-            "tests\test_vc6_link_library_resolver.py",
-            "tests\test_dossier_link_context_integration.py",
-            "tests\test_build_workspace_link_libraries.py",
-            "tests\test_vc6_debug_workspace_link_libraries.py",
-            "tests\test_quick_summary_link_resolution.py",
-            "tests\test_linked_library_end_to_end.py",
-            "tests\test_link_only_library_calls.py"
+            "tests.test_vc6_dsp_link_settings",
+            "tests.test_vc6_lib32_link_resolution",
+            "tests.test_vc6_coff_archive",
+            "tests.test_linked_library_call_analysis",
+            "tests.test_linked_library_provider_warnings",
+            "tests.test_vc6_link_library_resolver",
+            "tests.test_dossier_link_context_integration",
+            "tests.test_build_workspace_link_libraries",
+            "tests.test_vc6_debug_workspace_link_libraries",
+            "tests.test_quick_summary_link_resolution",
+            "tests.test_linked_library_end_to_end",
+            "tests.test_link_only_library_calls"
           )
           foreach ($test in $tests) {
             "=== $test ===" | Tee-Object -FilePath feature-test.log -Append
-            py $test *>&1 | Tee-Object -FilePath feature-test.log -Append
+            py -m unittest $test *>&1 | Tee-Object -FilePath feature-test.log -Append
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
