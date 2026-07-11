@@ -191,7 +191,7 @@ jobs:
           py -m venv $venv
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $python = Join-Path $venv "Scripts\python.exe"
-          $wheel = Get-ChildItem -Path $dist -Filter "unit_test_runner-*.whl" | Select-Object -Single
+          $wheel = Get-ChildItem -Path $dist -Filter "unit_test_runner-*.whl" | Select-Object -First 1
           & $python -m pip install $wheel.FullName
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $python -m unit_test_runner --help

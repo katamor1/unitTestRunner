@@ -87,6 +87,8 @@ class CiContractTests(unittest.TestCase):
         self.assertIn("py -m venv", text)
         self.assertIn("-m unit_test_runner --help", text)
         self.assertIn("unit_test_runner.schemas", text)
+        self.assertIn("Select-Object -First 1", text)
+        self.assertNotIn("Select-Object -Single", text)
 
 
 if __name__ == "__main__":
