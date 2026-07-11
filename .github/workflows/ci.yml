@@ -28,6 +28,7 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: |
+          git fetch origin 7f050f4ccfcd09a1c2446604fdfb7ffe116abb15 --depth=1
           git worktree add base-worktree 7f050f4ccfcd09a1c2446604fdfb7ffe116abb15
           Push-Location base-worktree
           py -m unittest discover -s tests -p "test_*.py" *>&1 | Tee-Object -FilePath ..\base-python-test.log
