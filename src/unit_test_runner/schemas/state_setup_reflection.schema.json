@@ -16,7 +16,7 @@
           "const": "1.0.0"
         },
         "data": {
-          "$ref": "common.schema.json#/$defs/reservedData"
+          "$ref": "common.schema.json#/$defs/stateSetupReflectionData"
         }
       }
     }

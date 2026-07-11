@@ -10,17 +10,6 @@ from unit_test_runner.contracts.validator import validate_payload
 
 
 SHA256 = "7b18e68b2afcf1b0f0a1b857c5d1fcb2cf9db4d1540d778a266dbeaa3aa176a8"
-RESERVED_KINDS = {
-    ArtifactKind.STATE_SETUP_REFLECTION,
-    ArtifactKind.REVIEW_DECISIONS,
-    ArtifactKind.REANALYSIS_SNAPSHOT,
-    ArtifactKind.LATEST_RUN_POINTER,
-    ArtifactKind.LATEST_EVIDENCE_POINTER,
-    ArtifactKind.LATEST_SUITE_RUN_POINTER,
-    ArtifactKind.EVIDENCE_SOURCE_RUN,
-}
-
-
 def generic_payload(kind: ArtifactKind) -> dict:
     return {
         "artifact_kind": kind.value,
@@ -100,15 +89,6 @@ class PublicArtifactSchemaTests(unittest.TestCase):
         for kind in ArtifactKind:
             with self.subTest(kind=kind.value):
                 violations = validate_payload(kind, generic_payload(kind))
-                if kind in RESERVED_KINDS:
-                    self.assertIn(
-                        ("unsupported_artifact_payload", "$.data", "blocking"),
-                        {
-                            (item.code, item.json_path, item.severity)
-                            for item in violations
-                        },
-                    )
-                    continue
                 self.assertTrue(
                     any(
                         item.code == "required_property"

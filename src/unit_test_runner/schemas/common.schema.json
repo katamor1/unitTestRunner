@@ -1115,13 +1115,14 @@
         "entry_id",
         "function",
         "workspace",
-        "execution_status",
+        "outcome",
         "green_status",
         "executed",
         "total_tests",
         "passed_tests",
         "failed_tests",
         "inconclusive_tests",
+        "not_run_tests",
         "unresolved_review_count",
         "report_path"
       ],
@@ -1136,16 +1137,8 @@
         "workspace": {
           "$ref": "#/$defs/relativePath"
         },
-        "execution_status": {
-          "enum": [
-            "not_run",
-            "blocked",
-            "passed",
-            "failed",
-            "timeout",
-            "inconclusive",
-            "error"
-          ]
+        "outcome": {
+          "$ref": "#/$defs/runOutcome"
         },
         "green_status": {
           "enum": [
@@ -1169,6 +1162,10 @@
           "minimum": 0
         },
         "inconclusive_tests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_run_tests": {
           "type": "integer",
           "minimum": 0
         },
@@ -1388,14 +1385,15 @@
         },
         "workspaces": {
           "type": "array",
+          "minItems": 1,
           "items": {
-            "$ref": "#/$defs/opaqueRecord"
+            "$ref": "#/$defs/dswWorkspace"
           }
         },
         "warnings": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/warning"
+            "$ref": "#/$defs/dswWarning"
           }
         }
       }
@@ -2246,19 +2244,19 @@
         "copied_files": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/opaqueRecord"
+            "$ref": "#/$defs/workspaceFile"
           }
         },
         "referenced_files": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/opaqueRecord"
+            "$ref": "#/$defs/workspaceFile"
           }
         },
         "generated_build_files": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/opaqueRecord"
+            "$ref": "#/$defs/workspaceFile"
           }
         },
         "compile_units": {
@@ -3270,7 +3268,8 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "status",
+        "lifecycle",
+        "outcome",
         "suite_id",
         "selector",
         "policy",
@@ -3278,11 +3277,11 @@
         "results"
       ],
       "properties": {
-        "status": {
-          "enum": [
-            "suite_run_completed",
-            "suite_run_failed"
-          ]
+        "lifecycle": {
+          "$ref": "#/$defs/runLifecycle"
+        },
+        "outcome": {
+          "$ref": "#/$defs/runOutcome"
         },
         "suite_id": {
           "$ref": "#/$defs/identifier"
@@ -3564,8 +3563,617 @@
         }
       }
     },
-    "reservedData": {
-      "not": {}
+    "runOutcome": {
+      "enum": [
+        "planned",
+        "passed",
+        "failed",
+        "blocked",
+        "inconclusive",
+        "cancelled",
+        "timed_out",
+        "error"
+      ]
+    },
+    "runLifecycle": {
+      "enum": [
+        "queued",
+        "running",
+        "finished"
+      ]
+    },
+    "dateTime": {
+      "type": "string",
+      "minLength": 1
+    },
+    "contractFunctionIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "function_id",
+        "name"
+      ],
+      "properties": {
+        "function_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "reviewDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "review_id",
+        "resolution",
+        "reviewer",
+        "rationale",
+        "decided_at",
+        "subject_artifacts"
+      ],
+      "properties": {
+        "review_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "resolution": {
+          "enum": [
+            "open",
+            "approved",
+            "changes_requested",
+            "waived"
+          ]
+        },
+        "reviewer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "decided_at": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "subject_artifacts": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/artifact_reference"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "resolution": {
+                "enum": [
+                  "changes_requested",
+                  "waived"
+                ]
+              }
+            },
+            "required": [
+              "resolution"
+            ]
+          },
+          "then": {
+            "properties": {
+              "rationale": {
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "reviewDecisionsData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "decisions"
+      ],
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "decisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reviewDecision"
+          }
+        }
+      }
+    },
+    "reflectedStateSetup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "variable_name",
+        "scope",
+        "value_expression",
+        "setup_method_hint",
+        "source_candidate_id",
+        "review_required",
+        "confidence",
+        "fixture_includes",
+        "fixture_declarations",
+        "setup_statements"
+      ],
+      "properties": {
+        "variable_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value_expression": {
+          "type": "string",
+          "minLength": 1
+        },
+        "setup_method_hint": {
+          "enum": [
+            "direct_assignment",
+            "fixture_pointer",
+            "custom_statements",
+            "not_directly_accessible"
+          ]
+        },
+        "source_candidate_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "review_required": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "fixture_includes": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "fixture_declarations": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "setup_includes": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "setup_statements": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "inferred_from": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "stateSetupReflectionData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "function",
+        "state_setups",
+        "provenance_references"
+      ],
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/contractFunctionIdentity"
+        },
+        "state_setups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reflectedStateSetup"
+          }
+        },
+        "provenance_references": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/artifact_reference"
+          }
+        }
+      }
+    },
+    "reanalysisFingerprints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_sha256",
+        "signature_sha256",
+        "build_context_sha256",
+        "dependency_policy_sha256",
+        "coverage_sha256",
+        "type_context_sha256"
+      ],
+      "properties": {
+        "source_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "signature_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "build_context_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "dependency_policy_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "coverage_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "type_context_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "reanalysisSnapshotData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot_id",
+        "function",
+        "created_at",
+        "producer_version",
+        "contract_versions",
+        "fingerprints"
+      ],
+      "properties": {
+        "snapshot_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "function": {
+          "$ref": "#/$defs/contractFunctionIdentity"
+        },
+        "created_at": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "producer_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contract_versions": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+          }
+        },
+        "fingerprints": {
+          "$ref": "#/$defs/reanalysisFingerprints"
+        }
+      }
+    },
+    "latestRunPointerData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "execution_report",
+        "updated_at"
+      ],
+      "properties": {
+        "run_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "execution_report": {
+          "$ref": "#/$defs/artifact_reference"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "latestEvidencePointerData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "source_run_id",
+        "evidence_manifest",
+        "updated_at"
+      ],
+      "properties": {
+        "evidence_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "source_run_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "evidence_manifest": {
+          "$ref": "#/$defs/artifact_reference"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "latestSuiteRunPointerData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "suite_run_report",
+        "updated_at"
+      ],
+      "properties": {
+        "run_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "suite_run_report": {
+          "$ref": "#/$defs/artifact_reference"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "evidenceSourceRunData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_run_id",
+        "execution_report",
+        "logs",
+        "created_at"
+      ],
+      "properties": {
+        "source_run_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "execution_report": {
+          "$ref": "#/$defs/artifact_reference"
+        },
+        "logs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/artifact_reference"
+          }
+        },
+        "created_at": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "workspaceFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_path",
+        "workspace_path",
+        "file_kind",
+        "sha256",
+        "copied",
+        "generated",
+        "required",
+        "exists",
+        "warnings"
+      ],
+      "properties": {
+        "source_path": {
+          "$ref": "#/$defs/nullablePath"
+        },
+        "workspace_path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "file_kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/nullableSha256"
+        },
+        "copied": {
+          "type": "boolean"
+        },
+        "generated": {
+          "type": "boolean"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaqueRecord"
+          }
+        }
+      }
+    },
+    "dswWarning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "line_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "line_text": {
+          "type": "string"
+        },
+        "dsw_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "dswProject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "dsp_path_raw",
+        "dsp_path",
+        "dsp_path_normalized",
+        "dsp_path_absolute",
+        "package_owner",
+        "exists",
+        "line_number"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dsp_path_raw": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dsp_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dsp_path_normalized": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dsp_path_absolute": {
+          "type": "string",
+          "minLength": 1
+        },
+        "package_owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "line_number": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "dswDependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from_project",
+        "to_project",
+        "kind",
+        "line_number"
+      ],
+      "properties": {
+        "from_project": {
+          "type": "string",
+          "minLength": 1
+        },
+        "to_project": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "project_dependency"
+        },
+        "line_number": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "dswWorkspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dsw_path",
+        "root_dir",
+        "format_version",
+        "encoding",
+        "projects",
+        "dependencies",
+        "warnings"
+      ],
+      "properties": {
+        "dsw_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "root_dir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "format_version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "encoding": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dswProject"
+          }
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dswDependency"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dswWarning"
+          }
+        }
+      }
     }
   }
 }

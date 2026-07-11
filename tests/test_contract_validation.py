@@ -1,12 +1,16 @@
 import copy
 import unittest
+from pathlib import Path
 
 
 from unit_test_runner.contracts import ArtifactKind
+from unit_test_runner.contracts.migrations import migrate_payload
 from unit_test_runner.contracts.validator import validate_payload
+from unit_test_runner.dsw_parser import discover_dsw_workspaces
 
 
 SHA256 = "7b18e68b2afcf1b0f0a1b857c5d1fcb2cf9db4d1540d778a266dbeaa3aa176a8"
+DSW_FIXTURES = Path(__file__).parent / "fixtures" / "vc6_dsw"
 
 
 def valid_test_spec() -> dict:
@@ -277,7 +281,8 @@ def valid_suite_run_report() -> dict:
     return artifact_payload(
         ArtifactKind.SUITE_RUN_REPORT,
         {
-            "status": "suite_run_completed",
+            "lifecycle": "finished",
+            "outcome": "passed",
             "suite_id": "default",
             "selector": {"kind": "entry_id", "entry_ids": ["entry-001"]},
             "policy": {
@@ -299,19 +304,159 @@ def valid_suite_run_report() -> dict:
                     "entry_id": "entry-001",
                     "function": "Control_Update",
                     "workspace": "functions/control-update",
-                    "execution_status": "passed",
+                    "outcome": "passed",
                     "green_status": "green",
                     "executed": True,
                     "total_tests": 1,
                     "passed_tests": 1,
                     "failed_tests": 0,
                     "inconclusive_tests": 0,
+                    "not_run_tests": 0,
                     "unresolved_review_count": 0,
                     "report_path": "functions/control-update/reports/test_execution_report.json",
                 }
             ],
         },
     )
+
+
+def artifact_reference(kind: str, path: str) -> dict:
+    return {
+        "artifact_kind": kind,
+        "path": path,
+        "sha256": SHA256,
+    }
+
+
+def resolved_contract_payloads() -> dict[ArtifactKind, dict]:
+    function = {
+        "function_id": "fn_control_update_7a32c11d",
+        "name": "Control_Update",
+    }
+    return {
+        ArtifactKind.REVIEW_DECISIONS: artifact_payload(
+            ArtifactKind.REVIEW_DECISIONS,
+            {
+                "revision": 1,
+                "decisions": [
+                    {
+                        "review_id": "review-001",
+                        "resolution": "approved",
+                        "reviewer": "reviewer@example.com",
+                        "rationale": "Evidence is complete.",
+                        "decided_at": "2026-07-12T00:00:00+00:00",
+                        "subject_artifacts": [
+                            artifact_reference(
+                                "function_dossier",
+                                "reports/function_dossier.json",
+                            )
+                        ],
+                    }
+                ],
+            },
+        ),
+        ArtifactKind.STATE_SETUP_REFLECTION: artifact_payload(
+            ArtifactKind.STATE_SETUP_REFLECTION,
+            {
+                "function": function,
+                "state_setups": [
+                    {
+                        "variable_name": "g_state",
+                        "scope": "extern",
+                        "value_expression": "1",
+                        "setup_method_hint": "direct_assignment",
+                        "source_candidate_id": "state-candidate-001",
+                        "review_required": False,
+                        "confidence": "high",
+                        "fixture_includes": [],
+                        "fixture_declarations": [],
+                        "setup_statements": ["g_state = 1"],
+                    }
+                ],
+                "provenance_references": [
+                    artifact_reference(
+                        "test_spec",
+                        "reports/test_case_design.json",
+                    )
+                ],
+            },
+        ),
+        ArtifactKind.REANALYSIS_SNAPSHOT: artifact_payload(
+            ArtifactKind.REANALYSIS_SNAPSHOT,
+            {
+                "snapshot_id": "snapshot-control-update-001",
+                "function": function,
+                "created_at": "2026-07-12T00:00:00+00:00",
+                "producer_version": "0.1.0",
+                "contract_versions": {
+                    "source_digest": "1.0.0",
+                    "function_signature": "1.0.0",
+                    "build_context": "1.0.0",
+                    "dependency_policy": "1.0.0",
+                    "coverage_design": "1.0.0",
+                },
+                "fingerprints": {
+                    "source_sha256": SHA256,
+                    "signature_sha256": SHA256,
+                    "build_context_sha256": SHA256,
+                    "dependency_policy_sha256": SHA256,
+                    "coverage_sha256": SHA256,
+                    "type_context_sha256": SHA256,
+                },
+            },
+        ),
+        ArtifactKind.LATEST_RUN_POINTER: artifact_payload(
+            ArtifactKind.LATEST_RUN_POINTER,
+            {
+                "run_id": "run-control-update-001",
+                "execution_report": artifact_reference(
+                    "test_execution_report",
+                    "runs/run-control-update-001/test_execution_report.json",
+                ),
+                "updated_at": "2026-07-12T00:00:00+00:00",
+            },
+        ),
+        ArtifactKind.LATEST_EVIDENCE_POINTER: artifact_payload(
+            ArtifactKind.LATEST_EVIDENCE_POINTER,
+            {
+                "evidence_id": "evidence-control-update-001",
+                "source_run_id": "run-control-update-001",
+                "evidence_manifest": artifact_reference(
+                    "evidence_manifest",
+                    "evidence/evidence-control-update-001/manifest.json",
+                ),
+                "updated_at": "2026-07-12T00:00:00+00:00",
+            },
+        ),
+        ArtifactKind.LATEST_SUITE_RUN_POINTER: artifact_payload(
+            ArtifactKind.LATEST_SUITE_RUN_POINTER,
+            {
+                "run_id": "suite-run-001",
+                "suite_run_report": artifact_reference(
+                    "suite_run_report",
+                    "runs/suite-run-001/suite_run_report.json",
+                ),
+                "updated_at": "2026-07-12T00:00:00+00:00",
+            },
+        ),
+        ArtifactKind.EVIDENCE_SOURCE_RUN: artifact_payload(
+            ArtifactKind.EVIDENCE_SOURCE_RUN,
+            {
+                "source_run_id": "run-control-update-001",
+                "execution_report": artifact_reference(
+                    "test_execution_report",
+                    "runs/run-control-update-001/test_execution_report.json",
+                ),
+                "logs": [
+                    artifact_reference(
+                        "execution_log",
+                        "runs/run-control-update-001/logs/test.log",
+                    )
+                ],
+                "created_at": "2026-07-12T00:00:00+00:00",
+            },
+        ),
+    }
 
 
 def violation_codes(kind: ArtifactKind, payload: dict) -> set[str]:
@@ -416,6 +561,127 @@ class ContractValidationTests(unittest.TestCase):
         for kind, payload in samples.items():
             with self.subTest(kind=kind.value):
                 self.assertEqual((), validate_payload(kind, payload))
+
+    def test_resolved_artifact_contracts_accept_meaningful_v1_payloads(self):
+        for kind, payload in resolved_contract_payloads().items():
+            with self.subTest(kind=kind.value):
+                self.assertEqual((), validate_payload(kind, payload))
+
+    def test_resolved_artifact_contracts_enforce_semantic_invariants(self):
+        cases = []
+
+        review = resolved_contract_payloads()[ArtifactKind.REVIEW_DECISIONS]
+        review["data"]["decisions"][0]["resolution"] = "changes_requested"
+        review["data"]["decisions"][0]["rationale"] = ""
+        cases.append(
+            (
+                ArtifactKind.REVIEW_DECISIONS,
+                review,
+                ("schema_error", "$.data.decisions[0].rationale"),
+            )
+        )
+
+        state_setup = resolved_contract_payloads()[
+            ArtifactKind.STATE_SETUP_REFLECTION
+        ]
+        state_setup["data"]["state_setups"][0]["setup_method_hint"] = (
+            "fixture_pointer"
+        )
+        state_setup["data"]["state_setups"][0]["fixture_declarations"] = []
+        cases.append(
+            (
+                ArtifactKind.STATE_SETUP_REFLECTION,
+                state_setup,
+                ("invalid_state_setup", "$.data.state_setups[0]"),
+            )
+        )
+
+        snapshot = resolved_contract_payloads()[ArtifactKind.REANALYSIS_SNAPSHOT]
+        snapshot["data"]["fingerprints"]["coverage_sha256"] = "bad-hash"
+        cases.append(
+            (
+                ArtifactKind.REANALYSIS_SNAPSHOT,
+                snapshot,
+                ("invalid_hash", "$.data.fingerprints.coverage_sha256"),
+            )
+        )
+
+        run_pointer = resolved_contract_payloads()[ArtifactKind.LATEST_RUN_POINTER]
+        run_pointer["data"]["execution_report"]["artifact_kind"] = "test_result"
+        cases.append(
+            (
+                ArtifactKind.LATEST_RUN_POINTER,
+                run_pointer,
+                ("invalid_reference", "$.data.execution_report.artifact_kind"),
+            )
+        )
+
+        evidence_source = resolved_contract_payloads()[ArtifactKind.EVIDENCE_SOURCE_RUN]
+        evidence_source["data"]["logs"] = []
+        cases.append(
+            (
+                ArtifactKind.EVIDENCE_SOURCE_RUN,
+                evidence_source,
+                ("schema_error", "$.data.logs"),
+            )
+        )
+
+        for kind, payload, expected in cases:
+            with self.subTest(kind=kind.value):
+                self.assertIn(
+                    expected,
+                    {(item.code, item.json_path) for item in validate_payload(kind, payload)},
+                )
+
+    def test_dsw_writer_data_is_modeled_and_dependency_references_are_validated(self):
+        legacy = discover_dsw_workspaces(
+            DSW_FIXTURES / "dependencies" / "Product.dsw"
+        ).to_dict()
+        migrated = migrate_payload(
+            ArtifactKind.DSW_DISCOVERY,
+            legacy,
+            target_version="1.0.0",
+        )
+        data_schema_violations = {
+            (item.code, item.json_path)
+            for item in validate_payload(ArtifactKind.DSW_DISCOVERY, migrated)
+            if item.json_path.startswith("$.data")
+            and item.code
+            in {
+                "required_property",
+                "unknown_property",
+                "invalid_enum",
+                "schema_error",
+            }
+        }
+        self.assertEqual(set(), data_schema_violations)
+
+        malformed = copy.deepcopy(migrated)
+        malformed["data"]["workspaces"][0]["dependencies"][0][
+            "to_project"
+        ] = "MissingProject"
+        self.assertIn(
+            (
+                "invalid_reference",
+                "$.data.workspaces[0].dependencies[0].to_project",
+            ),
+            {
+                (item.code, item.json_path)
+                for item in validate_payload(ArtifactKind.DSW_DISCOVERY, malformed)
+            },
+        )
+
+        duplicate = copy.deepcopy(migrated)
+        duplicate["data"]["workspaces"][0]["projects"].append(
+            copy.deepcopy(duplicate["data"]["workspaces"][0]["projects"][0])
+        )
+        self.assertIn(
+            ("duplicate_id", "$.data.workspaces[0].projects"),
+            {
+                (item.code, item.json_path)
+                for item in validate_payload(ArtifactKind.DSW_DISCOVERY, duplicate)
+            },
+        )
 
     def test_analysis_contract_rejects_absolute_data_source_path(self):
         payload = valid_function_signature()
@@ -585,6 +851,18 @@ class ContractValidationTests(unittest.TestCase):
             {(item.code, item.json_path) for item in violations},
         )
 
+    def test_build_probe_rejects_absolute_log_file_list_item(self):
+        payload = valid_build_probe_report()
+        payload["data"]["log_files"] = ["C:/workspace/logs/build.log"]
+
+        self.assertIn(
+            ("invalid_relative_path", "$.data.log_files[0]"),
+            {
+                (item.code, item.json_path)
+                for item in validate_payload(ArtifactKind.BUILD_PROBE_REPORT, payload)
+            },
+        )
+
     def test_evidence_contract_blocks_missing_required_file_hash(self):
         payload = valid_evidence_manifest()
         payload["data"]["source_files"][0]["sha256"] = None
@@ -687,6 +965,69 @@ class ContractValidationTests(unittest.TestCase):
             },
         )
 
+    def test_suite_v1_rejects_legacy_lifecycle_and_outcome_aliases(self):
+        payload = valid_suite_run_report()
+        payload["data"]["lifecycle"] = "suite_run_completed"
+        payload["data"]["outcome"] = "not_run"
+        payload["data"]["results"][0]["outcome"] = "timeout"
+
+        violations = {
+            (item.code, item.json_path)
+            for item in validate_payload(ArtifactKind.SUITE_RUN_REPORT, payload)
+        }
+
+        self.assertTrue(
+            {
+                ("invalid_enum", "$.data.lifecycle"),
+                ("invalid_enum", "$.data.outcome"),
+                ("invalid_enum", "$.data.results[0].outcome"),
+            }.issubset(violations),
+            violations,
+        )
+
+    def test_suite_green_status_requires_canonical_pass_and_zero_non_green_evidence(self):
+        mutations = (
+            ("outcome", "failed"),
+            ("failed_tests", 1),
+            ("inconclusive_tests", 1),
+            ("not_run_tests", 1),
+            ("unresolved_review_count", 1),
+            ("error", "process crashed"),
+        )
+        for field, value in mutations:
+            with self.subTest(field=field):
+                payload = valid_suite_run_report()
+                payload["data"]["results"][0][field] = value
+                self.assertIn(
+                    (
+                        "inconsistent_green_status",
+                        "$.data.results[0].green_status",
+                    ),
+                    {
+                        (item.code, item.json_path)
+                        for item in validate_payload(
+                            ArtifactKind.SUITE_RUN_REPORT,
+                            payload,
+                        )
+                    },
+                )
+
+    def test_suite_passed_outcome_requires_every_selected_result_green(self):
+        payload = valid_suite_run_report()
+        payload["data"]["results"][0]["outcome"] = "inconclusive"
+        payload["data"]["results"][0]["green_status"] = "not_green"
+        payload["data"]["results"][0]["inconclusive_tests"] = 1
+        payload["data"]["summary"]["green"] = 0
+        payload["data"]["summary"]["not_green"] = 1
+
+        self.assertIn(
+            ("inconsistent_suite_outcome", "$.data.outcome"),
+            {
+                (item.code, item.json_path)
+                for item in validate_payload(ArtifactKind.SUITE_RUN_REPORT, payload)
+            },
+        )
+
         violations = validate_payload(ArtifactKind.SUITE_MANIFEST, payload)
 
         self.assertNotIn(
@@ -694,24 +1035,14 @@ class ContractValidationTests(unittest.TestCase):
             {item.code for item in violations},
         )
 
-    def test_unimplemented_artifact_families_are_blocked_explicitly(self):
-        reserved = {
-            ArtifactKind.STATE_SETUP_REFLECTION,
-            ArtifactKind.REVIEW_DECISIONS,
-            ArtifactKind.REANALYSIS_SNAPSHOT,
-            ArtifactKind.LATEST_RUN_POINTER,
-            ArtifactKind.LATEST_EVIDENCE_POINTER,
-            ArtifactKind.LATEST_SUITE_RUN_POINTER,
-            ArtifactKind.EVIDENCE_SOURCE_RUN,
-        }
-        for kind in reserved:
+    def test_resolved_artifact_families_have_normal_semantic_validation(self):
+        for kind, payload in resolved_contract_payloads().items():
             with self.subTest(kind=kind.value):
-                violations = validate_payload(kind, artifact_payload(kind, {}))
-                self.assertIn(
-                    ("unsupported_artifact_payload", "$.data", "blocking"),
+                self.assertNotIn(
+                    "unsupported_artifact_payload",
                     {
-                        (item.code, item.json_path, item.severity)
-                        for item in violations
+                        item.code
+                        for item in validate_payload(kind, payload)
                     },
                 )
 

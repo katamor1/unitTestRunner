@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from datetime import datetime
 from functools import lru_cache
 from importlib import resources
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -89,6 +90,22 @@ def load_artifact(
         )
 
     source_version = str(decoded.get("schema_version") or "")
+    decoded_kind = decoded.get("artifact_kind")
+    if decoded_kind is not None and decoded_kind != expected_kind.value:
+        return LoadedArtifact(
+            kind=expected_kind,
+            source_version=source_version,
+            current_version=contract.current_version,
+            payload=dict(decoded),
+            migrated=False,
+            violations=(
+                ContractViolation(
+                    "artifact_kind_mismatch",
+                    "$.artifact_kind",
+                    f"Expected {expected_kind.value}; received {decoded_kind!r}.",
+                ),
+            ),
+        )
     migrated = False
     payload = decoded
     if source_version != contract.current_version:
@@ -300,6 +317,26 @@ def _provenance_violations(
                     "blocking",
                 )
             )
+    extensions = payload.get("extensions")
+    migration = extensions.get("migration") if isinstance(extensions, Mapping) else None
+    path_migrations = (
+        migration.get("path_migrations") if isinstance(migration, Mapping) else None
+    )
+    if isinstance(path_migrations, list):
+        for item in path_migrations:
+            if not isinstance(item, Mapping) or item.get("verified") is not False:
+                continue
+            json_path = item.get("json_path")
+            if not isinstance(json_path, str):
+                continue
+            violations.append(
+                ContractViolation(
+                    "missing_provenance",
+                    json_path,
+                    "The legacy path has no verified workspace-relative mapping.",
+                    "blocking",
+                )
+            )
     return violations
 
 
@@ -322,12 +359,28 @@ _CONTRACT_PATH_KEYS = {
     "stub_header_path",
 }
 
+_CONTRACT_PATH_LIST_KEYS = {"log_files"}
+
 
 def _nested_path_violations(value: Any, path: str = "$") -> list[ContractViolation]:
     violations: list[ContractViolation] = []
     if isinstance(value, Mapping):
         for key, child in value.items():
             child_path = f"{path}.{key}"
+            if key in _CONTRACT_PATH_LIST_KEYS and isinstance(child, list):
+                for index, item in enumerate(child):
+                    if (
+                        isinstance(item, str)
+                        and item
+                        and not _is_relative_contract_path(item)
+                    ):
+                        violations.append(
+                            ContractViolation(
+                                "invalid_relative_path",
+                                f"{child_path}[{index}]",
+                                f"{key} items must be normalized relative contract paths.",
+                            )
+                        )
             if (
                 key in _CONTRACT_PATH_KEYS
                 and isinstance(child, str)
@@ -511,58 +564,30 @@ def _duplicate_id_violations(value: Any, path: str = "$") -> list[ContractViolat
     return violations
 
 
-_RESERVED_SEMANTIC_HOOKS = {
-    ArtifactKind.STATE_SETUP_REFLECTION.value,
-    ArtifactKind.REVIEW_DECISIONS.value,
-    ArtifactKind.REANALYSIS_SNAPSHOT.value,
-    ArtifactKind.LATEST_RUN_POINTER.value,
-    ArtifactKind.LATEST_EVIDENCE_POINTER.value,
-    ArtifactKind.LATEST_SUITE_RUN_POINTER.value,
-    ArtifactKind.EVIDENCE_SOURCE_RUN.value,
-}
-
-
 def _artifact_semantic_violations(
     semantic_hook: str,
     payload: Mapping[str, Any],
 ) -> list[ContractViolation]:
-    if semantic_hook in _RESERVED_SEMANTIC_HOOKS:
+    validator = _ARTIFACT_SEMANTIC_VALIDATORS.get(semantic_hook)
+    if validator is None:
         return [
             ContractViolation(
-                "unsupported_artifact_payload",
-                "$.data",
-                f"{semantic_hook} has no current public producer contract.",
+                "missing_semantic_validator",
+                "$.artifact_kind",
+                f"No semantic validator is registered for {semantic_hook}.",
                 "blocking",
             )
         ]
-    if semantic_hook == ArtifactKind.TEST_SPEC.value:
-        return _test_spec_semantic_violations(payload)
-    if semantic_hook in {
-        ArtifactKind.FUNCTION_DOSSIER.value,
-        ArtifactKind.DOSSIER_MANIFEST.value,
-    }:
-        return _dossier_semantic_violations(payload)
-    if semantic_hook == ArtifactKind.SUITE_RUN_REPORT.value:
-        return _suite_run_semantic_violations(payload)
-    if semantic_hook == ArtifactKind.CALL_REPORT.value:
-        return _call_report_semantic_violations(payload)
-    if semantic_hook == ArtifactKind.COVERAGE_DESIGN.value:
-        return _coverage_semantic_violations(payload)
-    if semantic_hook == ArtifactKind.BOUNDARY_CANDIDATES.value:
-        return _boundary_semantic_violations(payload)
-    if semantic_hook == ArtifactKind.BUILD_COMPLETION_PLAN.value:
-        return _build_completion_semantic_violations(payload)
-    if semantic_hook in {
-        ArtifactKind.TEST_CASE_RECONCILIATION.value,
-        ArtifactKind.REGRESSION_SELECTION.value,
-    }:
-        return _partition_semantic_violations(payload)
-    if semantic_hook in {
-        ArtifactKind.TEST_EXECUTION_REPORT.value,
-        ArtifactKind.TEST_RESULT.value,
-        ArtifactKind.EVIDENCE_MANIFEST.value,
-    }:
-        return _execution_semantic_violations(payload)
+    return validator(payload)
+
+
+def semantic_validator_names() -> frozenset[str]:
+    return frozenset(_ARTIFACT_SEMANTIC_VALIDATORS)
+
+
+def _no_artifact_semantic_violations(
+    _payload: Mapping[str, Any],
+) -> list[ContractViolation]:
     return []
 
 
@@ -875,11 +900,14 @@ def _suite_run_semantic_violations(
         selected_ids = {str(item) for item in selector.get("entry_ids") or []}
     violations: list[ContractViolation] = []
     results = data.get("results")
+    result_by_id: dict[str, Mapping[str, Any]] = {}
     if selected_ids is not None and isinstance(results, list):
         for index, result in enumerate(results):
             if not isinstance(result, Mapping):
                 continue
             entry_id = result.get("entry_id")
+            if entry_id:
+                result_by_id[str(entry_id)] = result
             if entry_id and str(entry_id) not in selected_ids:
                 violations.append(
                     ContractViolation(
@@ -888,6 +916,69 @@ def _suite_run_semantic_violations(
                         f"Result entry_id was not selected: {entry_id}",
                     )
                 )
+    elif isinstance(results, list):
+        result_by_id = {
+            str(result["entry_id"]): result
+            for result in results
+            if isinstance(result, Mapping) and result.get("entry_id")
+        }
+    if isinstance(results, list):
+        for index, result in enumerate(results):
+            if not isinstance(result, Mapping):
+                continue
+            if "not_run_tests" not in result:
+                violations.append(
+                    ContractViolation(
+                        "missing_provenance",
+                        f"$.data.results[{index}].not_run_tests",
+                        "Legacy suite output did not preserve the not-run test count.",
+                        "blocking",
+                    )
+                )
+            is_green = (
+                result.get("outcome") == "passed"
+                and not result.get("error")
+                and all(
+                    result.get(field) == 0
+                    for field in (
+                        "failed_tests",
+                        "inconclusive_tests",
+                        "not_run_tests",
+                        "unresolved_review_count",
+                    )
+                )
+            )
+            if (result.get("green_status") == "green") != is_green:
+                violations.append(
+                    ContractViolation(
+                        "inconsistent_green_status",
+                        f"$.data.results[{index}].green_status",
+                        "GREEN requires passed outcome and zero failure, inconclusive, not-run, and unresolved evidence.",
+                    )
+                )
+    if data.get("outcome") == "passed":
+        if selected_ids is None:
+            selected_results = list(result_by_id.values())
+            complete = bool(selected_results) or not results
+        else:
+            complete = selected_ids.issubset(result_by_id)
+            selected_results = [
+                result_by_id[entry_id]
+                for entry_id in selected_ids
+                if entry_id in result_by_id
+            ]
+        if not complete or any(
+            result.get("green_status") != "green"
+            or result.get("outcome") != "passed"
+            for result in selected_results
+        ):
+            violations.append(
+                ContractViolation(
+                    "inconsistent_suite_outcome",
+                    "$.data.outcome",
+                    "A passed suite outcome requires every selected result to be GREEN and passed.",
+                )
+            )
     summary = data.get("summary")
     if isinstance(summary, Mapping):
         total = summary.get("total")
@@ -1011,6 +1102,286 @@ def _test_spec_semantic_violations(
     return violations
 
 
+def _timestamp_violation(value: Any, path: str) -> list[ContractViolation]:
+    if not isinstance(value, str):
+        return []
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = None
+    if parsed is not None and parsed.tzinfo is not None:
+        return []
+    return [
+        ContractViolation(
+            "invalid_timestamp",
+            path,
+            "Timestamp must be an ISO-8601 value with an explicit UTC offset.",
+        )
+    ]
+
+
+def _review_decisions_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    violations: list[ContractViolation] = []
+    decisions = data.get("decisions")
+    if isinstance(decisions, list):
+        for index, decision in enumerate(decisions):
+            if isinstance(decision, Mapping):
+                violations.extend(
+                    _timestamp_violation(
+                        decision.get("decided_at"),
+                        f"$.data.decisions[{index}].decided_at",
+                    )
+                )
+    return violations
+
+
+def _state_setup_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    setups = data.get("state_setups")
+    if not isinstance(setups, list):
+        return []
+    violations: list[ContractViolation] = []
+    for index, setup in enumerate(setups):
+        if not isinstance(setup, Mapping):
+            continue
+        method = setup.get("setup_method_hint")
+        invalid = False
+        if method == "fixture_pointer":
+            invalid = not setup.get("fixture_declarations") or not setup.get(
+                "setup_statements"
+            )
+        elif method == "not_directly_accessible":
+            invalid = not bool(setup.get("review_required"))
+        if invalid:
+            violations.append(
+                ContractViolation(
+                    "invalid_state_setup",
+                    f"$.data.state_setups[{index}]",
+                    f"State setup method {method!r} lacks its required review or fixture evidence.",
+                )
+            )
+    return violations
+
+
+def _reanalysis_snapshot_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    violations = _timestamp_violation(data.get("created_at"), "$.data.created_at")
+    producer = payload.get("producer")
+    if (
+        isinstance(producer, Mapping)
+        and data.get("producer_version")
+        and data.get("producer_version") != producer.get("version")
+    ):
+        violations.append(
+            ContractViolation(
+                "invalid_reference",
+                "$.data.producer_version",
+                "Snapshot producer_version must match the envelope producer version.",
+            )
+        )
+    versions = data.get("contract_versions")
+    if isinstance(versions, Mapping):
+        for name, version in versions.items():
+            try:
+                kind = ArtifactKind(str(name))
+            except ValueError:
+                violations.append(
+                    ContractViolation(
+                        "invalid_reference",
+                        f"$.data.contract_versions.{name}",
+                        f"Unknown artifact contract: {name}",
+                    )
+                )
+                continue
+            if version != get_contract(kind).current_version:
+                violations.append(
+                    ContractViolation(
+                        "unsupported_version",
+                        f"$.data.contract_versions.{name}",
+                        f"Unsupported {name} contract version: {version}",
+                    )
+                )
+    return violations
+
+
+def _expected_artifact_reference_violations(
+    payload: Mapping[str, Any],
+    field: str,
+    expected_kind: ArtifactKind,
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    reference = data.get(field)
+    if not isinstance(reference, Mapping):
+        return []
+    actual = reference.get("artifact_kind")
+    if actual == expected_kind.value:
+        return []
+    return [
+        ContractViolation(
+            "invalid_reference",
+            f"$.data.{field}.artifact_kind",
+            f"{field} must reference {expected_kind.value}; received {actual!r}.",
+        )
+    ]
+
+
+def _latest_run_pointer_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    violations = _expected_artifact_reference_violations(
+        payload,
+        "execution_report",
+        ArtifactKind.TEST_EXECUTION_REPORT,
+    )
+    if isinstance(data, Mapping):
+        violations.extend(_timestamp_violation(data.get("updated_at"), "$.data.updated_at"))
+    return violations
+
+
+def _latest_evidence_pointer_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    violations = _expected_artifact_reference_violations(
+        payload,
+        "evidence_manifest",
+        ArtifactKind.EVIDENCE_MANIFEST,
+    )
+    if isinstance(data, Mapping):
+        violations.extend(_timestamp_violation(data.get("updated_at"), "$.data.updated_at"))
+    return violations
+
+
+def _latest_suite_run_pointer_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    violations = _expected_artifact_reference_violations(
+        payload,
+        "suite_run_report",
+        ArtifactKind.SUITE_RUN_REPORT,
+    )
+    if isinstance(data, Mapping):
+        violations.extend(_timestamp_violation(data.get("updated_at"), "$.data.updated_at"))
+    return violations
+
+
+def _evidence_source_run_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    violations = _expected_artifact_reference_violations(
+        payload,
+        "execution_report",
+        ArtifactKind.TEST_EXECUTION_REPORT,
+    )
+    if isinstance(data, Mapping):
+        violations.extend(_timestamp_violation(data.get("created_at"), "$.data.created_at"))
+    return violations
+
+
+def _dsw_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    workspaces = data.get("workspaces")
+    if not isinstance(workspaces, list):
+        return []
+    violations: list[ContractViolation] = []
+    workspace_paths: set[str] = set()
+    for workspace_index, workspace in enumerate(workspaces):
+        if not isinstance(workspace, Mapping):
+            continue
+        dsw_path = workspace.get("dsw_path")
+        if isinstance(dsw_path, str):
+            if dsw_path in workspace_paths:
+                violations.append(
+                    ContractViolation(
+                        "duplicate_id",
+                        "$.data.workspaces",
+                        f"Duplicate dsw_path: {dsw_path}",
+                    )
+                )
+            workspace_paths.add(dsw_path)
+        projects = workspace.get("projects")
+        names: set[str] = set()
+        if isinstance(projects, list):
+            for project_index, project in enumerate(projects):
+                if not isinstance(project, Mapping):
+                    continue
+                name = project.get("name")
+                if isinstance(name, str):
+                    if name in names:
+                        violations.append(
+                            ContractViolation(
+                                "duplicate_id",
+                                f"$.data.workspaces[{workspace_index}].projects",
+                                f"Duplicate project name: {name}",
+                            )
+                        )
+                    names.add(name)
+                if (
+                    project.get("dsp_path")
+                    and project.get("dsp_path_normalized")
+                    != project.get("dsp_path")
+                ):
+                    violations.append(
+                        ContractViolation(
+                            "invalid_reference",
+                            f"$.data.workspaces[{workspace_index}].projects[{project_index}].dsp_path_normalized",
+                            "dsp_path_normalized must match dsp_path.",
+                        )
+                    )
+        dependencies = workspace.get("dependencies")
+        if isinstance(dependencies, list):
+            for dependency_index, dependency in enumerate(dependencies):
+                if not isinstance(dependency, Mapping):
+                    continue
+                for field in ("from_project", "to_project"):
+                    reference = dependency.get(field)
+                    if reference and str(reference) not in names:
+                        violations.append(
+                            ContractViolation(
+                                "invalid_reference",
+                                f"$.data.workspaces[{workspace_index}].dependencies[{dependency_index}].{field}",
+                                f"Unknown DSW project reference: {reference}",
+                            )
+                        )
+    warnings = data.get("warnings")
+    if isinstance(warnings, list):
+        for index, warning in enumerate(warnings):
+            if not isinstance(warning, Mapping):
+                continue
+            dsw_path = warning.get("dsw_path")
+            if dsw_path and str(dsw_path) not in workspace_paths:
+                violations.append(
+                    ContractViolation(
+                        "invalid_reference",
+                        f"$.data.warnings[{index}].dsw_path",
+                        f"Unknown warning workspace: {dsw_path}",
+                    )
+                )
+    return violations
+
+
 def _is_relative_contract_path(value: str) -> bool:
     normalized = value.replace("\\", "/")
     windows = PureWindowsPath(value)
@@ -1031,3 +1402,50 @@ def _deduplicate_violations(
     for item in violations:
         unique[(item.code, item.json_path, item.message, item.severity)] = item
     return tuple(unique.values())
+
+
+_ARTIFACT_SEMANTIC_VALIDATORS: dict[
+    str,
+    Callable[[Mapping[str, Any]], list[ContractViolation]],
+] = {
+    ArtifactKind.CLI_RESULT.value: _no_artifact_semantic_violations,
+    ArtifactKind.INPUT_REQUEST.value: _no_artifact_semantic_violations,
+    ArtifactKind.DSW_DISCOVERY.value: _dsw_semantic_violations,
+    ArtifactKind.SOURCE_MEMBERSHIP.value: _no_artifact_semantic_violations,
+    ArtifactKind.PROJECT_MEMBERSHIP.value: _no_artifact_semantic_violations,
+    ArtifactKind.BUILD_CONTEXT.value: _no_artifact_semantic_violations,
+    ArtifactKind.SOURCE_DIGEST.value: _no_artifact_semantic_violations,
+    ArtifactKind.FUNCTION_LOCATION.value: _no_artifact_semantic_violations,
+    ArtifactKind.FUNCTION_SIGNATURE.value: _no_artifact_semantic_violations,
+    ArtifactKind.GLOBAL_ACCESS.value: _no_artifact_semantic_violations,
+    ArtifactKind.CALL_REPORT.value: _call_report_semantic_violations,
+    ArtifactKind.COVERAGE_DESIGN.value: _coverage_semantic_violations,
+    ArtifactKind.BOUNDARY_CANDIDATES.value: _boundary_semantic_violations,
+    ArtifactKind.DEPENDENCY_POLICY.value: _no_artifact_semantic_violations,
+    ArtifactKind.TEST_SPEC.value: _test_spec_semantic_violations,
+    ArtifactKind.HARNESS_SKELETON_REPORT.value: _no_artifact_semantic_violations,
+    ArtifactKind.BUILD_WORKSPACE_REPORT.value: _no_artifact_semantic_violations,
+    ArtifactKind.BUILD_PROBE_REPORT.value: _no_artifact_semantic_violations,
+    ArtifactKind.BUILD_COMPLETION_PLAN.value: _build_completion_semantic_violations,
+    ArtifactKind.BUILD_COMPLETION_ITERATION.value: _no_artifact_semantic_violations,
+    ArtifactKind.BUILD_COMPLETION_HISTORY.value: _no_artifact_semantic_violations,
+    ArtifactKind.TEST_EXECUTION_REPORT.value: _execution_semantic_violations,
+    ArtifactKind.TEST_RESULT.value: _execution_semantic_violations,
+    ArtifactKind.EVIDENCE_MANIFEST.value: _execution_semantic_violations,
+    ArtifactKind.FUNCTION_DOSSIER.value: _dossier_semantic_violations,
+    ArtifactKind.DOSSIER_MANIFEST.value: _dossier_semantic_violations,
+    ArtifactKind.STATE_SETUP_REFLECTION.value: _state_setup_semantic_violations,
+    ArtifactKind.REVIEW_DECISIONS.value: _review_decisions_semantic_violations,
+    ArtifactKind.CHANGE_IMPACT.value: _no_artifact_semantic_violations,
+    ArtifactKind.TEST_CASE_RECONCILIATION.value: _partition_semantic_violations,
+    ArtifactKind.REGRESSION_SELECTION.value: _partition_semantic_violations,
+    ArtifactKind.REANALYSIS_SNAPSHOT.value: _reanalysis_snapshot_semantic_violations,
+    ArtifactKind.SUITE_MANIFEST.value: _no_artifact_semantic_violations,
+    ArtifactKind.SUITE_RUN_REPORT.value: _suite_run_semantic_violations,
+    ArtifactKind.LATEST_RUN_POINTER.value: _latest_run_pointer_semantic_violations,
+    ArtifactKind.LATEST_EVIDENCE_POINTER.value: _latest_evidence_pointer_semantic_violations,
+    ArtifactKind.LATEST_SUITE_RUN_POINTER.value: _latest_suite_run_pointer_semantic_violations,
+    ArtifactKind.EVIDENCE_SOURCE_RUN.value: _evidence_source_run_semantic_violations,
+    ArtifactKind.PROMPT_PACK.value: _no_artifact_semantic_violations,
+    ArtifactKind.QUICK_SUMMARY.value: _no_artifact_semantic_violations,
+}

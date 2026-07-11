@@ -9,7 +9,7 @@ from typing import Any, Mapping
 from unit_test_runner import __version__
 
 from .kinds import ArtifactKind
-from .registry import CURRENT_CONTRACT_VERSION, get_contract
+from .registry import get_contract
 
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -47,6 +47,8 @@ def migrate_payload(
         data = _migrate_build_context_data(source)
     elif kind is ArtifactKind.SUITE_MANIFEST:
         data = _migrate_suite_manifest_data(source)
+    elif kind is ArtifactKind.SUITE_RUN_REPORT:
+        data = _migrate_suite_run_report_data(source)
     else:
         data = _migrate_generic_data(source)
 
@@ -54,18 +56,12 @@ def migrate_payload(
         "source_version": source_version,
         "source_artifact_kind": source.get("artifact_kind"),
     }
-    original_source_path = _normalize_data_source_path(data, subject)
-    if original_source_path is not None:
-        migration_metadata["original_source_path"] = original_source_path
-    if kind is ArtifactKind.SOURCE_DIGEST:
-        original_masked_source_path = _normalize_masked_source_path(data)
-        if original_masked_source_path is not None:
-            migration_metadata["original_masked_source_path"] = (
-                original_masked_source_path
-            )
+    path_migrations = _migrate_contract_paths(kind, source, data, subject)
+    if path_migrations:
+        migration_metadata["path_migrations"] = path_migrations
     return {
         "artifact_kind": kind.value,
-        "schema_version": CURRENT_CONTRACT_VERSION,
+        "schema_version": target_version,
         "producer": {
             "name": "unit-test-runner",
             "version": __version__,
@@ -81,17 +77,8 @@ def _legacy_subject(payload: Mapping[str, Any]) -> dict[str, str]:
     source_info = source if isinstance(source, Mapping) else {}
     target = payload.get("target")
     target_info = target if isinstance(target, Mapping) else {}
-    raw_source_path = (
-        source_info.get("path")
-        or payload.get("source_path")
-        or target_info.get("source")
-        or payload.get("workspace")
-    )
-    source_path = (
-        _compatible_relative_path(str(raw_source_path))
-        if raw_source_path
-        else None
-    )
+    raw_source_path = _legacy_source_path_value(payload)
+    source_path = _known_relative_path(raw_source_path)
     source_sha256 = _known_sha256(
         source_info.get("sha256") or payload.get("source_sha256")
     )
@@ -118,6 +105,19 @@ def _legacy_subject(payload: Mapping[str, Any]) -> dict[str, str]:
     return subject
 
 
+def _legacy_source_path_value(payload: Mapping[str, Any]) -> Any:
+    source = payload.get("source")
+    source_info = source if isinstance(source, Mapping) else {}
+    target = payload.get("target")
+    target_info = target if isinstance(target, Mapping) else {}
+    return (
+        source_info.get("path")
+        or payload.get("source_path")
+        or target_info.get("source")
+        or payload.get("workspace")
+    )
+
+
 def _known_sha256(value: Any) -> str | None:
     candidate = str(value or "").lower()
     if not _SHA256_RE.fullmatch(candidate) or candidate == "0" * 64:
@@ -125,14 +125,22 @@ def _known_sha256(value: Any) -> str | None:
     return candidate
 
 
-def _compatible_relative_path(value: str) -> str:
-    normalized = value.replace("\\", "/")
-    windows = PureWindowsPath(value)
+def _known_relative_path(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    normalized = text.replace("\\", "/")
+    windows = PureWindowsPath(text)
     posix = PurePosixPath(normalized)
-    if windows.is_absolute() or posix.is_absolute() or ".." in posix.parts:
-        name = windows.name or posix.name or "unknown"
-        return f"legacy/{name}"
-    return normalized or "legacy/unknown"
+    if (
+        not normalized
+        or windows.is_absolute()
+        or posix.is_absolute()
+        or ".." in posix.parts
+        or re.match(r"^[A-Za-z]:", text)
+    ):
+        return None
+    return normalized
 
 
 def _migrate_test_spec_data(
@@ -195,13 +203,15 @@ def _migrate_test_spec_data(
 
 def _migrate_cli_result_data(payload: Mapping[str, Any]) -> dict[str, Any]:
     legacy_status = str(payload.get("status") or "")
-    outcome_by_status = {
+    top_level_outcomes = {
         "tests_passed": "passed",
         "tests_failed": "failed",
-        "tests_blocked": "blocked",
         "tests_timed_out": "timed_out",
         "tests_cancelled": "cancelled",
         "evidence_prepared": "planned",
+        "tests_error": "error",
+        "error": "error",
+        "internal_error": "error",
     }
     data: dict[str, Any] = {
         "lifecycle": "finished",
@@ -210,13 +220,51 @@ def _migrate_cli_result_data(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
     if payload.get("command"):
         data["command"] = str(payload["command"])
-    if legacy_status in outcome_by_status:
-        data["outcome"] = outcome_by_status[legacy_status]
+    nested_outcome = _legacy_cli_nested_outcome(payload)
+    if nested_outcome is not None:
+        data["outcome"] = nested_outcome
+    elif legacy_status in top_level_outcomes:
+        data["outcome"] = top_level_outcomes[legacy_status]
     if payload.get("exit_code") is not None:
         data["exit_code"] = int(payload["exit_code"])
     if payload.get("message") is not None:
         data["message"] = str(payload["message"])
     return data
+
+
+def _legacy_cli_nested_outcome(payload: Mapping[str, Any]) -> str | None:
+    legacy_data = payload.get("data")
+    if not isinstance(legacy_data, Mapping):
+        return None
+    for field in ("test_execution", "evidence"):
+        nested = legacy_data.get(field)
+        if not isinstance(nested, Mapping):
+            continue
+        outcome = _canonical_run_outcome(nested.get("status"))
+        if outcome is not None:
+            return outcome
+    return None
+
+
+def _canonical_run_outcome(value: Any) -> str | None:
+    candidate = str(value or "")
+    aliases = {
+        "not_run": "planned",
+        "timeout": "timed_out",
+    }
+    candidate = aliases.get(candidate, candidate)
+    if candidate in {
+        "planned",
+        "passed",
+        "failed",
+        "blocked",
+        "inconclusive",
+        "cancelled",
+        "timed_out",
+        "error",
+    }:
+        return candidate
+    return None
 
 
 def _migrate_generic_data(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -238,11 +286,6 @@ def _migrate_function_dossier_data(
         normalized_target = dict(target)
         normalized_target["source"] = source_path
         data["target"] = normalized_target
-    function = data.get("function")
-    if isinstance(function, Mapping) and source_path:
-        normalized_function = dict(function)
-        normalized_function["source_path"] = source_path
-        data["function"] = normalized_function
     return data
 
 
@@ -269,34 +312,344 @@ def _migrate_suite_manifest_data(
     return data
 
 
-def _normalize_data_source_path(
+def _migrate_suite_run_report_data(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    data = _migrate_generic_data(payload)
+    data.pop("status", None)
+    data["lifecycle"] = "finished"
+    migrated_results: list[Any] = []
+    outcomes: list[str] = []
+    results = data.get("results")
+    if isinstance(results, list):
+        for result in results:
+            if not isinstance(result, Mapping):
+                migrated_results.append(result)
+                continue
+            migrated_result = copy.deepcopy(dict(result))
+            outcome = _canonical_run_outcome(
+                migrated_result.pop("execution_status", None)
+            )
+            if outcome is not None:
+                migrated_result["outcome"] = outcome
+                outcomes.append(outcome)
+            migrated_results.append(migrated_result)
+        data["results"] = migrated_results
+    if outcomes and len(outcomes) == len(migrated_results) and len(set(outcomes)) == 1:
+        data["outcome"] = outcomes[0]
+    return data
+
+
+_MIGRATED_PATH_KEYS = {
+    "path",
+    "source_path",
+    "masked_source_path",
+    "workspace_path",
+    "working_directory",
+    "source_file",
+    "object_file",
+    "log_file",
+    "stdout_log",
+    "stderr_log",
+    "combined_log",
+    "completion_plan",
+    "input_probe_report",
+    "probe_report",
+    "related_file",
+    "source_file",
+    "header_file",
+    "stub_source_path",
+    "stub_header_path",
+}
+
+_MIGRATED_PATH_LIST_KEYS = {"log_files"}
+
+_NULLABLE_MIGRATED_PATH_KEYS = {
+    "source_path",
+    "masked_source_path",
+    "log_file",
+    "stdout_log",
+    "stderr_log",
+    "combined_log",
+    "related_file",
+    "source_file",
+    "header_file",
+    "stub_source_path",
+    "stub_header_path",
+}
+
+
+def _migrate_contract_paths(
+    kind: ArtifactKind,
+    payload: Mapping[str, Any],
     data: dict[str, Any],
     subject: Mapping[str, str],
-) -> str | None:
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    raw_source_path = _legacy_source_path_value(payload)
+    data_source = data.get("source")
+    if (
+        isinstance(raw_source_path, str)
+        and _known_relative_path(raw_source_path) is None
+        and (
+            not isinstance(data_source, Mapping)
+            or "path" not in data_source
+        )
+    ):
+        _record_path_migration(
+            records,
+            "$.data.source.path"
+            if isinstance(data_source, Mapping)
+            else "$.subject.source_path",
+            raw_source_path,
+            None,
+            verified=False,
+            reason="no_workspace_relative_mapping",
+        )
+    if kind is ArtifactKind.FUNCTION_DOSSIER:
+        target = data.get("target")
+        if isinstance(target, Mapping):
+            original_target = target.get("source")
+            if (
+                isinstance(original_target, str)
+                and _known_relative_path(original_target) is None
+            ):
+                normalized_target = dict(target)
+                migrated_target = subject.get("source_path")
+                if migrated_target:
+                    normalized_target["source"] = migrated_target
+                else:
+                    normalized_target.pop("source", None)
+                data["target"] = normalized_target
+                _record_path_migration(
+                    records,
+                    "$.data.target.source",
+                    original_target,
+                    migrated_target,
+                    verified=migrated_target is not None,
+                    reason=(
+                        "matched_to_verified_subject_source"
+                        if migrated_target
+                        else "no_workspace_relative_mapping"
+                    ),
+                )
+        legacy_function = payload.get("function")
+        if isinstance(legacy_function, Mapping):
+            original = legacy_function.get("source_path")
+            if isinstance(original, str) and _known_relative_path(original) is None:
+                subject_source = subject.get("source_path")
+                verified = bool(
+                    subject_source
+                    and _absolute_path_matches_relative(original, subject_source)
+                )
+                migrated = subject_source if verified else None
+                function = data.get("function")
+                if isinstance(function, Mapping):
+                    normalized_function = dict(function)
+                    normalized_function["source_path"] = migrated
+                    data["function"] = normalized_function
+                _record_path_migration(
+                    records,
+                    "$.data.function.source_path",
+                    original,
+                    migrated,
+                    verified=verified,
+                    reason=(
+                        "matched_absolute_suffix_to_relative_dossier_target"
+                        if verified
+                        else "dossier_function_source_does_not_match_target"
+                    ),
+                )
+
+    workspace_root: str | None = None
+    if kind is ArtifactKind.BUILD_WORKSPACE_REPORT:
+        output_root = data.get("output_root")
+        if isinstance(output_root, str) and _known_relative_path(output_root) is None:
+            workspace_root = output_root
+            data["output_root"] = "."
+            _record_path_migration(
+                records,
+                "$.data.output_root",
+                output_root,
+                ".",
+                verified=True,
+                reason="build_report_output_root",
+            )
+            _rewrite_workspace_paths(data, "$.data", workspace_root, records)
+
     source = data.get("source")
-    source_path = subject.get("source_path")
-    if not isinstance(source, Mapping) or not source_path:
-        return None
-    original = source.get("path")
-    if not isinstance(original, str) or original == source_path:
-        return None
-    normalized_source = dict(source)
-    normalized_source["path"] = source_path
-    data["source"] = normalized_source
-    return original
+    if isinstance(source, Mapping):
+        original = source.get("path")
+        if isinstance(original, str) and _known_relative_path(original) is None:
+            normalized_source = dict(source)
+            verified_source = subject.get("source_path")
+            if verified_source:
+                normalized_source["path"] = verified_source
+                _record_path_migration(
+                    records,
+                    "$.data.source.path",
+                    original,
+                    verified_source,
+                    verified=True,
+                    reason="matched_to_verified_subject_source",
+                )
+            else:
+                normalized_source.pop("path", None)
+                _record_path_migration(
+                    records,
+                    "$.data.source.path",
+                    original,
+                    None,
+                    verified=False,
+                    reason="no_workspace_relative_mapping",
+                )
+            data["source"] = normalized_source
+
+    _rewrite_unverified_paths(data, "$.data", records)
+    return records
 
 
-def _normalize_masked_source_path(data: dict[str, Any]) -> str | None:
-    masking = data.get("masking")
-    if not isinstance(masking, Mapping):
-        return None
-    original = masking.get("masked_source_path")
-    if not isinstance(original, str) or not original:
-        return None
-    normalized = _compatible_relative_path(original)
-    if normalized == original:
-        return None
-    normalized_masking = dict(masking)
-    normalized_masking["masked_source_path"] = normalized
-    data["masking"] = normalized_masking
-    return original
+def _rewrite_workspace_paths(
+    value: Any,
+    json_path: str,
+    workspace_root: str,
+    records: list[dict[str, Any]],
+) -> None:
+    if isinstance(value, dict):
+        for key, child in list(value.items()):
+            child_path = f"{json_path}.{key}"
+            if key in _MIGRATED_PATH_KEYS and isinstance(child, str):
+                relative = _relative_to_workspace(child, workspace_root)
+                if relative is not None and relative != child.replace("\\", "/"):
+                    value[key] = relative
+                    _record_path_migration(
+                        records,
+                        child_path,
+                        child,
+                        relative,
+                        verified=True,
+                        reason="relative_to_build_output_root",
+                    )
+                    continue
+            _rewrite_workspace_paths(child, child_path, workspace_root, records)
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _rewrite_workspace_paths(
+                child,
+                f"{json_path}[{index}]",
+                workspace_root,
+                records,
+            )
+
+
+def _rewrite_unverified_paths(
+    value: Any,
+    json_path: str,
+    records: list[dict[str, Any]],
+) -> None:
+    if isinstance(value, dict):
+        for key, child in list(value.items()):
+            child_path = f"{json_path}.{key}"
+            if key in _MIGRATED_PATH_LIST_KEYS and isinstance(child, list):
+                retained: list[Any] = []
+                for index, item in enumerate(child):
+                    item_path = f"{child_path}[{index}]"
+                    if (
+                        isinstance(item, str)
+                        and item
+                        and _known_relative_path(item) is None
+                    ):
+                        _record_path_migration(
+                            records,
+                            item_path,
+                            item,
+                            None,
+                            verified=False,
+                            reason="no_workspace_relative_mapping",
+                        )
+                        continue
+                    retained.append(item)
+                value[key] = retained
+                continue
+            if (
+                key in _MIGRATED_PATH_KEYS
+                and isinstance(child, str)
+                and child
+                and _known_relative_path(child) is None
+            ):
+                if key in _NULLABLE_MIGRATED_PATH_KEYS:
+                    value[key] = None
+                else:
+                    value.pop(key, None)
+                _record_path_migration(
+                    records,
+                    child_path,
+                    child,
+                    None,
+                    verified=False,
+                    reason="no_workspace_relative_mapping",
+                )
+                continue
+            _rewrite_unverified_paths(child, child_path, records)
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _rewrite_unverified_paths(child, f"{json_path}[{index}]", records)
+
+
+def _relative_to_workspace(value: str, workspace_root: str) -> str | None:
+    normalized_value = value.replace("\\", "/")
+    normalized_root = workspace_root.replace("\\", "/")
+    candidates = (
+        (PureWindowsPath(value), PureWindowsPath(workspace_root)),
+        (PurePosixPath(normalized_value), PurePosixPath(normalized_root)),
+    )
+    for path, root in candidates:
+        if not path.is_absolute() or not root.is_absolute():
+            continue
+        try:
+            relative = path.relative_to(root)
+        except ValueError:
+            continue
+        relative_text = relative.as_posix()
+        return relative_text or "."
+    return None
+
+
+def _absolute_path_matches_relative(value: str, relative: str) -> bool:
+    normalized_value = value.replace("\\", "/")
+    normalized_relative = _known_relative_path(relative)
+    if normalized_relative is None:
+        return False
+    windows = PureWindowsPath(value)
+    posix = PurePosixPath(normalized_value)
+    if not windows.is_absolute() and not posix.is_absolute():
+        return False
+    relative_parts = tuple(
+        part.casefold() for part in PurePosixPath(normalized_relative).parts
+    )
+    if len(relative_parts) < 2:
+        return False
+    value_parts = tuple(part.casefold() for part in PurePosixPath(normalized_value).parts)
+    return value_parts[-len(relative_parts) :] == relative_parts
+
+
+def _record_path_migration(
+    records: list[dict[str, Any]],
+    json_path: str,
+    original_value: str,
+    migrated_value: str | None,
+    *,
+    verified: bool,
+    reason: str,
+) -> None:
+    if any(item["json_path"] == json_path for item in records):
+        return
+    records.append(
+        {
+            "json_path": json_path,
+            "original_value": original_value,
+            "migrated_value": migrated_value,
+            "verified": verified,
+            "reason": reason,
+        }
+    )
