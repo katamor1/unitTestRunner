@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -208,38 +209,42 @@ def prepare_evidence_from_existing_run(
     workspace = Path(workspace).resolve()
     loaded_run = load_execution_run(workspace, run_id)
     paths = create_evidence_paths(workspace, loaded_run.run_id)
-    producer_commit = current_producer_commit()
-    manifest = build_evidence_manifest_from_run(
-        workspace,
-        loaded_run,
-        paths,
-        producer_commit=producer_commit,
-    )
-    manifest.evidence_paths = paths
-    manifest_hash = sha256_file(paths.evidence_manifest)
-    if manifest_hash is None:
-        raise ValueError("Evidence manifest was not published.")
-    pointer = build_artifact_payload(
-        ArtifactKind.LATEST_EVIDENCE_POINTER,
-        {
-            "evidence_id": paths.evidence_id,
-            "source_run_id": loaded_run.run_id,
-            "evidence_manifest": {
-                "artifact_kind": ArtifactKind.EVIDENCE_MANIFEST.value,
-                "path": paths.evidence_manifest.relative_to(workspace).as_posix(),
-                "sha256": manifest_hash,
+    try:
+        producer_commit = current_producer_commit()
+        manifest = build_evidence_manifest_from_run(
+            workspace,
+            loaded_run,
+            paths,
+            producer_commit=producer_commit,
+        )
+        manifest.evidence_paths = paths
+        manifest_hash = sha256_file(paths.evidence_manifest)
+        if manifest_hash is None:
+            raise ValueError("Evidence manifest was not published.")
+        pointer = build_artifact_payload(
+            ArtifactKind.LATEST_EVIDENCE_POINTER,
+            {
+                "evidence_id": paths.evidence_id,
+                "source_run_id": loaded_run.run_id,
+                "evidence_manifest": {
+                    "artifact_kind": ArtifactKind.EVIDENCE_MANIFEST.value,
+                    "path": paths.evidence_manifest.relative_to(workspace).as_posix(),
+                    "sha256": manifest_hash,
+                },
+                "updated_at": datetime.now(timezone.utc).isoformat(),
             },
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        },
-        subject=loaded_run.payload["subject"],
-        producer_commit=producer_commit,
-    )
-    write_validated_artifact(
-        workspace / "reports" / "latest_evidence.json",
-        ArtifactKind.LATEST_EVIDENCE_POINTER,
-        pointer,
-        atomic=True,
-    )
+            subject=loaded_run.payload["subject"],
+            producer_commit=producer_commit,
+        )
+        write_validated_artifact(
+            workspace / "reports" / "latest_evidence.json",
+            ArtifactKind.LATEST_EVIDENCE_POINTER,
+            pointer,
+            atomic=True,
+        )
+    except Exception:
+        shutil.rmtree(paths.root, ignore_errors=True)
+        raise
     return paths, loaded_run.report, manifest
 
 

@@ -1047,12 +1047,40 @@ def _evidence_manifest_semantic_violations(
                 "blocking",
             )
         )
-    if summary.get("test_green") is True and status != RunOutcome.PASSED.value:
+    total = summary.get("total_tests")
+    passed = summary.get("passed_tests")
+    failed = summary.get("failed_tests")
+    inconclusive = summary.get("inconclusive_tests")
+    counts = (total, passed, failed, inconclusive)
+    if all(isinstance(value, int) for value in counts):
+        accounted = passed + failed + inconclusive
+        if accounted > total:
+            violations.append(
+                ContractViolation(
+                    "inconsistent_summary",
+                    "$.data.summary.total_tests",
+                    "Outcome counts cannot exceed total_tests.",
+                    "blocking",
+                )
+            )
+    green_counts_are_consistent = (
+        isinstance(total, int)
+        and isinstance(passed, int)
+        and isinstance(failed, int)
+        and isinstance(inconclusive, int)
+        and total > 0
+        and passed == total
+        and failed == 0
+        and inconclusive == 0
+    )
+    if summary.get("test_green") is True and (
+        status != RunOutcome.PASSED.value or not green_counts_are_consistent
+    ):
         violations.append(
             ContractViolation(
                 "inconsistent_summary",
                 "$.data.summary.test_green",
-                "test_green may be true only for a passed execution outcome.",
+                "test_green requires a non-empty passed outcome with every test passed and no failed or inconclusive tests.",
                 "blocking",
             )
         )

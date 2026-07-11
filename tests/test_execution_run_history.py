@@ -326,6 +326,74 @@ class ExecutionRunHistoryTests(unittest.TestCase):
             )
             self.assertFalse(manifest.summary.ready_for_review)
 
+    def test_legacy_import_without_historical_logs_is_rejected_before_allocation(self):
+        import shutil
+
+        from unit_test_runner.execution.execution_models import TestRunRequest
+        from unit_test_runner.execution.report_loader import load_execution_run
+        from unit_test_runner.execution.test_execution import execute_test_run
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            runner = self._prepare_workspace(workspace)
+            execute_test_run(
+                TestRunRequest(workspace, runner, 5, True, run_id="seed-run")
+            )
+            seed_report = json.loads(
+                (
+                    workspace
+                    / "runs"
+                    / "seed-run"
+                    / "test_execution_report.json"
+                ).read_text(encoding="utf-8")
+            )
+            legacy_payload = {"schema_version": "0.1", **seed_report["data"]}
+            legacy_payload["source"]["sha256"] = seed_report["subject"][
+                "source_sha256"
+            ]
+            self._write_json(
+                workspace / "reports" / "test_execution_report.json",
+                legacy_payload,
+            )
+            shutil.rmtree(workspace / "runs")
+            (workspace / "reports" / "latest_run.json").unlink()
+            before = self._tree_snapshot(workspace)
+
+            with self.assertRaisesRegex(ValueError, "historical execution log"):
+                load_execution_run(workspace)
+
+            self.assertEqual(before, self._tree_snapshot(workspace))
+
+    def test_failed_evidence_publication_removes_unpublished_revision(self):
+        from unittest import mock
+
+        from unit_test_runner.execution.execution_models import TestRunRequest
+        from unit_test_runner.execution.test_execution import (
+            execute_test_run,
+            prepare_evidence_from_existing_run,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            runner = self._prepare_workspace(workspace)
+            execute_test_run(
+                TestRunRequest(workspace, runner, 5, True, run_id="stable-run")
+            )
+            prepare_evidence_from_existing_run(workspace, "stable-run")
+            before = self._tree_snapshot(workspace)
+
+            with mock.patch(
+                "unit_test_runner.execution.test_execution.build_evidence_manifest_from_run",
+                side_effect=ValueError("simulated evidence publication failure"),
+            ):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "simulated evidence publication failure",
+                ):
+                    prepare_evidence_from_existing_run(workspace, "stable-run")
+
+            self.assertEqual(before, self._tree_snapshot(workspace))
+
     def test_invalid_legacy_import_leaves_all_roots_and_pointers_unchanged(self):
         import shutil
 

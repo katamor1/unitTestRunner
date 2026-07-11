@@ -155,6 +155,15 @@ def _import_legacy_execution_run(
     source_path = _workspace_path(workspace, source_value)
     relative_source = source_path.relative_to(workspace)
     data["source"] = {"path": relative_source.as_posix()}
+    legacy_log_sources = (
+        workspace / "logs" / "test_stdout.log",
+        workspace / "logs" / "test_stderr.log",
+        workspace / "logs" / "test_execution.log",
+    )
+    if not any(path.is_file() for path in legacy_log_sources):
+        raise ValueError(
+            "Legacy execution report has no historical execution log; import is blocked."
+        )
     command = data.get("command")
     if isinstance(command, dict):
         command["working_directory"] = "."
@@ -201,6 +210,13 @@ def _import_legacy_execution_run(
             workspace / "logs" / "test_execution.log",
             paths.combined_log,
         )
+        if not any(
+            path.is_file()
+            for path in (paths.stdout_log, paths.stderr_log, paths.combined_log)
+        ):
+            raise ValueError(
+                "Legacy execution report has no historical execution log; import is blocked."
+            )
         report_payload = write_test_execution_reports(
             paths,
             report,

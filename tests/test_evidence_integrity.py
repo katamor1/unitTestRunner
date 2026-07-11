@@ -257,6 +257,60 @@ class EvidenceIntegrityTests(unittest.TestCase):
                 )
                 self.assertEqual((), loaded.violations)
 
+    def test_green_evidence_requires_consistent_passing_counts(self):
+        from unit_test_runner.contracts import ArtifactKind, validate_payload
+        from unit_test_runner.execution.execution_models import TestRunRequest
+        from unit_test_runner.execution.test_execution import (
+            execute_test_run,
+            prepare_evidence_from_existing_run,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            runner = self._prepare_workspace(workspace)
+            execute_test_run(TestRunRequest(workspace, runner, 5, True))
+            paths, _, _ = prepare_evidence_from_existing_run(workspace)
+            payload = json.loads(paths.evidence_manifest.read_text(encoding="utf-8"))
+
+            mutations = {
+                "failed": {"failed_tests": 1},
+                "inconclusive": {"inconclusive_tests": 1},
+                "not_all_passed": {"passed_tests": 0},
+                "empty": {"total_tests": 0, "passed_tests": 0},
+            }
+            for name, values in mutations.items():
+                with self.subTest(name=name):
+                    mutated = copy.deepcopy(payload)
+                    mutated["data"]["summary"].update(values)
+
+                    violations = validate_payload(
+                        ArtifactKind.EVIDENCE_MANIFEST,
+                        mutated,
+                    )
+
+                    self.assertIn(
+                        (
+                            "inconsistent_summary",
+                            "$.data.summary.test_green",
+                            "blocking",
+                        ),
+                        {
+                            (item.code, item.json_path, item.severity)
+                            for item in violations
+                        },
+                    )
+
+            overcounted = copy.deepcopy(payload)
+            overcounted["data"]["summary"]["failed_tests"] = 1
+            violations = validate_payload(
+                ArtifactKind.EVIDENCE_MANIFEST,
+                overcounted,
+            )
+            self.assertIn(
+                ("inconsistent_summary", "$.data.summary.total_tests"),
+                {(item.code, item.json_path) for item in violations},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
