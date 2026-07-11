@@ -5,12 +5,14 @@ from pathlib import Path
 from typing import Any
 
 from unit_test_runner.c_analyzer.call_models import CallAnalyzerWarning
+from unit_test_runner.vc6.coff_archive import LibrarySymbolCache
 from unit_test_runner.vc6.link_context import LinkContext, LinkContextWarning
 from unit_test_runner.vc6.link_library_resolver import resolve_link_context
 
 from . import workflow as _workflow
 
 _CURRENT_LINK_CONTEXT: ContextVar[LinkContext | None] = ContextVar("unit_test_runner_link_context", default=None)
+_PROCESS_LIBRARY_CACHE = LibrarySymbolCache()
 _ORIGINAL_SELECT_PROJECT_CONTEXT = _workflow.select_project_context
 _ORIGINAL_BUILD_SOURCE_DIGEST = _workflow.build_source_digest
 _ORIGINAL_ANALYZE_CALLS = _workflow.analyze_calls
@@ -25,6 +27,10 @@ def apply_link_context_compat() -> None:
     _workflow.build_source_digest = _build_source_digest_with_links
     _workflow.analyze_calls = _analyze_calls_with_links
     _PATCHED = True
+
+
+def clear_link_context() -> None:
+    _CURRENT_LINK_CONTEXT.set(None)
 
 
 def _select_project_context_with_links(
@@ -47,6 +53,7 @@ def _select_project_context_with_links(
             dsw_path,
             project["project_name"],
             config.get("full_name") or configuration,
+            cache=_PROCESS_LIBRARY_CACHE,
         )
     except (OSError, ValueError) as exc:
         context = LinkContext(
