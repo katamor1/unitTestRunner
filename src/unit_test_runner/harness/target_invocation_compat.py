@@ -67,7 +67,7 @@ def _write_target_invocation(
     function_name = function_payload.get("name", "unknown_function")
     source_path = Path(signature.get("source", {}).get("path") or "")
     raw_return_type = hsg._return_type(function_payload)
-    parameters = hsg._signature_parameters(function_payload)
+    parameters = _signature_parameters_compat(function_payload)
     raw_parameter_list = hsg._signature_parameter_list(parameters)
     public_return_type = _public_return_type(raw_return_type)
     public_parameter_list = _public_parameter_list(parameters)
@@ -111,6 +111,35 @@ def _write_target_invocation(
     hsg._write_c(output_root, generated_files, "generated/harness/target_invocation.h", "target_invocation_header", header, [function_name], True, overwrite)
     hsg._write_c(output_root, generated_files, "generated/harness/target_invocation.c", "target_invocation_source", source, [function_name], True, overwrite)
 
+
+
+def _signature_parameters_compat(function_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalize both report-shaped and legacy flat parameter payloads."""
+    values = list(function_payload.get("parameters", []))
+    if not values:
+        return []
+    if all(isinstance(item.get("type"), dict) for item in values):
+        return hsg._signature_parameters(function_payload)
+    result: list[dict[str, Any]] = []
+    for index, item in enumerate(values):
+        if item.get("is_void") or item.get("is_variadic"):
+            continue
+        name = sanitize_identifier(item.get("name"), f"arg{item.get('index', index)}")
+        type_raw = str(item.get("type_raw") or "int").strip()
+        pointer_level = int(item.get("pointer_level") or type_raw.count("*"))
+        is_array = bool(item.get("is_array"))
+        result.append(
+            {
+                "name": name,
+                "type_raw": type_raw,
+                "base_type": str(item.get("base_type") or type_raw.replace("*", "").strip() or "int"),
+                "is_array": is_array,
+                "pointer_level": pointer_level,
+                "array_base_type": str(item.get("array_base_type") or item.get("base_type") or type_raw),
+                "array_size": str(item.get("array_size") or "1"),
+            }
+        )
+    return result
 
 def _public_parameter_list(parameters: list[dict[str, Any]]) -> str:
     if not parameters:

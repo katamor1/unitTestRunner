@@ -183,6 +183,8 @@ export function buildGenerateHarnessSkeletonInvocation(settings: AdapterSettings
     path.join(reports, 'call_report.json'),
     '--test-case-design',
     path.join(reports, 'test_case_design.json'),
+    '--dependency-policy',
+    path.join(reports, 'dependency_policy.json'),
     '--out',
     workspace,
     '--overwrite',

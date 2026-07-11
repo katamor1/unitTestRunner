@@ -129,6 +129,22 @@ class TestStubSetup:
 
 
 @dataclass
+class TestDependencyOverride:
+    callee: str
+    mode: str = "inherit"
+    rationale: str = ""
+    review_required: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "callee": self.callee,
+            "mode": self.mode,
+            "rationale": self.rationale,
+            "review_required": self.review_required,
+        }
+
+
+@dataclass
 class TestExecutionStep:
     order: int
     action: str
@@ -193,6 +209,7 @@ class TestCaseDesign:
     input_assignments: list[TestInputAssignment] = field(default_factory=list)
     state_setups: list[TestStateSetup] = field(default_factory=list)
     stub_setups: list[TestStubSetup] = field(default_factory=list)
+    dependency_overrides: list[TestDependencyOverride] = field(default_factory=list)
     execution_steps: list[TestExecutionStep] = field(default_factory=list)
     expected_observations: list[ExpectedObservation] = field(default_factory=list)
     coverage_links: list[TestCoverageLink] = field(default_factory=list)
@@ -213,6 +230,7 @@ class TestCaseDesign:
             "input_assignments": [item.to_dict() for item in self.input_assignments],
             "state_setups": [item.to_dict() for item in self.state_setups],
             "stub_setups": [item.to_dict() for item in self.stub_setups],
+            "dependency_overrides": [item.to_dict() for item in self.dependency_overrides],
             "execution_steps": [item.to_dict() for item in self.execution_steps],
             "expected_observations": [item.to_dict() for item in self.expected_observations],
             "coverage_links": [item.to_dict() for item in self.coverage_links],

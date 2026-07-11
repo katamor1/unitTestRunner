@@ -60,6 +60,21 @@ Quick Check は `analyze-function` を軽量 profile で呼び出す。
 - diagnostics 数
 - `function_dossier.md` / `test_case_design.md` / `harness_skeleton_report.md` / `build_probe_report.md` へのパス
 
+
+## 呼び出し先の real / stub 選択
+
+Quick Checkでは `reports/dependency_policy.md` と `reports/dependency_policy.json` も生成する。呼び出し先ごとの既定方針は `real` / `stub` / `auto` で、`auto` は共有グローバル、ポインタ引数、副作用、実装の所在などから状態連動性を判定する。
+
+- 同じ機能を可読性のために分割した内部関数など、状態連動が強い依存は `real` 候補
+- 外部I/Oや戻り値だけを制御したい機能境界は `stub` 候補
+- 根拠が不足・競合する場合は `review_required`
+
+関係ごとの既定値を変更する場合は `dependency_policy.json` の `configured_mode` を編集し、Quick Checkまたは関数解析を再実行して解決結果を更新する。特定ケースだけ切り替える場合は `test_case_design.json` の `dependency_overrides` に `inherit` / `real` / `stub` を指定してから、ハーネスとbuild workspaceを再生成する。
+
+生成スタブは製品関数と同名にせず、`Utr_Stub_<callee>_Invoke` を使う。抽出済み対象Cの安全に検証できた直接呼び出しだけが `Utr_Dep_<callee>` へ書き換えられる。マクロ、関数ポインタ、メンバ経由呼び出し、関数アドレス利用は自動変換せず、詳細レポートでレビューする。
+
+外部グローバルの結合先はworkspace単位で固定される。`real` は製品定義を使用し、`fixture` は宣言互換のテスト実体を1つだけ生成する。ケース単位では値だけを設定し、対象関数と実呼び出し先が同じオブジェクトを共有できるようにする。
+
 ## 推奨運用
 
 1. 実装中は Quick Check を反復実行する。

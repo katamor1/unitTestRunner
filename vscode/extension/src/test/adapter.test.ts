@@ -209,6 +209,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.deepEqual(testDesign.args.slice(0, 3), ['--json', 'generate-test-design', '--dossier']);
     assert.deepEqual(harness.args.slice(0, 2), ['--json', 'generate-harness-skeleton']);
     assert.deepEqual(harness.args.slice(harness.args.indexOf('--test-case-design'), harness.args.indexOf('--test-case-design') + 2), ['--test-case-design', path.join(target.outputWorkspace, 'reports', 'test_case_design.json')]);
+    assert.deepEqual(harness.args.slice(harness.args.indexOf('--dependency-policy'), harness.args.indexOf('--dependency-policy') + 2), ['--dependency-policy', path.join(target.outputWorkspace, 'reports', 'dependency_policy.json')]);
     assert.deepEqual(harness.args.slice(harness.args.indexOf('--out'), harness.args.indexOf('--out') + 2), ['--out', target.outputWorkspace]);
     const buildProbe = buildBuildProbeInvocation(settings, target.outputWorkspace, true);
     assert.deepEqual(buildProbe.args.slice(buildProbe.args.indexOf('--vcvars'), buildProbe.args.indexOf('--vcvars') + 2), ['--vcvars', settings.vcvarsPath]);
