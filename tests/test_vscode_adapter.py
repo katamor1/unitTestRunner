@@ -16,6 +16,7 @@ class VscodeAdapterTests(unittest.TestCase):
         self.assertEqual("./dist/extension.js", manifest["main"])
         self.assertIn("onCommand:unitTestRunner.analyzeSelectedFunction", manifest["activationEvents"])
         self.assertIn("onCommand:unitTestRunner.openLastFunctionDossier", manifest["activationEvents"])
+        self.assertIn("onCommand:unitTestRunner.openGeneratedTestSource", manifest["activationEvents"])
 
         commands = {
             command["command"]: command["title"]
@@ -29,8 +30,12 @@ class VscodeAdapterTests(unittest.TestCase):
             "UnitTestRunner: 最後の関数dossierを開く",
             commands["unitTestRunner.openLastFunctionDossier"],
         )
+        self.assertIn("unitTestRunner.openGeneratedTestSource", commands)
         self.assertFalse(any("Analyze Current Function" in title for title in commands.values()))
         self.assertFalse(any("Open Last Function Dossier" in title for title in commands.values()))
+
+        editor_menu = manifest["contributes"]["menus"]["editor/context"]
+        self.assertTrue(all("editorLangId == cpp" not in item["when"] for item in editor_menu))
 
         properties = manifest["contributes"]["configuration"]["properties"]
         for key in (

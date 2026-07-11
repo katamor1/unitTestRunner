@@ -18,6 +18,7 @@
   "activationEvents": [
     "onCommand:unitTestRunner.quickCheckCurrentFunction",
     "onCommand:unitTestRunner.quickCheckSelectedFunction",
+    "onCommand:unitTestRunner.openGeneratedTestSource",
     "onCommand:unitTestRunner.openQuickSummary",
     "onCommand:unitTestRunner.runFullGateForCurrentFunction",
     "onCommand:unitTestRunner.analyzeCurrentFunction",
@@ -49,7 +50,7 @@
     "onView:unitTestRunner.workflow",
     "onStartupFinished"
   ],
-  "main": "./dist/quickExtension.js",
+  "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
@@ -59,6 +60,10 @@
       {
         "command": "unitTestRunner.quickCheckSelectedFunction",
         "title": "UnitTestRunner: Quick Check Selected Function"
+      },
+      {
+        "command": "unitTestRunner.openGeneratedTestSource",
+        "title": "UnitTestRunner: 生成テストソースを開く"
       },
       {
         "command": "unitTestRunner.openQuickSummary",
@@ -177,22 +182,22 @@
       "editor/context": [
         {
           "command": "unitTestRunner.quickCheckCurrentFunction",
-          "when": "editorLangId == c || editorLangId == cpp",
+          "when": "editorLangId == c",
           "group": "navigation@8"
         },
         {
           "command": "unitTestRunner.quickCheckSelectedFunction",
-          "when": "editorHasSelection && (editorLangId == c || editorLangId == cpp)",
+          "when": "editorHasSelection && editorLangId == c",
           "group": "navigation@9"
         },
         {
           "command": "unitTestRunner.analyzeCurrentFunction",
-          "when": "editorLangId == c || editorLangId == cpp",
+          "when": "editorLangId == c",
           "group": "navigation@10"
         },
         {
           "command": "unitTestRunner.analyzeSelectedFunction",
-          "when": "editorHasSelection && (editorLangId == c || editorLangId == cpp)",
+          "when": "editorHasSelection && editorLangId == c",
           "group": "navigation@11"
         }
       ]
@@ -344,11 +349,13 @@
   "scripts": {
     "compile": "tsc -p ./",
     "test": "npm run compile && node --test dist/test/*.test.js",
+    "test:extension-host": "npm run compile && node ./dist/test/runTest.js",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
     "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^3.0.0",
     "typescript": "^5.4.5"
   }
 }
