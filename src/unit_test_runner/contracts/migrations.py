@@ -9,10 +9,26 @@ from typing import Any, Mapping
 from unit_test_runner import __version__
 
 from .kinds import ArtifactKind
+from .path_policy import (
+    ContractPathPolicy,
+    iter_contract_path_values,
+    path_policy_for,
+)
 from .registry import get_contract
 
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+class ArtifactKindMismatchError(ValueError):
+    code = "artifact_kind_mismatch"
+
+    def __init__(self, expected_kind: ArtifactKind, actual_kind: Any) -> None:
+        self.expected_kind = expected_kind.value
+        self.actual_kind = actual_kind
+        super().__init__(
+            f"{self.code}: expected {self.expected_kind}; received {actual_kind!r}."
+        )
 
 
 def migrate_payload(
@@ -21,6 +37,10 @@ def migrate_payload(
     *,
     target_version: str,
 ) -> dict[str, Any]:
+    declared_kind = payload.get("artifact_kind")
+    if declared_kind is not None and declared_kind != kind.value:
+        raise ArtifactKindMismatchError(kind, declared_kind)
+
     contract = get_contract(kind)
     if target_version != contract.current_version:
         raise ValueError(
@@ -340,45 +360,6 @@ def _migrate_suite_run_report_data(
     return data
 
 
-_MIGRATED_PATH_KEYS = {
-    "path",
-    "source_path",
-    "masked_source_path",
-    "workspace_path",
-    "working_directory",
-    "source_file",
-    "object_file",
-    "log_file",
-    "stdout_log",
-    "stderr_log",
-    "combined_log",
-    "completion_plan",
-    "input_probe_report",
-    "probe_report",
-    "related_file",
-    "source_file",
-    "header_file",
-    "stub_source_path",
-    "stub_header_path",
-}
-
-_MIGRATED_PATH_LIST_KEYS = {"log_files"}
-
-_NULLABLE_MIGRATED_PATH_KEYS = {
-    "source_path",
-    "masked_source_path",
-    "log_file",
-    "stdout_log",
-    "stderr_log",
-    "combined_log",
-    "related_file",
-    "source_file",
-    "header_file",
-    "stub_source_path",
-    "stub_header_path",
-}
-
-
 def _migrate_contract_paths(
     kind: ArtifactKind,
     payload: Mapping[str, Any],
@@ -386,6 +367,7 @@ def _migrate_contract_paths(
     subject: Mapping[str, str],
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
+    path_policy = path_policy_for(kind)
     raw_source_path = _legacy_source_path_value(payload)
     data_source = data.get("source")
     if (
@@ -475,7 +457,13 @@ def _migrate_contract_paths(
                 verified=True,
                 reason="build_report_output_root",
             )
-            _rewrite_workspace_paths(data, "$.data", workspace_root, records)
+            _rewrite_workspace_paths(
+                data,
+                "$.data",
+                workspace_root,
+                records,
+                path_policy,
+            )
 
     source = data.get("source")
     if isinstance(source, Mapping):
@@ -505,7 +493,7 @@ def _migrate_contract_paths(
                 )
             data["source"] = normalized_source
 
-    _rewrite_unverified_paths(data, "$.data", records)
+    _rewrite_unverified_paths(data, "$.data", records, path_policy)
     return records
 
 
@@ -514,31 +502,24 @@ def _rewrite_workspace_paths(
     json_path: str,
     workspace_root: str,
     records: list[dict[str, Any]],
+    path_policy: ContractPathPolicy,
 ) -> None:
-    if isinstance(value, dict):
-        for key, child in list(value.items()):
-            child_path = f"{json_path}.{key}"
-            if key in _MIGRATED_PATH_KEYS and isinstance(child, str):
-                relative = _relative_to_workspace(child, workspace_root)
-                if relative is not None and relative != child.replace("\\", "/"):
-                    value[key] = relative
-                    _record_path_migration(
-                        records,
-                        child_path,
-                        child,
-                        relative,
-                        verified=True,
-                        reason="relative_to_build_output_root",
-                    )
-                    continue
-            _rewrite_workspace_paths(child, child_path, workspace_root, records)
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            _rewrite_workspace_paths(
-                child,
-                f"{json_path}[{index}]",
-                workspace_root,
+    for path_value in list(
+        iter_contract_path_values(value, path_policy, json_path)
+    ):
+        relative = _relative_to_workspace(path_value.value, workspace_root)
+        if (
+            relative is not None
+            and relative != path_value.value.replace("\\", "/")
+        ):
+            path_value.container[path_value.key] = relative
+            _record_path_migration(
                 records,
+                path_value.json_path,
+                path_value.value,
+                relative,
+                verified=True,
+                reason="relative_to_build_output_root",
             )
 
 
@@ -546,54 +527,39 @@ def _rewrite_unverified_paths(
     value: Any,
     json_path: str,
     records: list[dict[str, Any]],
+    path_policy: ContractPathPolicy,
 ) -> None:
-    if isinstance(value, dict):
-        for key, child in list(value.items()):
-            child_path = f"{json_path}.{key}"
-            if key in _MIGRATED_PATH_LIST_KEYS and isinstance(child, list):
-                retained: list[Any] = []
-                for index, item in enumerate(child):
-                    item_path = f"{child_path}[{index}]"
-                    if (
-                        isinstance(item, str)
-                        and item
-                        and _known_relative_path(item) is None
-                    ):
-                        _record_path_migration(
-                            records,
-                            item_path,
-                            item,
-                            None,
-                            verified=False,
-                            reason="no_workspace_relative_mapping",
-                        )
-                        continue
-                    retained.append(item)
-                value[key] = retained
-                continue
-            if (
-                key in _MIGRATED_PATH_KEYS
-                and isinstance(child, str)
-                and child
-                and _known_relative_path(child) is None
-            ):
-                if key in _NULLABLE_MIGRATED_PATH_KEYS:
-                    value[key] = None
-                else:
-                    value.pop(key, None)
+    path_values = list(iter_contract_path_values(value, path_policy, json_path))
+    for path_value in reversed(path_values):
+        if not path_value.value:
+            continue
+        normalized = _known_relative_path(path_value.value)
+        if normalized is not None:
+            if normalized != path_value.value:
+                path_value.container[path_value.key] = normalized
                 _record_path_migration(
                     records,
-                    child_path,
-                    child,
-                    None,
-                    verified=False,
-                    reason="no_workspace_relative_mapping",
+                    path_value.json_path,
+                    path_value.value,
+                    normalized,
+                    verified=True,
+                    reason="normalized_relative_path",
                 )
-                continue
-            _rewrite_unverified_paths(child, child_path, records)
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            _rewrite_unverified_paths(child, f"{json_path}[{index}]", records)
+            continue
+        if path_value.is_list_item:
+            path_value.container.pop(path_value.key)
+        elif path_value.field_name in path_policy.nullable_scalar_fields:
+            path_value.container[path_value.key] = None
+        else:
+            path_value.container.pop(path_value.key, None)
+        _record_path_migration(
+            records,
+            path_value.json_path,
+            path_value.value,
+            None,
+            verified=False,
+            reason="no_workspace_relative_mapping",
+        )
 
 
 def _relative_to_workspace(value: str, workspace_root: str) -> str | None:
@@ -606,9 +572,13 @@ def _relative_to_workspace(value: str, workspace_root: str) -> str | None:
     for path, root in candidates:
         if not path.is_absolute() or not root.is_absolute():
             continue
+        if ".." in path.parts or ".." in root.parts:
+            continue
         try:
             relative = path.relative_to(root)
         except ValueError:
+            continue
+        if ".." in relative.parts:
             continue
         relative_text = relative.as_posix()
         return relative_text or "."

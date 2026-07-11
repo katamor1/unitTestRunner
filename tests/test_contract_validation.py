@@ -965,6 +965,13 @@ class ContractValidationTests(unittest.TestCase):
             },
         )
 
+        violations = validate_payload(ArtifactKind.SUITE_MANIFEST, payload)
+
+        self.assertNotIn(
+            "invalid_relative_path",
+            {item.code for item in violations},
+        )
+
     def test_suite_v1_rejects_legacy_lifecycle_and_outcome_aliases(self):
         payload = valid_suite_run_report()
         payload["data"]["lifecycle"] = "suite_run_completed"
@@ -987,29 +994,49 @@ class ContractValidationTests(unittest.TestCase):
 
     def test_suite_green_status_requires_canonical_pass_and_zero_non_green_evidence(self):
         mutations = (
-            ("outcome", "failed"),
-            ("failed_tests", 1),
-            ("inconclusive_tests", 1),
-            ("not_run_tests", 1),
-            ("unresolved_review_count", 1),
-            ("error", "process crashed"),
+            ("outcome", lambda result: result.update(outcome="failed")),
+            ("executed", lambda result: result.update(executed=False)),
+            (
+                "nonempty",
+                lambda result: result.update(total_tests=0, passed_tests=0),
+            ),
+            (
+                "coherent_counts",
+                lambda result: result.update(passed_tests=0),
+            ),
+            ("failed_tests", lambda result: result.update(failed_tests=1)),
+            (
+                "inconclusive_tests",
+                lambda result: result.update(inconclusive_tests=1),
+            ),
+            ("not_run_tests", lambda result: result.update(not_run_tests=1)),
+            (
+                "unresolved_review_count",
+                lambda result: result.update(unresolved_review_count=1),
+            ),
+            ("error", lambda result: result.update(error="process crashed")),
         )
-        for field, value in mutations:
-            with self.subTest(field=field):
+        for prerequisite, mutate in mutations:
+            with self.subTest(prerequisite=prerequisite):
                 payload = valid_suite_run_report()
-                payload["data"]["results"][0][field] = value
+                mutate(payload["data"]["results"][0])
+                violations = {
+                    (item.code, item.json_path)
+                    for item in validate_payload(
+                        ArtifactKind.SUITE_RUN_REPORT,
+                        payload,
+                    )
+                }
                 self.assertIn(
                     (
                         "inconsistent_green_status",
                         "$.data.results[0].green_status",
                     ),
-                    {
-                        (item.code, item.json_path)
-                        for item in validate_payload(
-                            ArtifactKind.SUITE_RUN_REPORT,
-                            payload,
-                        )
-                    },
+                    violations,
+                )
+                self.assertIn(
+                    ("inconsistent_suite_outcome", "$.data.outcome"),
+                    violations,
                 )
 
     def test_suite_passed_outcome_requires_every_selected_result_green(self):
@@ -1026,13 +1053,6 @@ class ContractValidationTests(unittest.TestCase):
                 (item.code, item.json_path)
                 for item in validate_payload(ArtifactKind.SUITE_RUN_REPORT, payload)
             },
-        )
-
-        violations = validate_payload(ArtifactKind.SUITE_MANIFEST, payload)
-
-        self.assertNotIn(
-            "invalid_relative_path",
-            {item.code for item in violations},
         )
 
     def test_resolved_artifact_families_have_normal_semantic_validation(self):

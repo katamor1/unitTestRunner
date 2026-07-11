@@ -1,10 +1,11 @@
 from .kinds import ArtifactKind, ContractMode, RunOutcome
 from .models import ContractViolation, LoadedArtifact
-from .migrations import migrate_payload
+from .migrations import ArtifactKindMismatchError, migrate_payload
 from .validator import load_artifact, validate_payload
 
 __all__ = [
     "ArtifactKind",
+    "ArtifactKindMismatchError",
     "ContractMode",
     "ContractViolation",
     "LoadedArtifact",

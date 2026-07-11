@@ -16,6 +16,7 @@ from referencing import Registry, Resource
 from .kinds import ArtifactKind, ContractMode
 from .migrations import migrate_payload
 from .models import ContractViolation, LoadedArtifact
+from .path_policy import iter_contract_path_values, path_policy_for
 from .registry import ContractDefinition, get_contract
 
 
@@ -250,7 +251,7 @@ def _common_semantic_violations(
             )
     violations.extend(_duplicate_id_violations(builtin_payload))
     violations.extend(_provenance_violations(kind, payload))
-    violations.extend(_nested_path_violations(builtin_payload))
+    violations.extend(_nested_path_violations(kind, builtin_payload))
     violations.extend(_nested_hash_violations(builtin_payload))
     violations.extend(_subject_consistency_violations(payload))
     return violations
@@ -340,64 +341,21 @@ def _provenance_violations(
     return violations
 
 
-_CONTRACT_PATH_KEYS = {
-    "path",
-    "source_path",
-    "masked_source_path",
-    "workspace_path",
-    "log_file",
-    "stdout_log",
-    "stderr_log",
-    "combined_log",
-    "completion_plan",
-    "input_probe_report",
-    "probe_report",
-    "related_file",
-    "source_file",
-    "header_file",
-    "stub_source_path",
-    "stub_header_path",
-}
-
-_CONTRACT_PATH_LIST_KEYS = {"log_files"}
-
-
-def _nested_path_violations(value: Any, path: str = "$") -> list[ContractViolation]:
+def _nested_path_violations(
+    kind: ArtifactKind,
+    value: Any,
+) -> list[ContractViolation]:
     violations: list[ContractViolation] = []
-    if isinstance(value, Mapping):
-        for key, child in value.items():
-            child_path = f"{path}.{key}"
-            if key in _CONTRACT_PATH_LIST_KEYS and isinstance(child, list):
-                for index, item in enumerate(child):
-                    if (
-                        isinstance(item, str)
-                        and item
-                        and not _is_relative_contract_path(item)
-                    ):
-                        violations.append(
-                            ContractViolation(
-                                "invalid_relative_path",
-                                f"{child_path}[{index}]",
-                                f"{key} items must be normalized relative contract paths.",
-                            )
-                        )
-            if (
-                key in _CONTRACT_PATH_KEYS
-                and isinstance(child, str)
-                and child
-                and not _is_relative_contract_path(child)
-            ):
-                violations.append(
-                    ContractViolation(
-                        "invalid_relative_path",
-                        child_path,
-                        f"{key} must be a normalized relative contract path.",
-                    )
+    path_policy = path_policy_for(kind)
+    for path_value in iter_contract_path_values(value, path_policy):
+        if path_value.value and not _is_relative_contract_path(path_value.value):
+            violations.append(
+                ContractViolation(
+                    "invalid_relative_path",
+                    path_value.json_path,
+                    f"{path_value.field_name} must contain normalized relative contract paths.",
                 )
-            violations.extend(_nested_path_violations(child, child_path))
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            violations.extend(_nested_path_violations(child, f"{path}[{index}]"))
+            )
     return violations
 
 
@@ -935,25 +893,13 @@ def _suite_run_semantic_violations(
                         "blocking",
                     )
                 )
-            is_green = (
-                result.get("outcome") == "passed"
-                and not result.get("error")
-                and all(
-                    result.get(field) == 0
-                    for field in (
-                        "failed_tests",
-                        "inconclusive_tests",
-                        "not_run_tests",
-                        "unresolved_review_count",
-                    )
-                )
-            )
+            is_green = _suite_result_is_green(result)
             if (result.get("green_status") == "green") != is_green:
                 violations.append(
                     ContractViolation(
                         "inconsistent_green_status",
                         f"$.data.results[{index}].green_status",
-                        "GREEN requires passed outcome and zero failure, inconclusive, not-run, and unresolved evidence.",
+                        "GREEN requires executed, nonempty, coherent passed counts and zero failure, inconclusive, not-run, unresolved, or error evidence.",
                     )
                 )
     if data.get("outcome") == "passed":
@@ -969,7 +915,7 @@ def _suite_run_semantic_violations(
             ]
         if not complete or any(
             result.get("green_status") != "green"
-            or result.get("outcome") != "passed"
+            or not _suite_result_is_green(result)
             for result in selected_results
         ):
             violations.append(
@@ -994,6 +940,42 @@ def _suite_run_semantic_violations(
                     )
                 )
     return violations
+
+
+def _suite_result_is_green(result: Mapping[str, Any]) -> bool:
+    count_fields = (
+        "total_tests",
+        "passed_tests",
+        "failed_tests",
+        "inconclusive_tests",
+        "not_run_tests",
+    )
+    counts = {field: result.get(field) for field in count_fields}
+    if not all(
+        isinstance(value, int) and not isinstance(value, bool)
+        for value in counts.values()
+    ):
+        return False
+    coherent = counts["total_tests"] == sum(
+        counts[field]
+        for field in (
+            "passed_tests",
+            "failed_tests",
+            "inconclusive_tests",
+            "not_run_tests",
+        )
+    )
+    return (
+        result.get("executed") is True
+        and counts["total_tests"] > 0
+        and coherent
+        and result.get("outcome") == "passed"
+        and not result.get("error")
+        and counts["failed_tests"] == 0
+        and counts["inconclusive_tests"] == 0
+        and counts["not_run_tests"] == 0
+        and result.get("unresolved_review_count") == 0
+    )
 
 
 def _execution_semantic_violations(
