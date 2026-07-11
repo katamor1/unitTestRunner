@@ -18,6 +18,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Python dependencies
+        run: py -m pip install -e .
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -53,6 +56,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: py -m pip install -e .
 
       - name: Run Python tests
         run: |
@@ -146,6 +152,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Python dependencies
+        run: py -m pip install -e .
+
       - name: Run fixture smoke
         run: |
           $log = Join-Path $env:RUNNER_TEMP "fixture-smoke.log"
@@ -159,3 +168,46 @@ jobs:
         with:
           name: fixture-smoke-failure
           path: ${{ runner.temp }}\fixture-smoke.log
+
+  package-contract:
+    name: Package contract
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build and install wheel in a fresh environment
+        run: |
+          $dist = Join-Path $env:RUNNER_TEMP "unit-test-runner-dist"
+          $venv = Join-Path $env:RUNNER_TEMP "unit-test-runner-package-venv"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          py -m pip wheel --no-deps --wheel-dir $dist .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          py -m venv $venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $python = Join-Path $venv "Scripts\python.exe"
+          $wheel = Get-ChildItem -Path $dist -Filter "unit_test_runner-*.whl" | Select-Object -Single
+          & $python -m pip install $wheel.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $python -m unit_test_runner --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $contractCheck = @'
+          from importlib import resources
+          from unit_test_runner.contracts import ArtifactKind
+
+          root = resources.files("unit_test_runner.schemas")
+          missing = [
+              kind.value
+              for kind in ArtifactKind
+              if not root.joinpath(f"{kind.value}.schema.json").is_file()
+          ]
+          assert root.joinpath("common.schema.json").is_file()
+          assert not missing, missing
+          '@
+          $contractCheck | & $python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

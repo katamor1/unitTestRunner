@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://unit-test-runner.local/schemas/review_decisions.schema.json","title":"Review Decisions","allOf":[{"$ref":"common.schema.json"},{"type":"object","properties":{"artifact_kind":{"const":"review_decisions"},"schema_version":{"const":"1.0.0"}}}]}

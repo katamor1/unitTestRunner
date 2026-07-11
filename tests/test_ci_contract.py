@@ -32,7 +32,7 @@ class CiContractTests(unittest.TestCase):
         self.assertIn("npm.cmd test", text)
         self.assertIn("vscode/extension", text)
 
-    def test_github_actions_uses_five_independent_required_jobs(self):
+    def test_github_actions_uses_six_independent_required_jobs(self):
         workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
         text = workflow.read_text(encoding="utf-8")
@@ -45,6 +45,7 @@ class CiContractTests(unittest.TestCase):
                 "vscode-tests",
                 "vscode-activation",
                 "fixture-smoke",
+                "package-contract",
             },
             job_ids,
         )
@@ -76,6 +77,16 @@ class CiContractTests(unittest.TestCase):
         self.assertIn("py -m compileall -q src", text)
         self.assertLess(text.index(tracking), text.index("Run Python tests"))
         self.assertLess(text.index("py -m compileall -q src"), text.index("Run Python tests"))
+
+    def test_github_actions_installs_runtime_dependencies_and_tests_wheel_contract(self):
+        workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+
+        text = workflow.read_text(encoding="utf-8")
+        self.assertGreaterEqual(text.count("py -m pip install -e ."), 3)
+        self.assertIn("py -m pip wheel --no-deps", text)
+        self.assertIn("py -m venv", text)
+        self.assertIn("-m unit_test_runner --help", text)
+        self.assertIn("unit_test_runner.schemas", text)
 
 
 if __name__ == "__main__":

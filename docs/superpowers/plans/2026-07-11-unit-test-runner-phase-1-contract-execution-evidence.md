@@ -166,7 +166,7 @@ def migrate_payload(kind: ArtifactKind, payload: Mapping[str, Any], *,
                     target_version: str) -> dict[str, Any]: ...
 ```
 
-- [ ] **Step 1: Write registry and negative-schema tests**
+- [x] **Step 1: Write registry and negative-schema tests**
 
 Cover missing `artifact_kind`, unsupported version, invalid enum, missing nested field, unknown property, duplicate ID, invalid reference, and invalid relative path.
 
@@ -179,7 +179,7 @@ PYTHONPATH=src python -m unittest \
 
 Expected: import failure before the package exists.
 
-- [ ] **Step 2: Add the runtime dependency and common schema**
+- [x] **Step 2: Add the runtime dependency and common schema**
 
 Every public JSON root must contain:
 
@@ -196,7 +196,7 @@ Every public JSON root must contain:
 
 Use `additionalProperties: false` at modeled object boundaries and an explicit `extensions` object for future additions.
 
-- [ ] **Step 3: Implement registry, structural validation, and semantic hooks**
+- [x] **Step 3: Implement registry, structural validation, and semantic hooks**
 
 The registry maps `(ArtifactKind, version)` to schema path, migration path, and semantic validator. Schema files must be included in the wheel/package.
 
@@ -204,11 +204,11 @@ The scope is every JSON written by a public CLI command or stored in a generated
 
 Load schemas with `importlib.resources.files("unit_test_runner.schemas")`; configure setuptools package data for `*.json`. Do not rely on the repository-root `schemas/` directory at runtime.
 
-- [ ] **Step 4: Implement v0.1 compatible migration**
+- [x] **Step 4: Implement v0.1 compatible migration**
 
 Compatible mode converts existing top-level `schema_version: "0.1"` payloads in memory. Strict mode reports `unsupported_version` without modifying bytes.
 
-- [ ] **Step 5: Run all contract tests and commit**
+- [x] **Step 5: Run all contract tests and commit**
 
 Before commit, build a wheel into a temporary directory, install it into a fresh virtual environment, run `python -m unit_test_runner --help`, and load every registry schema through `importlib.resources`. Add this as the required CI `package-contract` job.
 
@@ -220,6 +220,14 @@ PYTHONPATH=src python -m unittest \
 git add pyproject.toml .github/workflows/ci.yml src/unit_test_runner/contracts src/unit_test_runner/schemas schemas/function_dossier.schema.json tests/test_contract_*.py tests/test_public_artifact_schemas.py tests/test_wheel_contract.py
 git commit -m "feat: add versioned artifact contract kernel"
 ```
+
+Local verification record (2026-07-11, Linux 6.12.47 x86_64, Python 3.12.13):
+
+- Contract registry, structural/semantic validation, migration, public-schema, and wheel tests: 21 passed.
+- CI contract, tracked-source, and dossier compatibility tests: 14 passed.
+- Full Python discovery: 298 passed with 2 expected platform skips.
+- The built wheel was installed into a fresh venv with its already-downloaded runtime dependency set; CLI help succeeded and all 40 artifact schemas plus the common schema loaded through `importlib.resources`.
+- The `package-contract` Windows job performs the complete online dependency installation from the wheel and remains the required remote package evidence.
 
 ---
 

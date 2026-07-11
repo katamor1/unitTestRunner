@@ -7,10 +7,13 @@ name = "unit-test-runner"
 version = "0.1.0"
 description = "Function-level VC6/C90 unit test dossier generator"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["jsonschema>=4.23,<5"]
 
 [project.scripts]
 unit-test-runner = "unit_test_runner.cli.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"unit_test_runner.schemas" = ["*.json"]

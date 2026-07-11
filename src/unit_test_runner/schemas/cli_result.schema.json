@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unit-test-runner.local/schemas/cli_result.schema.json",
+  "title": "CLI result contract",
+  "allOf": [
+    {"$ref": "common.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "artifact_kind": {"const": "cli_result"},
+        "schema_version": {"const": "1.0.0"},
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "lifecycle",
+            "outcome",
+            "exit_code",
+            "message",
+            "artifacts",
+            "errors"
+          ],
+          "properties": {
+            "command": {"type": "string", "minLength": 1},
+            "lifecycle": {
+              "enum": ["queued", "running", "finished"]
+            },
+            "outcome": {
+              "enum": [
+                "planned",
+                "passed",
+                "failed",
+                "blocked",
+                "inconclusive",
+                "cancelled",
+                "timed_out",
+                "error"
+              ]
+            },
+            "exit_code": {"type": "integer", "minimum": 0},
+            "message": {"type": "string"},
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "$ref": "common.schema.json#/$defs/artifact_reference"
+              }
+            },
+            "errors": {"type": "array", "items": {"type": "object"}}
+          }
+        }
+      }
+    }
+  ]
+}

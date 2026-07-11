@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://unit-test-runner.local/schemas/function_dossier.schema.json","title":"Function Dossier","allOf":[{"$ref":"common.schema.json"},{"type":"object","properties":{"artifact_kind":{"const":"function_dossier"},"schema_version":{"const":"1.0.0"}}}]}
