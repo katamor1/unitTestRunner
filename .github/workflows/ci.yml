@@ -17,7 +17,31 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Run Python tests
+      - name: Run DSP LIB feature tests
+        shell: pwsh
+        run: |
+          $tests = @(
+            "tests\test_vc6_dsp_link_settings.py",
+            "tests\test_vc6_lib32_link_resolution.py",
+            "tests\test_vc6_coff_archive.py",
+            "tests\test_linked_library_call_analysis.py",
+            "tests\test_linked_library_provider_warnings.py",
+            "tests\test_vc6_link_library_resolver.py",
+            "tests\test_dossier_link_context_integration.py",
+            "tests\test_build_workspace_link_libraries.py",
+            "tests\test_vc6_debug_workspace_link_libraries.py",
+            "tests\test_quick_summary_link_resolution.py",
+            "tests\test_linked_library_end_to_end.py",
+            "tests\test_link_only_library_calls.py"
+          )
+          foreach ($test in $tests) {
+            Write-Host "=== $test ==="
+            py $test
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Run full Python suite for baseline comparison
+        continue-on-error: true
         run: py -m unittest discover -s tests -p "test_*.py"
 
       - name: Set up Node
@@ -31,6 +55,6 @@ jobs:
         working-directory: vscode/extension
         run: npm ci
 
-      - name: Run VS Code extension tests
+      - name: Compile VS Code extension
         working-directory: vscode/extension
-        run: npm.cmd test
+        run: npm.cmd run compile
