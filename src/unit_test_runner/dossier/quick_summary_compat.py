@@ -6,6 +6,7 @@ from typing import Any
 from unit_test_runner.reports.quick_summary import write_quick_summary
 
 from . import workflow as _workflow
+from .link_context_compat import clear_link_context
 
 
 def analyze_function_workflow(
@@ -20,25 +21,28 @@ def analyze_function_workflow(
     run_tests: bool = False,
     phase: str = "execution",
 ) -> dict[str, Any]:
-    dossier = _workflow.analyze_function_workflow(
-        workspace_root,
-        dsw_path,
-        source,
-        function_name,
-        configuration,
-        out_dir,
-        project_name,
-        apply_safe_completions=apply_safe_completions,
-        run_tests=run_tests,
-        phase=phase,
-    )
-    paths = write_quick_summary(Path(out_dir), dossier, phase, _status_for_phase(phase))
-    dossier["quick_summary"] = {
-        "json": str(paths["json"]),
-        "markdown": str(paths["markdown"]),
-        "status": _status_for_phase(phase),
-    }
-    return dossier
+    try:
+        dossier = _workflow.analyze_function_workflow(
+            workspace_root,
+            dsw_path,
+            source,
+            function_name,
+            configuration,
+            out_dir,
+            project_name,
+            apply_safe_completions=apply_safe_completions,
+            run_tests=run_tests,
+            phase=phase,
+        )
+        paths = write_quick_summary(Path(out_dir), dossier, phase, _status_for_phase(phase))
+        dossier["quick_summary"] = {
+            "json": str(paths["json"]),
+            "markdown": str(paths["markdown"]),
+            "status": _status_for_phase(phase),
+        }
+        return dossier
+    finally:
+        clear_link_context()
 
 
 def _status_for_phase(phase: str) -> str:
