@@ -150,9 +150,12 @@ def _short_configuration(configuration: DspConfiguration) -> str:
     return configuration.name or configuration.full_name
 
 
-# Keep the core writer small and apply the legacy-IDE response-file workaround
-# as a compatibility layer, matching the build/harness compatibility pattern.
+# Keep the core writer small and apply compatibility layers for generated VC6 projects.
 from . import debug_workspace_writer as _debug_workspace_writer  # noqa: E402
+from .debug_workspace_link_compat import apply_debug_workspace_link_compat  # noqa: E402
+
+apply_debug_workspace_link_compat()
+
 from .debug_workspace_response import (  # noqa: E402
     write_vc6_debug_project as _write_vc6_debug_project,
     write_vc6_debug_suite as _write_vc6_debug_suite,
