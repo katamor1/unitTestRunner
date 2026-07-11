@@ -18,19 +18,7 @@ jobs:
           python-version: "3.12"
 
       - name: Run Python tests
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          py -m unittest discover -s tests -p "test_*.py" *>&1 | Tee-Object -FilePath python-test.log
-          exit $LASTEXITCODE
-
-      - name: Upload Python test log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-test-log
-          path: python-test.log
-          if-no-files-found: warn
+        run: py -m unittest discover -s tests -p "test_*.py"
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -45,15 +33,4 @@ jobs:
 
       - name: Run VS Code extension tests
         working-directory: vscode/extension
-        shell: pwsh
-        run: |
-          npm.cmd test *>&1 | Tee-Object -FilePath ..\..\node-test.log
-          exit $LASTEXITCODE
-
-      - name: Upload Node test log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: node-test-log
-          path: node-test.log
-          if-no-files-found: warn
+        run: npm.cmd test
