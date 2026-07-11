@@ -17,6 +17,7 @@ class PathLikeValue:
     normalized: str
     absolute: Path | None
     exists: bool | None
+    unresolved_macros: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -24,6 +25,7 @@ class PathLikeValue:
             "normalized": self.normalized,
             "absolute": _path_text(self.absolute),
             "exists": self.exists,
+            "unresolved_macros": list(self.unresolved_macros),
         }
 
 
@@ -79,6 +81,30 @@ class DspBuildSettings:
 
 
 @dataclass
+class DspLinkSettings:
+    libraries: list[str] = field(default_factory=list)
+    library_dirs: list[PathLikeValue] = field(default_factory=list)
+    output_file: PathLikeValue | None = None
+    import_library: PathLikeValue | None = None
+    output_dir: PathLikeValue | None = None
+    intermediate_dir: PathLikeValue | None = None
+    raw_options: list[str] = field(default_factory=list)
+    unresolved_macros: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "libraries": list(self.libraries),
+            "library_dirs": [item.to_dict() for item in self.library_dirs],
+            "output_file": self.output_file.to_dict() if self.output_file else None,
+            "import_library": self.import_library.to_dict() if self.import_library else None,
+            "output_dir": self.output_dir.to_dict() if self.output_dir else None,
+            "intermediate_dir": self.intermediate_dir.to_dict() if self.intermediate_dir else None,
+            "raw_options": list(self.raw_options),
+            "unresolved_macros": list(self.unresolved_macros),
+        }
+
+
+@dataclass
 class DspConfiguration:
     full_name: str
     project_name: str | None
@@ -87,6 +113,9 @@ class DspConfiguration:
     compiler_base_options: list[str] = field(default_factory=list)
     compiler_options: list[str] = field(default_factory=list)
     build_settings: DspBuildSettings = field(default_factory=DspBuildSettings)
+    linker_base_options: list[str] = field(default_factory=list)
+    linker_options: list[str] = field(default_factory=list)
+    link_settings: DspLinkSettings = field(default_factory=DspLinkSettings)
     line_number: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -98,6 +127,9 @@ class DspConfiguration:
             "compiler_base_options": list(self.compiler_base_options),
             "compiler_options": list(self.compiler_options),
             "build_settings": self.build_settings.to_dict(),
+            "linker_base_options": list(self.linker_base_options),
+            "linker_options": list(self.linker_options),
+            "link_settings": self.link_settings.to_dict(),
             "line_number": self.line_number,
         }
 
