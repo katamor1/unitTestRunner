@@ -307,15 +307,32 @@ export function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const initialRunningLabel = ${JSON.stringify(runningLabel ?? '')};
-    const persistedState = vscode.getState() || {};
+    function readWebviewState() {
+      return vscode.getState() || {};
+    }
+    function updateWebviewState(patch) {
+      vscode.setState({ ...readWebviewState(), ...patch });
+    }
     function setPanelMode(mode) {
       const safeMode = mode === 'full' ? 'full' : 'simple';
       document.getElementById('simplePanel')?.classList.toggle('hidden', safeMode !== 'simple');
       document.getElementById('fullPanel')?.classList.toggle('hidden', safeMode !== 'full');
       document.querySelectorAll('button[data-view-mode]').forEach((button) => button.classList.toggle('active-mode', button.dataset.viewMode === safeMode));
-      vscode.setState({ ...persistedState, panelMode: safeMode });
+      updateWebviewState({ panelMode: safeMode });
     }
-    setPanelMode(persistedState.panelMode || 'simple');
+    const initialState = readWebviewState();
+    const settingsPanel = document.getElementById('unitTestRunnerSettings');
+    if (settingsPanel) {
+      if (typeof initialState.settingsOpen === 'boolean') {
+        settingsPanel.open = initialState.settingsOpen;
+      } else {
+        updateWebviewState({ settingsOpen: settingsPanel.open });
+      }
+      settingsPanel.addEventListener('toggle', () => {
+        updateWebviewState({ settingsOpen: settingsPanel.open });
+      });
+    }
+    setPanelMode(initialState.panelMode || 'simple');
     function disableButtons(activeButton, label) {
       const runningText = label || '処理';
       document.querySelectorAll('button[data-kind], button[data-setting-kind]').forEach((button) => {
@@ -340,6 +357,9 @@ export function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState
     document.querySelectorAll('button[data-setting-kind]').forEach((button) => {
       button.addEventListener('click', () => {
         const label = button.textContent || '設定操作';
+        if (settingsPanel) {
+          updateWebviewState({ settingsOpen: settingsPanel.open });
+        }
         disableButtons(button, label);
         vscode.postMessage({ type: 'settingsAction', kind: button.dataset.settingKind, fieldId: button.dataset.fieldId, label });
       });

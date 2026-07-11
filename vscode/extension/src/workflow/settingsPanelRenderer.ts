@@ -3,7 +3,7 @@ import { SettingsAction, SettingsFieldId, SettingsViewModel } from '../config/se
 export function renderSettings(settings: SettingsViewModel): string {
   const readyLabel = settings.ready ? '設定確認は完了しています。' : '未設定の必須項目があります。';
   const openAttribute = settings.ready && settings.warnings.length === 0 ? '' : ' open';
-  return `<details class="settings"${openAttribute}>
+  return `<details id="unitTestRunnerSettings" class="settings"${openAttribute}>
   <summary class="settings-summary">
     <h2>設定</h2>
     <span class="settings-toggle settings-collapsed-label">設定を表示</span>
