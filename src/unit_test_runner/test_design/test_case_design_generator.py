@@ -13,6 +13,7 @@ from .test_case_models import (
     CoverageTestDesignSummary,
     TestCaseDesign,
     TestCaseDesignReport,
+    TestDependencyOverride,
     TestCaseGenerationPolicy,
     TestCoverageLink,
     TestExecutionStep,
@@ -27,6 +28,8 @@ def generate_test_case_design(
     coverage_design: Any,
     boundary_candidates: Any,
     policy: TestCaseGenerationPolicy | None = None,
+    dependency_policy: Any | None = None,
+    existing_design: dict | None = None,
 ) -> TestCaseDesignReport:
     policy = policy or TestCaseGenerationPolicy()
     signature_payload = _as_dict(function_signature)
@@ -34,6 +37,8 @@ def generate_test_case_design(
     call_payload = _as_dict(call_report)
     coverage_payload = _as_dict(coverage_design)
     boundary_payload = _as_dict(boundary_candidates)
+    dependency_payload = _as_optional_dict(dependency_policy)
+    existing_payload = existing_design or {}
     function = signature_payload["function"]
     source = signature_payload.get("source", {})
     cases: list[TestCaseDesign] = []
@@ -64,6 +69,7 @@ def generate_test_case_design(
             input_assignments=inputs,
             state_setups=states,
             stub_setups=stubs,
+            dependency_overrides=_dependency_overrides_for_case(test_case_id, dependency_payload, existing_payload),
             execution_steps=_execution_steps(function["name"]),
             expected_observations=observations,
             coverage_links=[
@@ -112,14 +118,61 @@ def generate_test_case_design_from_payloads(
     coverage_design: dict,
     boundary_candidates: dict,
     policy: TestCaseGenerationPolicy | None = None,
+    dependency_policy: dict | None = None,
+    existing_design: dict | None = None,
 ) -> TestCaseDesignReport:
-    return generate_test_case_design(function_signature, global_access, call_report, coverage_design, boundary_candidates, policy)
+    return generate_test_case_design(
+        function_signature,
+        global_access,
+        call_report,
+        coverage_design,
+        boundary_candidates,
+        policy,
+        dependency_policy,
+        existing_design,
+    )
 
 
 def _as_dict(value: Any) -> dict:
     if isinstance(value, dict):
         return value
     return value.to_dict()
+
+
+def _as_optional_dict(value: Any | None) -> dict:
+    if value is None:
+        return {}
+    return _as_dict(value)
+
+
+def _dependency_overrides_for_case(
+    test_case_id: str,
+    dependency_policy: dict,
+    existing_design: dict,
+) -> list[TestDependencyOverride]:
+    known = {str(item.get("callee")) for item in dependency_policy.get("dependencies", []) if item.get("callee")}
+    existing_case = next(
+        (item for item in existing_design.get("test_cases", []) if item.get("test_case_id") == test_case_id),
+        None,
+    )
+    if not existing_case:
+        return []
+    result: list[TestDependencyOverride] = []
+    for item in existing_case.get("dependency_overrides", []):
+        callee = str(item.get("callee") or "").strip()
+        mode = str(item.get("mode") or "inherit").strip()
+        if not callee or mode not in {"inherit", "real", "stub"}:
+            continue
+        review_required = bool(item.get("review_required", False)) or (bool(known) and callee not in known)
+        result.append(
+            TestDependencyOverride(
+                callee=callee,
+                mode=mode,
+                rationale=str(item.get("rationale") or ""),
+                review_required=review_required,
+            )
+        )
+    return result
 
 
 def _preconditions(function_name: str, has_stubs: bool) -> list[TestPrecondition]:

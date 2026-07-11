@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 from .c90_writer import sha256_file
+from .dependency_dispatcher import apply_dependency_dispatcher, augment_call_report_for_dependency_policy
 from .harness_report_writer import write_harness_report
 from .harness_skeleton_generator import generate_harness_skeleton as _generate_harness_skeleton
 from .parameter_init_compat import apply_parameter_init_compat
@@ -22,15 +24,30 @@ def generate_harness_skeleton(
     test_case_design: Any,
     output_root: Path | str,
     overwrite: bool = False,
+    dependency_policy: Any | None = None,
 ):
-    report = _generate_harness_skeleton(function_signature, global_access, call_report, test_case_design, output_root, overwrite)
     output_root = Path(output_root).resolve()
+    policy = dependency_policy or _load_dependency_policy(output_root)
+    augmented_call_report = augment_call_report_for_dependency_policy(call_report, policy)
+    report = _generate_harness_skeleton(function_signature, global_access, augmented_call_report, test_case_design, output_root, overwrite)
     changed = []
+    changed.extend(apply_dependency_dispatcher(output_root, policy, test_case_design, report))
     changed.extend(reflect_state_setups(output_root, test_case_design, report.function_name))
     changed.append(enhance_runner_output(output_root, report.function_name, report.test_skeletons))
     _refresh_generated_file_hashes(output_root, report, changed)
     write_harness_report(output_root, report)
     return report
+
+
+def _load_dependency_policy(output_root: Path) -> dict[str, Any] | None:
+    path = output_root / "reports" / "dependency_policy.json"
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def _refresh_generated_file_hashes(output_root: Path, report, changed_paths: list[Path]) -> None:

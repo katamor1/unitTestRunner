@@ -26,6 +26,7 @@ from ..c_analyzer.signature_extractor import extract_signature
 from ..c_analyzer.signature_writer import write_function_signature
 from ..c_analyzer.source_digest import build_source_digest, write_source_digest
 from ..harness import generate_harness_skeleton
+from ..dependency_policy import analyze_dependency_policy, write_dependency_policy
 from ..execution import prepare_test_execution_evidence
 from ..path_utils import normalize_relative
 from ..test_design import generate_test_design
@@ -259,6 +260,21 @@ def analyze_function_workflow(
     global_access_paths = write_global_access(out_dir, global_access)
     call_report = analyze_calls(digest, location, signature, global_access)
     call_report_paths = write_call_report(out_dir, call_report)
+    existing_dependency_policy = _read_existing_json(out_dir / "reports" / "dependency_policy.json")
+    project_sources = [workspace_root / item for item in project.get("sources", [])]
+    project_headers = [workspace_root / item for item in project.get("headers", [])]
+    dependency_policy = analyze_dependency_policy(
+        workspace_root=workspace_root,
+        target_source=source_path,
+        source_digest=digest,
+        function_signature=signature,
+        global_access=global_access,
+        call_report=call_report,
+        project_sources=project_sources,
+        project_headers=project_headers,
+        existing_policy=existing_dependency_policy,
+    )
+    dependency_policy_paths = write_dependency_policy(out_dir, dependency_policy)
     coverage_design = analyze_coverage_design(digest, location, signature, global_access, call_report)
     coverage_design_paths = write_coverage_design(out_dir, coverage_design)
     boundary_candidates = generate_boundary_equivalence_candidates(signature, global_access, call_report, coverage_design)
@@ -273,10 +289,26 @@ def analyze_function_workflow(
     test_execution = None
     evidence_manifest = None
     if phase_rank >= _analysis_phase_rank("design"):
-        test_case_design = generate_test_case_design(signature, global_access, call_report, coverage_design, boundary_candidates)
+        existing_test_case_design = _read_existing_json(out_dir / "reports" / "test_case_design.json")
+        test_case_design = generate_test_case_design(
+            signature,
+            global_access,
+            call_report,
+            coverage_design,
+            boundary_candidates,
+            dependency_policy=dependency_policy,
+            existing_design=existing_test_case_design,
+        )
         test_case_design_paths = write_test_case_design_report(out_dir, test_case_design)
     if phase_rank >= _analysis_phase_rank("harness"):
-        harness_skeleton = generate_harness_skeleton(signature, global_access, call_report, test_case_design, out_dir)
+        harness_skeleton = generate_harness_skeleton(
+            signature,
+            global_access,
+            call_report,
+            test_case_design,
+            out_dir,
+            dependency_policy=dependency_policy,
+        )
     if phase_rank >= _analysis_phase_rank("build"):
         build_workspace, build_probe = generate_build_workspace(
             dossier["build_context"],
@@ -326,6 +358,11 @@ def analyze_function_workflow(
         "json": str(call_report_paths["json"]),
         "markdown": str(call_report_paths["markdown"]),
         "status": call_report.status,
+    }
+    dossier["dependency_policy"] = {
+        "json": str(dependency_policy_paths["json"]),
+        "markdown": str(dependency_policy_paths["markdown"]),
+        "status": dependency_policy.status,
     }
     dossier["coverage_design"] = {
         "json": str(coverage_design_paths["json"]),
@@ -390,9 +427,11 @@ def analyze_function_workflow(
     write_function_signature(out_dir, signature)
     write_global_access(out_dir, global_access)
     write_call_report(out_dir, call_report)
+    write_dependency_policy(out_dir, dependency_policy)
     write_coverage_design(out_dir, coverage_design)
     write_boundary_equivalence_candidates(out_dir, boundary_candidates)
-    write_test_case_design_report(out_dir, test_case_design)
+    if test_case_design is not None:
+        write_test_case_design_report(out_dir, test_case_design)
     _write_json(out_dir / "generated" / "prompt_pack.json", {"function_dossier": dossier})
     return dossier
 
@@ -404,14 +443,19 @@ def generate_harness_skeleton_from_reports(
     test_case_design_path: Path | str,
     out: Path | str,
     overwrite: bool = False,
+    dependency_policy_path: Path | str | None = None,
 ):
+    call_report_path = Path(call_report_path)
+    policy_path = Path(dependency_policy_path) if dependency_policy_path else call_report_path.parent / "dependency_policy.json"
+    dependency_policy = _read_json(policy_path) if policy_path.exists() else None
     report = generate_harness_skeleton(
         _read_json(Path(function_signature_path)),
         _read_json(Path(global_access_path)),
-        _read_json(Path(call_report_path)),
+        _read_json(call_report_path),
         _read_json(Path(test_case_design_path)),
         Path(out),
         overwrite=overwrite,
+        dependency_policy=dependency_policy,
     )
     return report
 
@@ -574,6 +618,16 @@ def _legacy_report_from_csv_dossier(dossier: dict[str, Any], dossier_path: Path)
 
 def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _read_existing_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        value = _read_json(path)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def _test_design_target(default_dir: Path, output_format: str, out: Path | str | None) -> Path:

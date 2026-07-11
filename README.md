@@ -105,6 +105,56 @@ py -m unit_test_runner --json prepare-evidence --workspace $out
 
 `function_dossier.json` は通常解析後もレビュー確定後も公開dossier成果物です。確定後も `target`、`project_membership`、`build_context`、`function`、`test_design`、`diagnostics` を維持し、`artifact_index`、`traceability`、`review_items`、`unresolved_items`、`next_actions`、`readiness` などのレビュー用情報を追加します。
 
+
+## 依存関係ポリシーと衝突回避スタブ
+
+関数解析では、テスト対象関数から各呼び出し先への関係を `reports/dependency_policy.json` と `reports/dependency_policy.md` に出力します。呼び出し先ごとの既定方針は次の3種類です。
+
+- `real`: 実在する呼び出し先のC実装をテストworkspaceへ追加して実行する
+- `stub`: 実関数と異なる生成シンボルを使い、戻り値や呼び出し回数をテスト側で制御する
+- `auto`: 共有グローバル、ポインタ引数、副作用、実装の所在、機能境界の証拠から `real` / `stub` を解決する
+
+`configured_mode` は利用者が指定した方針、`resolved_mode` は解析後の実効方針です。`auto` で安全に決定できない場合は `review_required` となり、勝手にリンク構成を決めません。明示的に変更する場合は、`dependency_policy.json` の対象エントリを編集してから Quick Check または関数解析を再実行し、`resolved_mode` と生成物を更新します。
+
+```json
+{
+  "callee": "Helper_Update",
+  "configured_mode": "real",
+  "resolved_mode": "real"
+}
+```
+
+通常は関係ごとの既定方針を継承します。特定のテストケースだけ切り替える場合は、`test_case_design.json` の `dependency_overrides` を使います。
+
+```json
+{
+  "test_case_id": "TC_ErrorPath",
+  "dependency_overrides": [
+    {
+      "callee": "Helper_Update",
+      "mode": "stub",
+      "rationale": "異常戻り値を再現するため"
+    }
+  ]
+}
+```
+
+生成コードは製品シンボルと同名のスタブを定義しません。抽出した対象Cの検証済み直接呼び出しだけを `Utr_Dep_<関数名>` へ書き換え、ディスパッチャが `real` または `Utr_Stub_<関数名>_Invoke` を選びます。本番ソースは変更しません。関数マクロ、関数ポインタ、構造体メンバ経由の呼び出し、関数アドレス利用は自動書き換えせず `review_required` にします。
+
+外部グローバルはworkspace単位で `real` / `fixture` / `auto` を解決します。実定義が一意なら生成側で重複定義せず、宣言しかない場合だけ宣言互換のfixtureを1つ生成します。テストケース単位では結合先を切り替えず、同じオブジェクトの初期値・期待値だけを変更します。
+
+CLIでハーネスだけを再生成する場合、`--dependency-policy` は任意です。省略時は `call_report.json` と同じ `reports` フォルダの `dependency_policy.json` を自動で読みます。
+
+```powershell
+py -m unit_test_runner --json generate-harness-skeleton `
+  --function-signature "$out\reports\function_signature.json" `
+  --global-access "$out\reports\global_access.json" `
+  --call-report "$out\reports\call_report.json" `
+  --test-case-design "$out\reports\test_case_design.json" `
+  --dependency-policy "$out\reports\dependency_policy.json" `
+  --out $out --overwrite
+```
+
 ## 実用fixture
 
 より密な解析確認には `tests/fixtures/vc6_practical_project` を使います。`DeviceControl_Update` の周辺に、externグローバル、file-scope static、関数ポインタ、構造体メンバ、配列、function-like macro、複数関数の呼び出し木を含めています。

@@ -108,6 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
     harness.add_argument("--global-access", required=True)
     harness.add_argument("--call-report", required=True)
     harness.add_argument("--test-case-design", required=True)
+    harness.add_argument("--dependency-policy")
     harness.add_argument("--out", required=True)
     harness.add_argument("--overwrite", action="store_true")
 

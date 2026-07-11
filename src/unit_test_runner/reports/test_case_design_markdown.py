@@ -59,6 +59,12 @@ def render_test_case_design_markdown(payload: dict) -> str:
                 lines.append(f"| {setup['stub_name']} | {md_label_cell(setup['setup_kind'])} | {md_cell(setup['value_expression'] or setup['call_behavior'] or '')} | {'はい' if setup['review_required'] else 'いいえ'} |")
         else:
             lines.append("| なし | | | |")
+        lines.extend(["", "#### 依存関係上書き", "", "| 呼び出し先 | モード | 理由 | レビュー要否 |", "|---|---|---|---|"])
+        if case.get("dependency_overrides"):
+            for override in case["dependency_overrides"]:
+                lines.append(f"| {override['callee']} | {override['mode']} | {md_cell(override.get('rationale', ''))} | {'はい' if override.get('review_required') else 'いいえ'} |")
+        else:
+            lines.append("| なし | inherit | | |")
         lines.extend(["", "#### 期待観測", "", "| 種別 | 対象 | 期待値 | レビュー要否 |", "|---|---|---|---|"])
         for observation in case["expected_observations"]:
             lines.append(f"| {md_label_cell(observation['observation_kind'])} | {observation['target_name'] or ''} | {md_cell(observation['expected_expression'] or '')} | {'はい' if observation['review_required'] else 'いいえ'} |")

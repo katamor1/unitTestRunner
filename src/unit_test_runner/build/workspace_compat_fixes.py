@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -142,6 +143,80 @@ def _reference_transitive_header_includes(
                 header_queue.append(included)
 
 
+
+def _copy_dependency_sources(
+    output_root: Path,
+    build_context: dict[str, Any],
+    harness_report: dict[str, Any],
+    copied_files: list[WorkspaceFile],
+    diagnostics: list[BuildDiagnostic],
+) -> None:
+    """Copy real dependency/object C files while retaining headers by reference."""
+    output_root = Path(output_root).resolve()
+    workspace_root = Path(build_context.get("workspace_root") or "")
+    include_roots = bwg._include_search_roots(workspace_root, build_context)
+    referenced_dirs = _HEADER_REFERENCE_DIRS_BY_OUTPUT.setdefault(str(output_root), set())
+    copied_sources: set[Path] = set()
+    for item in copied_files:
+        if item.source_path is None or not item.source_path.exists():
+            continue
+        try:
+            copied_sources.add(item.source_path.resolve())
+        except OSError:
+            copied_sources.add(item.source_path)
+
+    def copy_source(raw_source: Any, file_kind: str, root_folder: str) -> None:
+        if not raw_source:
+            return
+        source = Path(str(raw_source))
+        if not source.is_absolute():
+            source = workspace_root / source
+        try:
+            source = source.resolve()
+        except OSError:
+            pass
+        if source in copied_sources:
+            return
+        if not source.is_file():
+            diagnostics.append(BuildDiagnostic(f"missing_{file_kind}", "error", f"Required product source is missing: {source}", source, None, None))
+            return
+        copied_sources.add(source)
+        relative = bwg._relative_or_name(source, workspace_root) if workspace_root.as_posix() else Path(source.name)
+        workspace_path = Path(root_folder) / relative
+        bwg._copy_file(source, output_root / workspace_path, copied_files, workspace_path, file_kind, diagnostics)
+        referenced_dirs.add(source.parent)
+        header_queue: list[Path] = []
+        for include_target in bwg._quote_include_targets(source):
+            included = bwg._resolve_quoted_include(source, include_target, include_roots)
+            if included is None:
+                diagnostics.append(BuildDiagnostic("missing_dependency_include", "warning", f"Product source include not found while preparing build workspace: {include_target}", source, None, None))
+                continue
+            _reference_header(included, workspace_root, copied_files, diagnostics, header_queue, referenced_dirs)
+        _reference_transitive_header_includes(workspace_root, include_roots, copied_files, diagnostics, header_queue, referenced_dirs)
+
+    for dispatch in harness_report.get("dependency_dispatches", []):
+        if dispatch.get("real_available") and dispatch.get("implementation_source"):
+            copy_source(dispatch.get("implementation_source"), "dependency_source", "extracted/dependencies")
+
+    policy = _load_dependency_policy(output_root)
+    for external_object in policy.get("external_objects", []):
+        if external_object.get("resolved_mode") != "real":
+            continue
+        definition_source = external_object.get("definition_source")
+        if not definition_source:
+            diagnostics.append(BuildDiagnostic("external_object_definition_missing", "error", f"External object {external_object.get('symbol', '')} is configured as real but has no definition source.", None, None, None))
+            continue
+        copy_source(definition_source, "external_object_source", "extracted/external_objects")
+
+
+def _load_dependency_policy(output_root: Path) -> dict[str, Any]:
+    path = Path(output_root) / "reports" / "dependency_policy.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
 def _include_dirs(output_root: Path, build_context: dict[str, Any]) -> list[BuildPathEntry]:
     output_root = Path(output_root).resolve()
     entries: list[BuildPathEntry] = []
@@ -158,6 +233,7 @@ def _include_dirs(output_root: Path, build_context: dict[str, Any]) -> list[Buil
     append("generated/harness", Path("generated/harness"), output_root / "generated" / "harness", (output_root / "generated" / "harness").exists(), "generated_include")
     append("generated/stubs", Path("generated/stubs"), output_root / "generated" / "stubs", (output_root / "generated" / "stubs").exists(), "generated_include")
     append("generated/tests", Path("generated/tests"), output_root / "generated" / "tests", (output_root / "generated" / "tests").exists(), "generated_include")
+    append("generated/dependencies", Path("generated/dependencies"), output_root / "generated" / "dependencies", (output_root / "generated" / "dependencies").exists(), "generated_include")
     append("extracted/include", Path("extracted/include"), output_root / "extracted" / "include", (output_root / "extracted" / "include").exists(), "extracted_include")
 
     for directory in sorted(_HEADER_REFERENCE_DIRS_BY_OUTPUT.get(str(output_root), set()), key=lambda item: item.as_posix().lower()):
@@ -196,25 +272,77 @@ def _makefile_include_arg(entry: BuildPathEntry) -> str:
 
 
 def _generate_extern_global_definitions(output_root: Path, copied_files: list[WorkspaceFile], diagnostics: list[BuildDiagnostic]) -> list[WorkspaceFile]:
-    del diagnostics
     output_root = Path(output_root).resolve()
-    target_sources = [item for item in copied_files if item.file_kind == "target_source" and item.exists]
-    target_source_texts = [_workspace_or_source_text(output_root, item) for item in target_sources]
+    destination = output_root / "generated/stubs/utr_extern_globals.c"
+    if destination.exists():
+        destination.unlink()
+
+    policy = _load_dependency_policy(output_root)
+    object_policies = {
+        str(item.get("symbol")): item
+        for item in policy.get("external_objects", [])
+        if item.get("symbol")
+    }
+    for symbol, item in object_policies.items():
+        if item.get("resolved_mode") == "review_required" or item.get("review_status") == "review_required":
+            diagnostics.append(
+                BuildDiagnostic(
+                    "external_object_binding_review_required",
+                    "error",
+                    f"External object {symbol} has no safe automatic binding. Review dependency_policy.json.",
+                    Path(str(item.get("declaration_header"))) if item.get("declaration_header") else None,
+                    None,
+                    None,
+                )
+            )
+
+    source_items = [
+        item
+        for item in copied_files
+        if item.file_kind in {"target_source", "dependency_source", "external_object_source"} and item.exists
+    ]
+    source_texts = [_workspace_or_source_text(output_root, item) for item in source_items]
     definitions: dict[str, tuple[str, str]] = {}
+    matched_fixture_symbols: set[str] = set()
     for header in [item for item in copied_files if item.file_kind == "target_header" and item.exists]:
         header_text = _workspace_or_source_text(output_root, header)
         for prefix, name, array in bwg._extern_variable_declarations(header_text):
-            if name in definitions or bwg._target_source_defines_name(name, target_source_texts):
+            item_policy = object_policies.get(name)
+            mode = str(item_policy.get("resolved_mode")) if item_policy else "fixture"
+            if mode == "real" or mode == "review_required":
+                continue
+            if name in definitions:
+                matched_fixture_symbols.add(name)
+                continue
+            if bwg._target_source_defines_name(name, source_texts):
+                if item_policy and mode == "fixture":
+                    diagnostics.append(BuildDiagnostic("external_object_fixture_conflict", "error", f"Fixture binding for {name} conflicts with a linked product definition.", header.source_path or header.workspace_path, None, None))
                 continue
             declaration = bwg._extern_definition_line(prefix, name, array)
             if declaration:
-                definitions[name] = (declaration, _include_token_for_header(header))
+                include_token = str(item_policy.get("declaration_header") or "").replace("\\", "/") if item_policy else ""
+                definitions[name] = (declaration, include_token or _include_token_for_header(header))
+                matched_fixture_symbols.add(name)
+
+    for symbol, item in object_policies.items():
+        if item.get("resolved_mode") == "fixture" and symbol not in matched_fixture_symbols:
+            diagnostics.append(
+                BuildDiagnostic(
+                    "external_object_fixture_declaration_missing",
+                    "error",
+                    f"Fixture binding for {symbol} could not find a compatible extern declaration in referenced headers.",
+                    Path(str(item.get("declaration_header"))) if item.get("declaration_header") else None,
+                    None,
+                    None,
+                )
+            )
+
     if not definitions:
         return []
     relative = Path("generated/stubs/utr_extern_globals.c")
     lines = [
-        "/* generated extern data placeholders for function-level build probe */",
-        "/* review required: replace with product objects when a real integration build is needed */",
+        "/* generated extern data fixtures for function-level build probe */",
+        "/* bindings are selected by reports/dependency_policy.json */",
         "",
     ]
     included_headers: list[str] = []
@@ -224,13 +352,11 @@ def _generate_extern_global_definitions(output_root: Path, copied_files: list[Wo
             lines.append(f'#include "{include_path}"')
     lines.append("")
     for name, (definition, _include_path) in sorted(definitions.items()):
-        lines.append(f"/* placeholder for unresolved external data symbol: {name} */")
+        lines.append(f"/* fixture for declaration-only external object: {name} */")
         lines.append(definition)
     lines.append("")
-    destination = output_root / relative
     bwg.write_build_text(destination, "\n".join(lines))
     return [WorkspaceFile(relative, "extern_global_source", sha256=bwg.sha256_file(destination), copied=False, generated=True, required=False, exists=True)]
-
 
 def _workspace_or_source_text(output_root: Path, item: WorkspaceFile) -> str:
     if item.source_path is not None and not item.copied:
@@ -358,6 +484,7 @@ def apply_build_probe_compat_fixes() -> None:
     bwg._is_passthrough_include_dir = _is_passthrough_include_dir
     bwg._include_dir_path = _include_dir_path
     bwg._copy_target_and_headers = _copy_target_and_headers
+    bwg._copy_dependency_sources = _copy_dependency_sources
     bwg._include_dirs = _include_dirs
     bwg._makefile_include_arg = _makefile_include_arg
     bwg._generate_extern_global_definitions = _generate_extern_global_definitions

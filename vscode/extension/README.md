@@ -95,6 +95,8 @@ Quick Check用の主な設定:
 | `harness` | ハーネス雛形生成まで確認。 |
 | `build-dry-run` | build workspace / build probe dry-runまで。生成テスト実行はしません。 |
 
+Quick Checkの解析結果には `reports/dependency_policy.md` / `dependency_policy.json` も含まれます。呼び出し先ごとの既定値は `real` / `stub` / `auto` です。`configured_mode` を変更した場合はQuick Checkまたは関数解析を再実行します。特定ケースだけ切り替える場合は、`test_case_design.json` の `dependency_overrides` で `inherit` / `real` / `stub` を指定してから、ハーネス生成とビルドを再実行してください。マクロ、関数ポインタ、メンバ経由呼び出し、関数アドレス利用は自動書き換えせずレビュー対象になります。
+
 ---
 
 ## 正式フロー: Full Gate / Function Dossier

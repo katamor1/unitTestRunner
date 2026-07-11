@@ -123,6 +123,36 @@ class StubSkeleton:
 
 
 @dataclass
+class DependencyDispatch:
+    callee: str
+    dispatcher_name: str
+    stub_invoke_name: str
+    default_mode: str
+    real_available: bool
+    signature_resolution: str
+    related_call_ids: list[str]
+    rewrite_sites: list[dict[str, Any]]
+    implementation_source: Path | None = None
+    header_file: Path | None = None
+    source_file: Path | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "callee": self.callee,
+            "dispatcher_name": self.dispatcher_name,
+            "stub_invoke_name": self.stub_invoke_name,
+            "default_mode": self.default_mode,
+            "real_available": self.real_available,
+            "signature_resolution": self.signature_resolution,
+            "related_call_ids": self.related_call_ids,
+            "rewrite_sites": self.rewrite_sites,
+            "implementation_source": _path_text(self.implementation_source),
+            "header_file": _path_text(self.header_file),
+            "source_file": _path_text(self.source_file),
+        }
+
+
+@dataclass
 class TestSkeleton:
     test_case_id: str
     function_name: str
@@ -199,6 +229,7 @@ class HarnessSkeletonReport:
     unresolved_placeholders: list[UnresolvedPlaceholder]
     build_hints: list[BuildHint]
     warnings: list[HarnessGenerationWarning]
+    dependency_dispatches: list[DependencyDispatch] = field(default_factory=list)
     schema_version: str = "0.1"
 
     def to_dict(self) -> dict[str, Any]:
@@ -214,4 +245,5 @@ class HarnessSkeletonReport:
             "unresolved_placeholders": [item.to_dict() for item in self.unresolved_placeholders],
             "build_hints": [item.to_dict() for item in self.build_hints],
             "warnings": [warning.to_dict() for warning in self.warnings],
+            "dependency_dispatches": [item.to_dict() for item in self.dependency_dispatches],
         }
