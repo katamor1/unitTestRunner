@@ -2,13 +2,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 
 def _path_text(path: Path | None) -> str | None:
     if path is None:
         return None
     return path.as_posix()
+
+
+@dataclass(frozen=True)
+class TestRunRequest:
+    workspace: Path
+    executable: Path | None
+    timeout_seconds: int
+    allow_placeholder_tests: bool
+    run_id: str | None = None
 
 
 @dataclass
@@ -217,16 +226,20 @@ class ExecutionReviewItem:
 class EvidenceFile:
     path: Path
     file_kind: str
-    sha256: str | None
     required: bool
+    exists: bool
+    sha256: str | None
+    integrity_status: Literal["valid", "missing", "hash_mismatch"]
     description: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "path": _path_text(self.path),
             "file_kind": self.file_kind,
-            "sha256": self.sha256,
             "required": self.required,
+            "exists": self.exists,
+            "sha256": self.sha256,
+            "integrity_status": self.integrity_status,
             "description": self.description,
         }
 
@@ -240,6 +253,7 @@ class EvidenceSummary:
     failed_tests: int
     inconclusive_tests: int
     unresolved_review_count: int
+    test_green: bool
     ready_for_review: bool
 
     def to_dict(self) -> dict[str, Any]:
@@ -251,6 +265,7 @@ class EvidenceSummary:
             "failed_tests": self.failed_tests,
             "inconclusive_tests": self.inconclusive_tests,
             "unresolved_review_count": self.unresolved_review_count,
+            "test_green": self.test_green,
             "ready_for_review": self.ready_for_review,
         }
 

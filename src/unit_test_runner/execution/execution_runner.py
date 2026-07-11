@@ -4,11 +4,15 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from unit_test_runner.process_control import run_process_tree
 
 from .execution_models import ExecutableInfo, ExecutionCommand, ExecutionCommandResult, TestCaseExecutionResult, TestExecutionWarning, TestResultSummary
 from .runner_output_parser import parse_runner_output
+
+if TYPE_CHECKING:
+    from .run_paths import RunPaths
 
 
 def build_execution_command(
@@ -29,14 +33,20 @@ def build_execution_command(
     )
 
 
-def run_test_executable(workspace: Path | str, executable: ExecutableInfo | Path | str, timeout_seconds: int = 60):
+def run_test_executable(
+    workspace: Path | str,
+    executable: ExecutableInfo | Path | str,
+    timeout_seconds: int = 60,
+    *,
+    run_paths: RunPaths | None = None,
+):
     workspace = Path(workspace).resolve()
     executable_path = executable.path if isinstance(executable, ExecutableInfo) else Path(executable)
     started = datetime.now(timezone.utc)
     start = time.monotonic()
-    stdout_log = workspace / "logs" / "test_stdout.log"
-    stderr_log = workspace / "logs" / "test_stderr.log"
-    combined_log = workspace / "logs" / "test_execution.log"
+    stdout_log = run_paths.stdout_log if run_paths else workspace / "logs" / "test_stdout.log"
+    stderr_log = run_paths.stderr_log if run_paths else workspace / "logs" / "test_stderr.log"
+    combined_log = run_paths.combined_log if run_paths else workspace / "logs" / "test_execution.log"
     command_path = executable_path if executable_path.is_absolute() else workspace / executable_path
     completed = run_process_tree([str(command_path)], cwd=workspace, text=True, timeout_seconds=timeout_seconds)
     duration = int((time.monotonic() - start) * 1000)
@@ -49,7 +59,7 @@ def run_test_executable(workspace: Path | str, executable: ExecutableInfo | Path
         stderr_log.write_text(stderr, encoding="utf-8")
         combined_log.write_text(stdout + stderr, encoding="utf-8")
         parsed = parse_runner_output(stdout + stderr, exit_code=None, timed_out=True)
-        result = ExecutionCommandResult(None, started.isoformat(), datetime.now(timezone.utc).isoformat(), duration, Path("logs/test_stdout.log"), Path("logs/test_stderr.log"), Path("logs/test_execution.log"), True)
+        result = ExecutionCommandResult(None, started.isoformat(), datetime.now(timezone.utc).isoformat(), duration, _reported_log_path(workspace, stdout_log), _reported_log_path(workspace, stderr_log), _reported_log_path(workspace, combined_log), True)
         return result, parsed.summary, parsed.case_results, "timeout"
 
     exit_code = completed.returncode if completed.returncode is not None else 1
@@ -58,18 +68,25 @@ def run_test_executable(workspace: Path | str, executable: ExecutableInfo | Path
     combined_log.write_text(stdout + stderr, encoding="utf-8")
     parsed = parse_runner_output(stdout + stderr, exit_code=exit_code, timed_out=False)
     status = "passed" if exit_code == 0 and parsed.summary.failed == 0 and parsed.summary.crashed == 0 else "failed"
-    result = ExecutionCommandResult(exit_code, started.isoformat(), datetime.now(timezone.utc).isoformat(), duration, Path("logs/test_stdout.log"), Path("logs/test_stderr.log"), Path("logs/test_execution.log"), False)
+    result = ExecutionCommandResult(exit_code, started.isoformat(), datetime.now(timezone.utc).isoformat(), duration, _reported_log_path(workspace, stdout_log), _reported_log_path(workspace, stderr_log), _reported_log_path(workspace, combined_log), False)
     return result, parsed.summary, parsed.case_results, status
 
 
-def run_test_executable_cases(workspace: Path | str, executable: ExecutableInfo | Path | str, test_case_ids: list[str], timeout_seconds: int = 60):
+def run_test_executable_cases(
+    workspace: Path | str,
+    executable: ExecutableInfo | Path | str,
+    test_case_ids: list[str],
+    timeout_seconds: int = 60,
+    *,
+    run_paths: RunPaths | None = None,
+):
     workspace = Path(workspace).resolve()
     executable_path = executable.path if isinstance(executable, ExecutableInfo) else Path(executable)
     started = datetime.now(timezone.utc)
     start = time.monotonic()
-    stdout_log = workspace / "logs" / "test_stdout.log"
-    stderr_log = workspace / "logs" / "test_stderr.log"
-    combined_log = workspace / "logs" / "test_execution.log"
+    stdout_log = run_paths.stdout_log if run_paths else workspace / "logs" / "test_stdout.log"
+    stderr_log = run_paths.stderr_log if run_paths else workspace / "logs" / "test_stderr.log"
+    combined_log = run_paths.combined_log if run_paths else workspace / "logs" / "test_execution.log"
     command_path = executable_path if executable_path.is_absolute() else workspace / executable_path
     stdout_parts: list[str] = []
     stderr_parts: list[str] = []
@@ -106,7 +123,7 @@ def run_test_executable_cases(workspace: Path | str, executable: ExecutableInfo 
     combined_log.write_text("".join(stdout_parts) + "".join(stderr_parts), encoding="utf-8")
     summary = _summary_from_case_results(case_results)
     status = _status_from_case_results(summary, timed_out)
-    result = ExecutionCommandResult(exit_code, started.isoformat(), datetime.now(timezone.utc).isoformat(), duration, Path("logs/test_stdout.log"), Path("logs/test_stderr.log"), Path("logs/test_execution.log"), timed_out)
+    result = ExecutionCommandResult(exit_code, started.isoformat(), datetime.now(timezone.utc).isoformat(), duration, _reported_log_path(workspace, stdout_log), _reported_log_path(workspace, stderr_log), _reported_log_path(workspace, combined_log), timed_out)
     return result, summary, case_results, status
 
 
@@ -152,6 +169,13 @@ def _text_output(value: str | bytes | None) -> str:
     if isinstance(value, str):
         return value
     return value.decode(errors="replace")
+
+
+def _reported_log_path(workspace: Path, log_path: Path) -> Path:
+    try:
+        return log_path.relative_to(workspace)
+    except ValueError:
+        return log_path
 
 
 def environment_summary() -> dict[str, str]:

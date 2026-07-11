@@ -154,6 +154,8 @@ def valid_evidence_manifest() -> dict:
         "file_kind": "source",
         "sha256": SHA256,
         "required": True,
+        "exists": True,
+        "integrity_status": "valid",
         "description": "Target source",
     }
     return artifact_payload(
@@ -176,6 +178,7 @@ def valid_evidence_manifest() -> dict:
                 "failed_tests": 0,
                 "inconclusive_tests": 0,
                 "unresolved_review_count": 0,
+                "test_green": True,
                 "ready_for_review": True,
             },
         },

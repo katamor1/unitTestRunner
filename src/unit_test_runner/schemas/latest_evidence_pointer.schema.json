@@ -19,6 +19,21 @@
           "$ref": "common.schema.json#/$defs/latestEvidencePointerData"
         }
       }
+    },
+    {
+      "properties": {
+        "data": {
+          "properties": {
+            "evidence_manifest": {
+              "properties": {
+                "path": {
+                  "pattern": "^evidence/[^/]+/(?:evidence_manifest|manifest)\\.json$"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

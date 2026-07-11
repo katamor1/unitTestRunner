@@ -543,6 +543,8 @@
         "file_kind",
         "sha256",
         "required",
+        "exists",
+        "integrity_status",
         "description"
       ],
       "properties": {
@@ -558,6 +560,16 @@
         },
         "required": {
           "type": "boolean"
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "integrity_status": {
+          "enum": [
+            "valid",
+            "missing",
+            "hash_mismatch"
+          ]
         },
         "description": {
           "type": "string",
@@ -2844,6 +2856,7 @@
             "failed_tests",
             "inconclusive_tests",
             "unresolved_review_count",
+            "test_green",
             "ready_for_review"
           ],
           "properties": {
@@ -2874,6 +2887,9 @@
             "unresolved_review_count": {
               "type": "integer",
               "minimum": 0
+            },
+            "test_green": {
+              "type": "boolean"
             },
             "ready_for_review": {
               "type": "boolean"
