@@ -111,12 +111,15 @@ def _strip_quotes(value: str) -> str:
 
 
 def _path_like(raw: str, dsp_dir: Path, workspace_root: Path) -> PathLikeValue:
+    del workspace_root
     clean = _strip_quotes(raw)
     normalized = clean.replace("\\", "/")
-    if _macros(clean):
-        return PathLikeValue(raw=raw, normalized=normalized, absolute=None, exists=None)
-    absolute = (dsp_dir / normalized).resolve()
-    return PathLikeValue(raw=raw, normalized=normalized, absolute=absolute, exists=absolute.exists())
+    macros = _macros(clean)
+    if macros:
+        return PathLikeValue(raw=raw, normalized=normalized, absolute=None, exists=None, unresolved_macros=macros)
+    path = Path(normalized)
+    absolute = path.resolve() if path.is_absolute() else (dsp_dir / path).resolve()
+    return PathLikeValue(raw=raw, normalized=normalized, absolute=absolute, exists=absolute.exists(), unresolved_macros=[])
 
 
 def _macros(value: str) -> list[str]:

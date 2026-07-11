@@ -16,10 +16,12 @@ from .analysis_common import (
     split_top_level,
 )
 from .call_models import (
+    CallAnalyzerWarning,
     CallArgument,
     CallReport,
     CallSideEffectCandidate,
     FunctionCall,
+    LinkProvider,
     ReturnUsage,
     StubCandidate,
 )
@@ -29,22 +31,47 @@ from .signature_models import FunctionSignature
 from .source_models import SourceDigest
 
 
-STANDARD_LIBRARY = {"memcpy", "memset", "memcmp", "strcpy", "strncpy", "strcmp", "strlen", "sprintf", "printf", "malloc", "free", "abs", "labs"}
+STANDARD_LIBRARY = {
+    "abort", "abs", "acos", "asin", "atan", "atan2", "atof", "atoi", "atol", "calloc", "ceil",
+    "cos", "cosh", "exit", "exp", "fabs", "floor", "fmod", "free", "labs", "log", "log10",
+    "malloc", "memchr", "memcmp", "memcpy", "memmove", "memset", "pow", "printf", "puts", "qsort",
+    "rand", "realloc", "sin", "sinh", "sprintf", "sqrt", "srand", "strcat", "strchr", "strcmp",
+    "strcoll", "strcpy", "strcspn", "strlen", "strncat", "strncmp", "strncpy", "strpbrk",
+    "strrchr", "strspn", "strstr", "strtod", "strtok", "strtol", "strtoul", "tan", "tanh",
+    "vprintf", "vsprintf",
+    # Common VC/legacy CRT spellings. These are link-only runtime dependencies, not harness stubs.
+    "_abs64", "_finite", "_isnan", "_itoa", "_ltoa", "_snprintf", "_snwprintf", "_strcmpi",
+    "_stricmp", "_strdup", "_strlwr", "_strnicmp", "_strupr", "_ultoa", "_vsnprintf",
+}
 
 
-def analyze_calls(digest: SourceDigest, function_location: object, function_signature: FunctionSignature, global_access: GlobalAccessReport) -> CallReport:
+def analyze_calls(
+    digest: SourceDigest,
+    function_location: object,
+    function_signature: FunctionSignature,
+    global_access: GlobalAccessReport,
+    link_providers_by_name: dict[str, list[LinkProvider]] | None = None,
+    link_warnings: list[CallAnalyzerWarning] | None = None,
+) -> CallReport:
     body = body_text(digest, function_location, masked=True)
     original_body = body_text(digest, function_location, masked=False)
     base_offset = body_base_offset(function_location)
     defined = {item["name"]: item for item in list_functions(digest.source.path)}
     macro_names = {macro.name for macro in digest.macros if macro.is_function_like}
     parameter_names = {parameter.name for parameter in function_signature.parameters if parameter.name}
-    pointer_parameters = {parameter.name for parameter in function_signature.parameters if parameter.name and (parameter.type_info.pointer_level or parameter.type_info.is_array or parameter.type_info.is_function_pointer)}
+    pointer_parameters = {
+        parameter.name
+        for parameter in function_signature.parameters
+        if parameter.name and (parameter.type_info.pointer_level or parameter.type_info.is_array or parameter.type_info.is_function_pointer)
+    }
     globals_by_name = {declaration.name: declaration for declaration in global_access.file_scope_declarations}
     local_names = {declaration.name for declaration in global_access.local_declarations}
 
     calls: list[FunctionCall] = []
     side_effects: list[CallSideEffectCandidate] = []
+    warnings = list(link_warnings or [])
+    multiple_provider_warnings: set[str] = set()
+    provider_map = link_providers_by_name or {}
     for match in re.finditer(r"\b([A-Za-z_]\w*)\s*\(", body):
         name = match.group(1)
         if name in CONTROL_KEYWORDS or name == function_signature.function_name:
@@ -71,7 +98,17 @@ def analyze_calls(digest: SourceDigest, function_location: object, function_sign
             local_names,
             macro_names,
         )
-        target_kind = _target_kind(name, defined, macro_names, pointer_parameters)
+        providers = sorted(provider_map.get(name, []), key=lambda item: item.link_order)
+        target_kind = _target_kind(name, defined, macro_names, pointer_parameters, bool(providers))
+        if len(providers) > 1 and name not in multiple_provider_warnings:
+            multiple_provider_warnings.add(name)
+            warnings.append(
+                CallAnalyzerWarning(
+                    "multiple_library_symbol_providers",
+                    f"Multiple linked libraries provide {name}; the first library in link order is selected as the primary provider.",
+                    line_number=position_from_offset(digest.source.text, absolute_start).line,
+                )
+            )
         return_usage = _return_usage(digest.source.text, body, base_offset, match.start(), close_paren + 1)
         call = FunctionCall(
             call_id=call_id,
@@ -84,6 +121,8 @@ def analyze_calls(digest: SourceDigest, function_location: object, function_sign
             nesting_level=body[: match.start()].count("(") - body[: match.start()].count(")"),
             confidence="high" if target_kind != "unknown" else "low",
             evidence=evidence,
+            link_provider=providers[0] if providers else None,
+            link_providers=providers,
         )
         calls.append(call)
         side_effects.extend(_call_side_effects(call, arguments))
@@ -100,7 +139,7 @@ def analyze_calls(digest: SourceDigest, function_location: object, function_sign
         stub_candidates=stubs,
         side_effect_candidates=side_effects,
         unresolved_calls=unresolved,
-        warnings=[],
+        warnings=warnings,
     )
 
 
@@ -195,7 +234,7 @@ def _argument_kind(raw: str, parameters: set[str], pointer_parameters: set[str],
     return "expression", "unknown"
 
 
-def _target_kind(name: str, defined: dict[str, dict], macros: set[str], pointer_parameters: set[str]) -> str:
+def _target_kind(name: str, defined: dict[str, dict], macros: set[str], pointer_parameters: set[str], has_link_provider: bool = False) -> str:
     if name in macros:
         return "macro_like"
     if name in pointer_parameters:
@@ -204,6 +243,8 @@ def _target_kind(name: str, defined: dict[str, dict], macros: set[str], pointer_
         return "same_file_static_function" if defined[name].get("static") else "same_file_function"
     if name in STANDARD_LIBRARY:
         return "standard_library"
+    if has_link_provider:
+        return "linked_library_function"
     return "external_function"
 
 
@@ -261,7 +302,14 @@ def _stub_candidates(calls: list[FunctionCall]) -> list[StubCandidate]:
     candidates: list[StubCandidate] = []
     for name, related in grouped.items():
         return_needed = any(call.return_usage.usage_kind not in {"ignored", "unknown"} for call in related)
-        side_effect_needed = any(any(argument.passing_mode_hint in {"by_address", "pointer_or_array"} or argument.argument_kind in {"address_of_global", "address_of_local", "global"} for argument in call.arguments) for call in related)
+        side_effect_needed = any(
+            any(
+                argument.passing_mode_hint in {"by_address", "pointer_or_array"}
+                or argument.argument_kind in {"address_of_global", "address_of_local", "global"}
+                for argument in call.arguments
+            )
+            for call in related
+        )
         tags = ["external_dependency"] if any(call.target_kind == "external_function" for call in related) else ["unknown_dependency"]
         upper_name = name.upper()
         if any(hint.upper() in upper_name for hint in ("PORT", "IO", "DEVICE", "SENSOR", "REG")):
