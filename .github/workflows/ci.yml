@@ -17,6 +17,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Verify tracked Python sources
+        run: |
+          git ls-files --error-unmatch src/unit_test_runner/build/dependency_rewriter.py
+          py -m compileall -q src
+
       - name: Run Python tests
         run: py -m unittest discover -s tests -p "test_*.py"
 

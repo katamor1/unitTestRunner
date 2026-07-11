@@ -56,16 +56,32 @@ def generate_build_workspace(
     copied_files = _copy_target_and_headers(output_root, source_path, source_digest, build_context, function_name, diagnostics)
     _copy_dependency_sources(output_root, build_context, harness_report, copied_files, diagnostics)
     generated_files = _copy_or_verify_generated_files(output_root, harness_report, diagnostics)
-    _rewrite_target_dependency_calls(output_root, copied_files, harness_report, diagnostics)
+    dependency_rewrite_blocked = _rewrite_target_dependency_calls(
+        output_root,
+        copied_files,
+        harness_report,
+        diagnostics,
+    )
     generated_files.extend(_generate_extern_global_definitions(output_root, copied_files, diagnostics))
     include_dirs = _include_dirs(output_root, build_context)
     defines = _defines(build_context)
     compiler_options = _compiler_options(build_context)
     compile_units = _compile_units(output_root, copied_files, generated_files, include_dirs, defines, compiler_options)
     build_commands = _write_build_files(output_root, compile_units, include_dirs, defines, compiler_options, vcvars, dry_run, toolchain, cc)
-    status = "partial" if any(item.severity == "error" for item in diagnostics) else "generated"
+    if dependency_rewrite_blocked:
+        status = "blocked"
+    else:
+        status = "partial" if any(item.severity == "error" for item in diagnostics) else "generated"
     workspace_report = BuildWorkspaceReport(source_path, function_name, status, output_root, copied_files, [], [], compile_units, [unit.object_file for unit in compile_units], include_dirs, defines, compiler_options, build_commands, diagnostics)
-    probe_report = _build_probe_report(output_root, source_path, function_name, build_commands, compile_units, include_dirs, defines, compiler_options, harness_report, run_probe, dry_run, timeout_seconds, vcvars, toolchain, cc)
+    if dependency_rewrite_blocked:
+        probe_report = _blocked_dependency_rewrite_probe(
+            output_root,
+            source_path,
+            function_name,
+            diagnostics,
+        )
+    else:
+        probe_report = _build_probe_report(output_root, source_path, function_name, build_commands, compile_units, include_dirs, defines, compiler_options, harness_report, run_probe, dry_run, timeout_seconds, vcvars, toolchain, cc)
     write_build_reports(output_root, workspace_report, probe_report)
     return workspace_report, probe_report
 
@@ -510,10 +526,11 @@ def _rewrite_target_dependency_calls(
     copied_files: list[WorkspaceFile],
     harness_report: dict[str, Any],
     diagnostics: list[BuildDiagnostic],
-) -> None:
+) -> bool:
     dispatches = list(harness_report.get("dependency_dispatches", []))
     if not dispatches:
-        return
+        return False
+    blocked = False
     for item in copied_files:
         if item.file_kind != "target_source" or not item.exists:
             continue
@@ -522,23 +539,55 @@ def _rewrite_target_dependency_calls(
             original = decode_bytes_auto(path.read_bytes())
         except OSError as exc:
             diagnostics.append(BuildDiagnostic("dependency_call_rewrite_failed", "error", f"Could not read extracted target source: {exc}", item.workspace_path, None, None))
+            blocked = True
             continue
         rewritten, issues = rewrite_dependency_calls(original, dispatches)
         for issue in issues:
             diagnostics.append(
                 BuildDiagnostic(
-                    "dependency_call_rewrite_skipped",
-                    "warning",
-                    issue,
+                    "dependency_call_rewrite_failed",
+                    "error",
+                    f"{issue.code}: {issue.message}",
                     item.workspace_path,
                     None,
                     None,
                 )
             )
+            blocked = True
         if rewritten == original:
             continue
         path.write_text(rewritten, encoding="cp932", errors="replace")
         item.sha256 = sha256_file(path)
+    return blocked
+
+
+def _blocked_dependency_rewrite_probe(
+    output_root: Path,
+    source_path: Path,
+    function_name: str,
+    diagnostics: list[BuildDiagnostic],
+) -> BuildProbeReport:
+    rewrite_diagnostics = [
+        item for item in diagnostics if item.code == "dependency_call_rewrite_failed"
+    ]
+    log_path = output_root / "logs" / "build.log"
+    lines = ["BUILD BLOCKED", "Dependency call rewriting failed; no compiler was started."]
+    lines.extend(item.message for item in rewrite_diagnostics)
+    log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return BuildProbeReport(
+        source_path,
+        function_name,
+        "blocked",
+        False,
+        None,
+        [],
+        rewrite_diagnostics,
+        [],
+        [],
+        [],
+        [],
+        [Path("logs/build.log")],
+    )
 
 
 def _copy_or_verify_generated_files(output_root: Path, harness_report: dict[str, Any], diagnostics: list[BuildDiagnostic]) -> list[WorkspaceFile]:

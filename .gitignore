@@ -35,10 +35,11 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-.venv-release/
+/.venv-release/
 *.spec
-build/
-dist/
+/build/
+/dist/
 
 # Node / VS Code extension
 node_modules/
+vscode/extension/dist/
