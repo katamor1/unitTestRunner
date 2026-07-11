@@ -48,8 +48,12 @@ def run_verification_build(
     cc: Path | str | None = None,
     timeout_seconds: int = 120,
     env_setup: Path | str | None = None,
+    link_libraries: list[Path] | None = None,
+    library_dirs: list[Path] | None = None,
 ) -> VerificationBuildResult:
     output_root = Path(output_root).resolve()
+    link_libraries = [Path(item).resolve() for item in (link_libraries or [])]
+    library_dirs = [Path(item).resolve() for item in (library_dirs or [])]
     log_path = output_root / "logs" / "build.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     exe_path = output_root / "bin" / "utr_probe.exe"
@@ -102,7 +106,7 @@ def run_verification_build(
             return VerificationBuildResult(True, exit_code, command_text, log_text, diagnostics, compiler)
         object_paths.append(obj)
 
-    link_command = _link_command(compiler, flavor, object_paths, exe_path)
+    link_command = _link_command(compiler, flavor, object_paths, exe_path, link_libraries, library_dirs)
     link_command_text = _command_text(link_command)
     command_lines.append(link_command_text)
     exit_code, output = _run_command(link_command, cwd=output_root, timeout_seconds=timeout_seconds, env_setup=env_setup)
@@ -203,10 +207,35 @@ def _compile_command(
     ]
 
 
-def _link_command(compiler: str, flavor: str, object_paths: list[Path], exe_path: Path) -> list[str]:
+def _link_command(
+    compiler: str,
+    flavor: str,
+    object_paths: list[Path],
+    exe_path: Path,
+    link_libraries: list[Path] | None = None,
+    library_dirs: list[Path] | None = None,
+) -> list[str]:
+    link_libraries = list(link_libraries or [])
+    library_dirs = list(library_dirs or [])
     if flavor == "msvc":
-        return [compiler, "/nologo", *[str(path) for path in object_paths], f"/Fe{exe_path}"]
-    return [compiler, *[str(path) for path in object_paths], "-o", str(exe_path)]
+        return [
+            compiler,
+            "/nologo",
+            *[str(path) for path in object_paths],
+            *[str(path) for path in link_libraries],
+            f"/Fe{exe_path}",
+            "/link",
+            *[f"/LIBPATH:{path}" for path in library_dirs],
+        ]
+    supported_libraries = [path for path in link_libraries if path.suffix.lower() in {".a", ".so", ".dylib"}]
+    return [
+        compiler,
+        *[str(path) for path in object_paths],
+        *[f"-L{path}" for path in library_dirs],
+        *[str(path) for path in supported_libraries],
+        "-o",
+        str(exe_path),
+    ]
 
 
 def _run_command(command: list[str], cwd: Path, timeout_seconds: int, env_setup: Path | str | None = None) -> tuple[int, str]:
