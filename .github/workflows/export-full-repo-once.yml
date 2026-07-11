@@ -28,10 +28,10 @@ jobs:
           fetch-depth: 0
       - name: Archive repository including Git metadata
         shell: bash
-        run: tar --exclude=full-repo.tgz -czf full-repo.tgz .
+        run: tar -czf "$RUNNER_TEMP/full-repo.tgz" .
       - name: Upload repository archive
         uses: actions/upload-artifact@v4
         with:
           name: full-repository-workspace
-          path: full-repo.tgz
+          path: ${{ runner.temp }}/full-repo.tgz
           retention-days: 1
