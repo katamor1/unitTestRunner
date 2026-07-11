@@ -35,7 +35,7 @@
 - Consumes: `dispatches[*].callee`, `dispatcher_name`, and 1-based `rewrite_sites[*].start/end` positions from `harness_skeleton_report.json`.
 - Safety result: any mismatch is returned as a structured error; mismatched text is never rewritten and build generation becomes `blocked`.
 
-- [ ] **Step 1: Add a failing repository-ignore contract**
+- [x] **Step 1: Add a failing repository-ignore contract**
 
 Add a CI-contract test that runs:
 
@@ -55,7 +55,7 @@ PYTHONPATH=src python -m unittest tests.test_ci_contract -v
 
 Expected: FAIL because `.gitignore:40` contains unanchored `build/`.
 
-- [ ] **Step 2: Anchor build-output ignore rules**
+- [x] **Step 2: Anchor build-output ignore rules**
 
 Replace generic repository-wide entries with explicit output roots:
 
@@ -68,7 +68,7 @@ vscode/extension/dist/
 
 Run the test again. Expected: PASS.
 
-- [ ] **Step 3: Extend the rewriter regression tests**
+- [x] **Step 3: Extend the rewriter regression tests**
 
 Add cases for CRLF, two reverse-ordered replacements on one line, duplicate include suppression, mismatched callee text, member calls, and macro/address uses. Exact direct calls must change; all other uses must remain byte-for-byte unchanged.
 
@@ -80,7 +80,7 @@ PYTHONPATH=src python -m unittest tests.test_dependency_call_rewriter -v
 
 Expected: import failure before the file is created.
 
-- [ ] **Step 4: Implement the minimal position-checked rewriter**
+- [x] **Step 4: Implement the minimal position-checked rewriter**
 
 The implementation must return structured issues:
 
@@ -109,11 +109,11 @@ Run focused rewriter and dependency E2E tests. Expected: PASS, and product sourc
 
 Update `_rewrite_target_dependency_calls()` so any rewrite issue produces an error diagnostic, sets build workspace status to `blocked`, and prevents compile/run. Add an E2E where a `stub` policy has a mismatched site and assert the real callee is never executed.
 
-- [ ] **Step 5: Add a tracked-source preflight to CI**
+- [x] **Step 5: Add a tracked-source preflight to CI**
 
 Before Python tests, add a step that verifies the file exists in `git ls-files` and that `python -m compileall -q src` succeeds.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add .gitignore .github/workflows/ci.yml src/unit_test_runner/build/dependency_rewriter.py tests/test_dependency_call_rewriter.py tests/test_ci_contract.py
@@ -131,7 +131,7 @@ git commit -m "fix: restore dependency call rewriter and source tracking"
 
 **Interfaces:** None; this task establishes evidence for Tasks 3-5.
 
-- [ ] **Step 1: Run the complete Python suite**
+- [x] **Step 1: Run the complete Python suite**
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests -p "test_*.py" -v
@@ -139,7 +139,7 @@ PYTHONPATH=src python -m unittest discover -s tests -p "test_*.py" -v
 
 Expected after Task 1: no `ModuleNotFoundError`; approximately 250 tests discovered. Record exact failures without changing production code.
 
-- [ ] **Step 2: Run TypeScript tests**
+- [x] **Step 2: Run TypeScript tests**
 
 ```bash
 cd vscode/extension
@@ -149,7 +149,7 @@ npm test
 
 Expected on the current Linux diagnostic environment: compile succeeds, 38 pass and 5 Windows-path tests fail. Record platform and Node version.
 
-- [ ] **Step 3: Confirm CLI startup**
+- [x] **Step 3: Confirm CLI startup**
 
 ```bash
 PYTHONPATH=src python -m unit_test_runner --help
@@ -159,6 +159,13 @@ PYTHONPATH=src python -m unit_test_runner --json discover-projects --workspace t
 Expected: both exit 0 and JSON stdout contains no traceback.
 
 No commit is required unless the verification record is updated.
+
+Verification record (2026-07-11, Linux, Python 3.12.13, Node 24.14.0):
+
+- Python discovery reached 258 tests: 6 failures, 1 Linux-only `cmd.exe` error, and 1 skip. There were no import errors.
+- VS Code compilation succeeded; 43 tests ran: 38 passed and 5 failed on Windows-path interpretation.
+- `unit_test_runner --help` and JSON `discover-projects` both exited 0 without a traceback.
+- npm 11.9.0 required a writable `--cache /tmp/unit-test-runner-npm-cache` in the sandbox; this was an environment setup issue rather than a product failure.
 
 ---
 
