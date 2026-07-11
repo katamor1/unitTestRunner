@@ -29,7 +29,18 @@ from .signature_models import FunctionSignature
 from .source_models import SourceDigest
 
 
-STANDARD_LIBRARY = {"memcpy", "memset", "memcmp", "strcpy", "strncpy", "strcmp", "strlen", "sprintf", "printf", "malloc", "free", "abs", "labs"}
+STANDARD_LIBRARY = {
+    "abort", "abs", "acos", "asin", "atan", "atan2", "atof", "atoi", "atol", "calloc", "ceil",
+    "cos", "cosh", "exit", "exp", "fabs", "floor", "fmod", "free", "labs", "log", "log10",
+    "malloc", "memchr", "memcmp", "memcpy", "memmove", "memset", "pow", "printf", "puts", "qsort",
+    "rand", "realloc", "sin", "sinh", "sprintf", "sqrt", "srand", "strcat", "strchr", "strcmp",
+    "strcoll", "strcpy", "strcspn", "strlen", "strncat", "strncmp", "strncpy", "strpbrk",
+    "strrchr", "strspn", "strstr", "strtod", "strtok", "strtol", "strtoul", "tan", "tanh",
+    "vprintf", "vsprintf",
+    # Common VC/legacy CRT spellings. These are link-only runtime dependencies, not harness stubs.
+    "_abs64", "_finite", "_isnan", "_itoa", "_ltoa", "_snprintf", "_snwprintf", "_strcmpi",
+    "_stricmp", "_strdup", "_strlwr", "_strnicmp", "_strupr", "_ultoa", "_vsnprintf",
+}
 
 
 def analyze_calls(digest: SourceDigest, function_location: object, function_signature: FunctionSignature, global_access: GlobalAccessReport) -> CallReport:
