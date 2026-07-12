@@ -32,18 +32,34 @@ jobs:
           do
             base64 --decode --ignore-garbage "$part" >> "$RUNNER_TEMP/p1t6.bundle"
           done
-          wc -c "$RUNNER_TEMP/p1t6.bundle"
-          sha256sum "$RUNNER_TEMP/p1t6.bundle"
 
-      - name: Verify and import Git bundle
+      - name: Verify Git bundle
         shell: bash
         run: |
           set -euo pipefail
           git bundle verify "$RUNNER_TEMP/p1t6.bundle"
           git bundle list-heads "$RUNNER_TEMP/p1t6.bundle"
-          git bundle unbundle "$RUNNER_TEMP/p1t6.bundle"
+
+      - name: Fetch advertised task ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch "$RUNNER_TEMP/p1t6.bundle" \
+            "+refs/heads/codex/p1t6-review-decisions-readiness:refs/heads/p1t6-imported"
+
+      - name: Verify imported commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse refs/heads/p1t6-imported)" = \
+            "efbff7825b94afda01d86d15b8f0ec6be520225b"
           git cat-file -e \
             efbff7825b94afda01d86d15b8f0ec6be520225b^{commit}
+
+      - name: Validate bundle ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
           git merge-base --is-ancestor \
             b66790165a2d4f82943cd199b3b499e1f1725fc3 \
             efbff7825b94afda01d86d15b8f0ec6be520225b
@@ -53,4 +69,4 @@ jobs:
         run: |
           set -euo pipefail
           git push origin \
-            efbff7825b94afda01d86d15b8f0ec6be520225b:refs/heads/codex/p1t6-review-decisions-readiness
+            refs/heads/p1t6-imported:refs/heads/codex/p1t6-review-decisions-readiness
