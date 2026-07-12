@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import shutil
 import tempfile
@@ -139,6 +140,88 @@ def _single_view_identity(path: Path) -> tuple[int, str]:
 
 
 class TestSpecFormalReviewWriterSnapshotTests(unittest.TestCase):
+    def test_external_custom_view_cli_inventory_uses_explicit_output_root(self):
+        for output_format in ("md", "csv"):
+            with self.subTest(output_format=output_format), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                out = root / "canonical-workspace" / "Control_Update"
+                external = root / "external-views" / f"review.{output_format}"
+                dossier_workflow.analyze_function_workflow(
+                    FIXTURE,
+                    FIXTURE / "Product.dsw",
+                    "src/control.c",
+                    "Control_Update",
+                    "Win32 Debug",
+                    out,
+                    "Control",
+                    phase="design",
+                )
+                reports = out / "reports"
+                canonical = reports / "test_spec.json"
+                fixed_before = {
+                    suffix: (reports / f"test_spec.{suffix}").read_bytes()
+                    for suffix in ("md", "csv")
+                }
+
+                result = commands_module.handle_generate_test_design(
+                    Namespace(
+                        dossier=None,
+                        function_signature=str(reports / "function_signature.json"),
+                        global_access=str(reports / "global_access.json"),
+                        call_report=str(reports / "call_report.json"),
+                        coverage_design=str(reports / "coverage_design.json"),
+                        boundary_candidates=str(
+                            reports / "boundary_equivalence_candidates.json"
+                        ),
+                        format=output_format,
+                        out=str(external),
+                        command="generate-test-design",
+                    )
+                )
+
+                self.assertEqual(0, result.exit_code)
+                self.assertTrue(external.is_file())
+                self.assertEqual(
+                    {"test_spec", f"test_spec_{'markdown' if output_format == 'md' else 'csv'}"},
+                    {artifact.kind for artifact in result.artifacts},
+                )
+                canonical_artifact = next(
+                    artifact for artifact in result.artifacts if artifact.kind == "test_spec"
+                )
+                custom_artifact = next(
+                    artifact for artifact in result.artifacts if artifact.kind != "test_spec"
+                )
+                self.assertEqual(
+                    canonical.read_bytes(),
+                    (out / canonical_artifact.path).read_bytes(),
+                )
+                self.assertEqual(
+                    hashlib.sha256(canonical.read_bytes()).hexdigest(),
+                    canonical_artifact.sha256,
+                )
+                self.assertEqual(external.name, custom_artifact.path)
+                self.assertEqual(
+                    external.read_bytes(),
+                    (external.parent / custom_artifact.path).read_bytes(),
+                )
+                self.assertEqual(
+                    hashlib.sha256(external.read_bytes()).hexdigest(),
+                    custom_artifact.sha256,
+                )
+                revision, canonical_sha = _single_view_identity(external)
+                self.assertEqual(result.data["saved_revision"], revision)
+                self.assertEqual(result.data["saved_sha256"], canonical_sha)
+                self.assertEqual(
+                    fixed_before,
+                    {
+                        suffix: (reports / f"test_spec.{suffix}").read_bytes()
+                        for suffix in ("md", "csv")
+                    },
+                )
+                self.assertFalse(
+                    list(external.parent.glob(f".{external.name}.*.tmp"))
+                )
+
     def test_explicit_custom_views_render_writer_a_snapshot_and_inventory(self):
         for output_format in ("md", "csv"):
             for location in ("reports", "separate"):

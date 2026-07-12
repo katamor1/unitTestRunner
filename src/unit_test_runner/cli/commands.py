@@ -999,8 +999,11 @@ def handle_generate_test_design(args: argparse.Namespace) -> CLIResult:
     else:
         design_value = str(result)
         artifact_root = Path(result).resolve().parent
-    if design_result.canonical_artifact is not None:
-        artifact_root = Path(args.function_signature).resolve().parent.parent
+    canonical_workspace = (
+        Path(args.function_signature).resolve().parent.parent
+        if design_result.canonical_artifact is not None
+        else None
+    )
     artifacts = (
         [design_result.canonical_artifact]
         if design_result.canonical_artifact is not None
@@ -1008,7 +1011,11 @@ def handle_generate_test_design(args: argparse.Namespace) -> CLIResult:
     )
     artifacts.extend(
         build_produced_artifact(
-            artifact_root,
+            _test_spec_view_artifact_root(
+                path,
+                canonical_workspace=canonical_workspace,
+                fallback_root=artifact_root,
+            ),
             path,
             kind=(
                 "test_spec_markdown"
@@ -1316,6 +1323,26 @@ def handle_suite_run(args: argparse.Namespace) -> CLIResult:
         outcome=outcome,
         artifacts=artifacts,
     )
+
+
+def _test_spec_view_artifact_root(
+    path: Path,
+    *,
+    canonical_workspace: Path | None,
+    fallback_root: Path,
+) -> Path:
+    if canonical_workspace is None:
+        return fallback_root
+    lexical_path = Path(os.path.abspath(path))
+    lexical_workspace = Path(os.path.abspath(canonical_workspace))
+    try:
+        lexical_path.relative_to(lexical_workspace)
+    except ValueError:
+        # A custom --out is an independently rooted produced artifact. Keep the
+        # lexical parent as the trust boundary so build_produced_artifact still
+        # rejects a symlink/reparse redirect that resolves outside that parent.
+        return lexical_path.parent
+    return lexical_workspace
 
 
 def _plan_suite_run(
