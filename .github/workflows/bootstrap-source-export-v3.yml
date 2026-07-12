@@ -1,0 +1,36 @@
+name: bootstrap-source-export-v3
+
+on:
+  push:
+    branches:
+      - codex/bootstrap-source-export-b667901
+    paths:
+      - .github/workflows/bootstrap-source-export-v3.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: b66790165a2d4f82943cd199b3b499e1f1725fc3
+          fetch-depth: 0
+      - name: Build source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          git archive --format=tar.gz --prefix=unitTestRunner-b667901/ --output=unitTestRunner-b667901-source.tar.gz b66790165a2d4f82943cd199b3b499e1f1725fc3
+          sha256sum unitTestRunner-b667901-source.tar.gz > unitTestRunner-b667901-source.tar.gz.sha256
+      - name: Publish recovery release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag=bootstrap-b667901-export-v3
+          gh release delete "$tag" --cleanup-tag --yes || true
+          gh release create "$tag" unitTestRunner-b667901-source.tar.gz unitTestRunner-b667901-source.tar.gz.sha256 --target b66790165a2d4f82943cd199b3b499e1f1725fc3 --title "Temporary baseline source export" --notes "Temporary recovery artifact; delete after download."
