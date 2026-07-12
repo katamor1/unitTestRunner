@@ -8,7 +8,7 @@
       "type": "object",
       "properties": {
         "artifact_kind": {"const": "test_spec"},
-        "schema_version": {"const": "1.0.0"},
+        "schema_version": {"const": "1.1.0"},
         "data": {
           "type": "object",
           "additionalProperties": false,
@@ -85,9 +85,28 @@
   "$defs": {
     "test_case": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["test_case_id", "coverage_links"],
       "properties": {
         "test_case_id": {"type": "string", "minLength": 1},
+        "title": {"type": "string"},
+        "target_function": {"type": "string"},
+        "purpose": {"type": "string"},
+        "priority": {"type": "string"},
+        "case_kind": {"type": "string"},
+        "preconditions": {"type": "array", "items": {"type": "object"}},
+        "input_assignments": {"type": "array", "items": {"type": "object"}},
+        "state_setups": {"type": "array", "items": {"type": "object"}},
+        "stub_setups": {"type": "array", "items": {"type": "object"}},
+        "dependency_overrides": {"type": "array", "items": {"type": "object"}},
+        "execution_steps": {"type": "array", "items": {"type": "object"}},
+        "expected_observations": {"type": "array", "items": {"type": "object"}},
+        "candidate_links": {"type": "array", "items": {"type": "string"}},
+        "confidence": {"type": "string"},
+        "warnings": {"type": "array", "items": {"type": "object"}},
+        "review_item_ids": {
+          "type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true
+        },
         "coverage_links": {
           "type": "array",
           "items": {

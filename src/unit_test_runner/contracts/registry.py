@@ -7,6 +7,7 @@ from .kinds import ArtifactKind
 
 
 CURRENT_CONTRACT_VERSION = "1.0.0"
+CURRENT_TEST_SPEC_VERSION = "1.1.0"
 
 
 @dataclass(frozen=True)
@@ -18,7 +19,7 @@ class ContractDefinition:
     semantic_validator: str
 
 
-_CONTRACTS = tuple(
+_DEFAULT_CONTRACTS = tuple(
     ContractDefinition(
         kind=kind,
         current_version=CURRENT_CONTRACT_VERSION,
@@ -27,16 +28,41 @@ _CONTRACTS = tuple(
         semantic_validator=kind.value,
     )
     for kind in ArtifactKind
+    if kind is not ArtifactKind.TEST_SPEC
 )
+
+_TEST_SPEC_V1 = ContractDefinition(
+    kind=ArtifactKind.TEST_SPEC,
+    current_version="1.0.0",
+    schema_resource="test_spec_v1_0.schema.json",
+    compatible_source_versions=("0.1",),
+    semantic_validator=ArtifactKind.TEST_SPEC.value,
+)
+
+_TEST_SPEC_CURRENT = ContractDefinition(
+    kind=ArtifactKind.TEST_SPEC,
+    current_version=CURRENT_TEST_SPEC_VERSION,
+    schema_resource="test_spec.schema.json",
+    compatible_source_versions=("1.0.0", "0.1"),
+    semantic_validator=ArtifactKind.TEST_SPEC.value,
+)
+
+_CONTRACTS = _DEFAULT_CONTRACTS + (_TEST_SPEC_CURRENT,)
+_CONTRACT_VERSIONS = _CONTRACTS + (_TEST_SPEC_V1,)
 
 _BY_KIND = {contract.kind: contract for contract in _CONTRACTS}
 _BY_KIND_AND_VERSION = {
-    (contract.kind, contract.current_version): contract for contract in _CONTRACTS
+    (contract.kind, contract.current_version): contract
+    for contract in _CONTRACT_VERSIONS
 }
 
 
 def iter_contracts() -> Iterator[ContractDefinition]:
     return iter(_CONTRACTS)
+
+
+def iter_contract_versions() -> Iterator[ContractDefinition]:
+    return iter(_CONTRACT_VERSIONS)
 
 
 def get_contract(

@@ -63,7 +63,9 @@ def build_current_reanalysis(
         "project_membership": {"schema_version": "0.1", "project_membership": memberships},
     }
     for kind, payload in payloads.items():
-        filename = "test_case_design.generated.json" if kind == "test_case_design" else f"{kind}.json"
+        if kind == "test_case_design":
+            continue
+        filename = f"{kind}.json"
         _write_json(current_reports / filename, payload)
     return payloads
 

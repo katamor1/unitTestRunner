@@ -22,7 +22,7 @@ class NextActionsTests(unittest.TestCase):
                 "expected_result_unknown",
                 "Expected result requires review for TC_Shared_001.",
                 "The generated test cannot be treated as approved until expected values are reviewed.",
-                ["test_case_design"],
+                ["test_spec"],
                 ["TC_Shared_001"],
                 "Review function specification and replace TBD expected values.",
             ),
@@ -32,15 +32,15 @@ class NextActionsTests(unittest.TestCase):
                 "expected_result_unknown",
                 "Expected result requires review for TC_Shared_002.",
                 "The generated test cannot be treated as approved until expected values are reviewed.",
-                ["test_case_design"],
+                ["test_spec"],
                 ["TC_Shared_002"],
                 "Review function specification and replace TBD expected values.",
             ),
         ]
         artifact_index = [
             {
-                "artifact_kind": "test_case_design",
-                "path": "reports/test_case_design.json",
+                "artifact_kind": "test_spec",
+                "path": "reports/test_spec.json",
             }
         ]
 
@@ -56,8 +56,9 @@ class NextActionsTests(unittest.TestCase):
         self.assertIn("NEXT_001", markdown)
         self.assertIn("UNRESOLVED_EXPECTED_001", markdown)
         self.assertIn("TC_Shared_002", markdown)
-        self.assertIn("[テストケース設計](test_case_design.md)", markdown)
-        self.assertIn("[JSON/成果物](test_case_design.json)", markdown)
+        self.assertIn("[テスト仕様](test_spec.md)", markdown)
+        self.assertIn("[JSON/成果物](test_spec.json)", markdown)
+        self.assertNotIn("test_case_design", markdown)
         self.assertIn("[生成テストソース](../generated/tests/test_Shared.c)", markdown)
         self.assertNotIn("| medium | Review expected result | spec_reviewer | Updated generated workspace artifacts or recorded human review decision. |", markdown)
 

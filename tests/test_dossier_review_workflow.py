@@ -161,7 +161,7 @@ class DossierReviewWorkflowTests(unittest.TestCase):
                     "expected_result_unknown",
                     "Expected result requires review for TC_Control_Update_001.",
                     "The generated test cannot be treated as approved until expected values are reviewed.",
-                    ["test_case_design"],
+                    ["test_spec"],
                     ["TC_Control_Update_001"],
                     "Review function specification and replace TBD expected values.",
                 ),
@@ -171,7 +171,7 @@ class DossierReviewWorkflowTests(unittest.TestCase):
                     "expected_result_unknown",
                     "Expected return value must be reviewed from specification.",
                     "Expected return value must be reviewed from specification.",
-                    ["test_case_design"],
+                    ["test_spec"],
                     ["TC_Control_Update_002"],
                     "Review generated test case and replace TBD expected values.",
                 ),
@@ -262,13 +262,13 @@ class DossierReviewWorkflowTests(unittest.TestCase):
             (reports / "source_digest.json").write_text(json.dumps({"schema_version": "0.1", "function": {"name": "Control_Update"}}), encoding="utf-8")
             (reports / "function_location.json").write_text(json.dumps({"schema_version": "0.1", "function": {"name": "Control_Update"}}), encoding="utf-8")
             (reports / "function_signature.json").write_text(json.dumps({"schema_version": "0.1", "function": {"name": "Control_Update"}}), encoding="utf-8")
-            (reports / "test_case_design.json").write_text(json.dumps({"schema_version": "0.1", "function": {"name": "Other_Function"}, "test_cases": []}), encoding="utf-8")
+            (reports / "test_spec.json").write_text(json.dumps({"schema_version": "0.1", "function": {"name": "Other_Function"}, "test_cases": []}), encoding="utf-8")
 
             dossier = finalize_function_dossier(workspace, function_name="Control_Update")
             test_design = next(
                 item
                 for item in dossier.artifact_index
-                if item.artifact_kind == "test_case_design"
+                if item.artifact_kind == "test_spec"
             )
             self.assertEqual("schema_error", test_design.contract_status)
             self.assertTrue(dossier.readiness.blocked)

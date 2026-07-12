@@ -17,7 +17,7 @@ STANDARD_ARTIFACTS = {
     "call_report": "call_report.json",
     "coverage_design": "coverage_design.json",
     "boundary_equivalence_candidates": "boundary_equivalence_candidates.json",
-    "test_case_design": "test_case_design.json",
+    "test_spec": "test_spec.json",
     "build_context": "build_context.json",
 }
 
@@ -35,10 +35,6 @@ def build_analysis_snapshot(
     artifacts: dict[str, SnapshotArtifact] = {}
     for kind, filename in STANDARD_ARTIFACTS.items():
         path = report_root / filename
-        if kind == "test_case_design" and not path.exists():
-            generated_path = report_root / "test_case_design.generated.json"
-            if generated_path.exists():
-                path = generated_path
         relative = _relative_or_absolute(path, workspace)
         exists = path.exists()
         schema_version = None

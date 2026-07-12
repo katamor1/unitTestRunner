@@ -9,7 +9,7 @@ def build_summaries(payloads: dict[str, dict[str, Any]]) -> dict[str, Any]:
     call_report = payloads.get("call_report", {})
     coverage_design = payloads.get("coverage_design", {})
     boundary = payloads.get("boundary_equivalence_candidates", {})
-    test_design = payloads.get("test_case_design", {})
+    test_design = payloads.get("test_spec", {})
     build_probe = payloads.get("build_probe_report", {})
     completion = payloads.get("build_completion_plan", {})
     execution = payloads.get("test_execution_report", {})

@@ -190,8 +190,8 @@ class HarnessSkeletonGenerationTests(unittest.TestCase):
                 str(reports / "global_access.json"),
                 "--call-report",
                 str(reports / "call_report.json"),
-                "--test-case-design",
-                str(reports / "test_case_design.json"),
+                "--test-spec",
+                str(reports / "test_spec.json"),
                 "--out",
                 str(explicit_out),
             )

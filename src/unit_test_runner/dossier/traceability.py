@@ -25,7 +25,7 @@ TRACEABILITY_FIELDS = [
 
 def build_traceability(payloads: dict[str, dict[str, Any]]) -> list[TraceabilityLink]:
     links: list[TraceabilityLink] = []
-    test_design = payloads.get("test_case_design", {})
+    test_design = payloads.get("test_spec", {})
     execution_cases = {
         item.get("test_case_id"): item
         for item in payloads.get("test_execution_report", {}).get("case_results", [])
@@ -47,7 +47,7 @@ def build_traceability(payloads: dict[str, dict[str, Any]]) -> list[Traceability
                     coverage_id,
                     "covers",
                     "high",
-                    bool(case.get("review_status") == "review_required"),
+                    bool(case.get("review_item_ids")),
                     test_case_id=test_case_id,
                     coverage_id=coverage_id,
                 )

@@ -19,6 +19,7 @@ from unit_test_runner.suite import (
 )
 from unit_test_runner.cli.outcomes import classify_suite_run
 from unit_test_runner.contracts import RunOutcome
+from tests.spec_support import write_canonical_test_spec
 
 
 class SuiteManagerTests(unittest.TestCase):
@@ -188,6 +189,12 @@ class SuiteManagerTests(unittest.TestCase):
     def _write_function_workspace(self, workspace: Path, function_name: str) -> Path:
         reports = workspace / "reports"
         reports.mkdir(parents=True)
+        source = workspace / "src" / "control.c"
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            f"int {function_name}(void) {{ return 0; }}\n",
+            encoding="utf-8",
+        )
         target = {
             "source": "src/control.c",
             "function": function_name,
@@ -198,22 +205,12 @@ class SuiteManagerTests(unittest.TestCase):
             json.dumps({"schema_version": "0.1", "target": target, "function": {"name": function_name}}),
             encoding="utf-8",
         )
-        (reports / "test_case_design.json").write_text(
-            json.dumps(
-                {
-                    "schema_version": "0.1",
-                    "function": {"name": function_name},
-                    "test_cases": [
-                        {
-                            "test_case_id": f"TC_{function_name}_001",
-                            "review_status": "ready",
-                            "coverage_links": [{"coverage_id": "BR_001"}],
-                            "expected_observations": [{"expected_expression": "0"}],
-                        }
-                    ],
-                }
-            ),
-            encoding="utf-8",
+        write_canonical_test_spec(
+            workspace,
+            source_path="src/control.c",
+            function_name=function_name,
+            test_case_id=f"TC_{function_name}_001",
+            coverage_ids=("BR_001",),
         )
         (reports / "harness_skeleton_report.json").write_text(
             json.dumps({"schema_version": "0.1", "function": {"name": function_name}, "unresolved_placeholders": []}),

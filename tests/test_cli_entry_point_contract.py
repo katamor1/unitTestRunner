@@ -282,7 +282,7 @@ class CliEntryPointContractTests(unittest.TestCase):
             payload = json.loads(completed.stdout)
             self.assertEqual("passed", payload["data"]["outcome"])
             self.assertEqual("design", payload["data"]["details"]["phase"])
-            self.assertIn("test_case_design", payload["data"]["details"])
+            self.assertIn("test_spec", payload["data"]["details"])
             self.assertNotIn("harness_skeleton", payload["data"]["details"])
             self.assertFalse((out_dir / "reports" / "harness_skeleton_report.json").exists())
             self.assertFalse((out_dir / "reports" / "build_workspace_report.json").exists())

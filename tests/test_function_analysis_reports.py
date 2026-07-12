@@ -197,9 +197,9 @@ class FunctionAnalysisReportTests(unittest.TestCase):
                 "coverage_design.md",
                 "boundary_equivalence_candidates.json",
                 "boundary_equivalence_candidates.md",
-                "test_case_design.json",
-                "test_case_design.md",
-                "test_case_design.csv",
+                "test_spec.json",
+                "test_spec.md",
+                "test_spec.csv",
                 "harness_skeleton_report.json",
                 "harness_skeleton_report.md",
                 "build_workspace_report.json",
@@ -227,7 +227,7 @@ class FunctionAnalysisReportTests(unittest.TestCase):
                 "call_report.md": "# 呼び出し解析レポート",
                 "coverage_design.md": "# カバレッジ設計レポート",
                 "boundary_equivalence_candidates.md": "# 境界値・同値クラス候補レポート",
-                "test_case_design.md": "# テストケース設計レポート",
+                "test_spec.md": "# テスト仕様（生成ビュー）",
                 "harness_skeleton_report.md": "# ハーネスひな形レポート",
                 "build_workspace_report.md": "# ビルドワークスペースレポート",
                 "build_probe_report.md": "# ビルドプローブレポート",
@@ -249,7 +249,8 @@ class FunctionAnalysisReportTests(unittest.TestCase):
             self.assertIn("call_report", dossier)
             self.assertIn("coverage_design", dossier)
             self.assertIn("boundary_equivalence_candidates", dossier)
-            self.assertIn("test_case_design", dossier)
+            self.assertIn("test_spec", dossier)
+            self.assertNotIn("test_case_design", dossier)
             self.assertIn("harness_skeleton", dossier)
             self.assertIn("build_workspace", dossier)
             self.assertIn("build_probe", dossier)

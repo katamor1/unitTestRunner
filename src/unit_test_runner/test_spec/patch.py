@@ -1,0 +1,174 @@
+from __future__ import annotations
+
+import copy
+import re
+from pathlib import Path
+from typing import Any, Mapping
+
+from unit_test_runner.cli.artifacts import ProducedArtifact
+from unit_test_runner.contracts import ContractMode
+
+from .models import CurrentArtifactContext, TestSpec
+from .repository import load_test_spec, save_test_spec
+
+
+class InvalidTestSpecPatchError(ValueError):
+    pass
+
+
+_EDITABLE_CASE_FIELDS = {
+    "title",
+    "target_function",
+    "purpose",
+    "priority",
+    "case_kind",
+    "preconditions",
+    "input_assignments",
+    "state_setups",
+    "stub_setups",
+    "dependency_overrides",
+    "execution_steps",
+    "expected_observations",
+    "coverage_links",
+    "candidate_links",
+    "confidence",
+    "warnings",
+    "review_item_ids",
+}
+_FORBIDDEN_SEGMENTS = {
+    "approved",
+    "approval",
+    "approval_status",
+    "is_approved",
+    "review_status",
+    "review_decision",
+    "revision",
+    "schema_version",
+    "spec_id",
+    "test_case_id",
+    "generated_from",
+    "source",
+    "function",
+}
+_FIELD_SEGMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def apply_test_spec_patch(
+    spec: TestSpec,
+    patch: Mapping[str, Any],
+) -> TestSpec:
+    if set(patch) != {"operations"} or not isinstance(patch.get("operations"), list):
+        raise InvalidTestSpecPatchError("Patch must contain only an operations array.")
+    operations = patch["operations"]
+    if not operations:
+        raise InvalidTestSpecPatchError("Patch operations must not be empty.")
+    normalized: list[tuple[str, tuple[str, ...], Any]] = []
+    keys: list[tuple[str, tuple[str, ...]]] = []
+    for index, operation in enumerate(operations):
+        if not isinstance(operation, Mapping) or set(operation) != {"op", "case_id", "path", "value"}:
+            raise InvalidTestSpecPatchError(
+                f"Operation {index} must contain exactly op, case_id, path, and value."
+            )
+        if operation["op"] != "replace":
+            raise InvalidTestSpecPatchError("Only replace operations are supported.")
+        case_id = str(operation["case_id"] or "")
+        segments = _parse_pointer(str(operation["path"] or ""))
+        if segments[0] not in _EDITABLE_CASE_FIELDS:
+            raise InvalidTestSpecPatchError(
+                f"Case field is immutable or unknown: {segments[0]}"
+            )
+        if any(segment.lower() in _FORBIDDEN_SEGMENTS for segment in segments):
+            raise InvalidTestSpecPatchError(
+                "Patch paths cannot edit identity, provenance, revision, version, or review authority."
+            )
+        key = (case_id, segments)
+        if any(
+            existing_case == case_id
+            and (_is_prefix(existing_path, segments) or _is_prefix(segments, existing_path))
+            for existing_case, existing_path in keys
+        ):
+            raise InvalidTestSpecPatchError("Duplicate or conflicting patch operations are not allowed.")
+        keys.append(key)
+        normalized.append((case_id, segments, copy.deepcopy(operation["value"])))
+
+    payload = spec.to_payload()
+    for case_id, segments, value in normalized:
+        case = _find_case(payload["data"], case_id)
+        _replace_existing(case, segments, value)
+    return TestSpec.from_payload(payload)
+
+
+def update_test_spec(
+    path: Path,
+    patch: Mapping[str, Any],
+    *,
+    expected_revision: int,
+    current_context: CurrentArtifactContext,
+) -> tuple[TestSpec, ProducedArtifact]:
+    current = load_test_spec(path, mode=ContractMode.STRICT)
+    candidate = apply_test_spec_patch(current, patch)
+    artifact = save_test_spec(
+        path,
+        candidate,
+        expected_revision=expected_revision,
+        current_context=current_context,
+    )
+    return load_test_spec(path, mode=ContractMode.STRICT), artifact
+
+
+def _parse_pointer(value: str) -> tuple[str, ...]:
+    if not value.startswith("/") or value == "/":
+        raise InvalidTestSpecPatchError("Patch path must be a non-empty JSON Pointer.")
+    raw_segments = value[1:].split("/")
+    segments: list[str] = []
+    for raw in raw_segments:
+        if not raw or raw in {".", ".."} or "~" in raw:
+            raise InvalidTestSpecPatchError("Patch path contains an escaping or malformed segment.")
+        if not raw.isdigit() and not _FIELD_SEGMENT.fullmatch(raw):
+            raise InvalidTestSpecPatchError(f"Invalid patch path segment: {raw}")
+        segments.append(raw)
+    return tuple(segments)
+
+
+def _is_prefix(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
+    return len(left) <= len(right) and right[: len(left)] == left
+
+
+def _find_case(data: Mapping[str, Any], case_id: str) -> dict[str, Any]:
+    matches = [
+        case
+        for collection in ("test_cases", "additional_case_candidates")
+        for case in data.get(collection) or []
+        if isinstance(case, dict) and str(case.get("test_case_id") or "") == case_id
+    ]
+    if len(matches) != 1:
+        raise InvalidTestSpecPatchError(f"Unknown or ambiguous case_id: {case_id}")
+    return matches[0]
+
+
+def _replace_existing(container: Any, segments: tuple[str, ...], value: Any) -> None:
+    current = container
+    for segment in segments[:-1]:
+        if isinstance(current, dict):
+            if segment not in current:
+                raise InvalidTestSpecPatchError(f"Unknown patch path: /{'/'.join(segments)}")
+            current = current[segment]
+        elif isinstance(current, list) and segment.isdigit():
+            index = int(segment)
+            if index >= len(current):
+                raise InvalidTestSpecPatchError(f"Array index outside patch target: {segment}")
+            current = current[index]
+        else:
+            raise InvalidTestSpecPatchError(f"Patch path is not traversable: /{'/'.join(segments)}")
+    leaf = segments[-1]
+    if isinstance(current, dict):
+        if leaf not in current:
+            raise InvalidTestSpecPatchError(f"Unknown patch path: /{'/'.join(segments)}")
+        current[leaf] = value
+    elif isinstance(current, list) and leaf.isdigit():
+        index = int(leaf)
+        if index >= len(current):
+            raise InvalidTestSpecPatchError(f"Array index outside patch target: {leaf}")
+        current[index] = value
+    else:
+        raise InvalidTestSpecPatchError(f"Patch path is not replaceable: /{'/'.join(segments)}")

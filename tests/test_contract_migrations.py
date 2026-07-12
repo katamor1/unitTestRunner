@@ -427,7 +427,7 @@ class ContractMigrationTests(unittest.TestCase):
 
         self.assertTrue(loaded.migrated)
         self.assertEqual("0.1", loaded.source_version)
-        self.assertEqual("1.0.0", loaded.current_version)
+        self.assertEqual("1.1.0", loaded.current_version)
         self.assertEqual("test_spec", loaded.payload["artifact_kind"])
         self.assertEqual("tc-control-update-001", loaded.payload["data"]["test_cases"][0]["test_case_id"])
         self.assertNotIn(
@@ -476,11 +476,11 @@ class ContractMigrationTests(unittest.TestCase):
         migrated = migrate_payload(
             ArtifactKind.TEST_SPEC,
             legacy,
-            target_version="1.0.0",
+            target_version="1.1.0",
         )
 
         self.assertEqual(before, json.dumps(legacy, sort_keys=True))
-        self.assertEqual("1.0.0", migrated["schema_version"])
+        self.assertEqual("1.1.0", migrated["schema_version"])
 
     def test_dossier_migration_uses_known_target_source_without_inventing_hash(self):
         legacy = {
@@ -948,7 +948,7 @@ class ContractMigrationTests(unittest.TestCase):
                     migrate_payload(
                         ArtifactKind.TEST_SPEC,
                         payload,
-                        target_version="1.0.0",
+                        target_version="1.1.0",
                     )
 
                 self.assertIs(
@@ -976,10 +976,10 @@ class ContractMigrationTests(unittest.TestCase):
             migrated = migrations_module.migrate_payload(
                 ArtifactKind.TEST_SPEC,
                 legacy_test_case_design(),
-                target_version="1.0.0",
+                target_version="1.1.0",
             )
 
-        self.assertEqual("1.0.0", migrated["schema_version"])
+        self.assertEqual("1.1.0", migrated["schema_version"])
 
     def test_real_source_digest_migration_normalizes_data_and_preserves_origin(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1106,7 +1106,7 @@ class ContractMigrationTests(unittest.TestCase):
         migrated = migrate_payload(
             ArtifactKind.TEST_SPEC,
             legacy,
-            target_version="1.0.0",
+            target_version="1.1.0",
         )
 
         self.assertNotIn("source_path", migrated["subject"])

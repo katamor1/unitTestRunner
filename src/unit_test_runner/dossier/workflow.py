@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import csv
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -32,6 +32,18 @@ from ..path_utils import normalize_relative
 from ..test_design import generate_test_design
 from ..test_design.test_case_design_generator import generate_test_case_design, generate_test_case_design_from_payloads
 from ..test_design.test_case_design_writer import write_test_case_design_format, write_test_case_design_payload_format, write_test_case_design_report
+from ..contracts import ContractMode
+from ..test_spec import (
+    ArtifactReference,
+    artifact_reference,
+    build_current_artifact_context,
+    create_test_spec_from_design,
+    export_test_spec_views,
+    load_test_spec,
+    save_test_spec,
+    test_spec_consumer_payload,
+    validate_test_spec,
+)
 from ..vc6 import select_project_context
 
 
@@ -150,48 +162,9 @@ def _write_markdown_reports(out_dir: Path, dossier: dict[str, Any], copied_files
 
 
 def write_test_case_design(path: Path, dossier: dict[str, Any]) -> None:
-    rows = []
-    function_name = dossier["target"]["function"]
-    for index, branch in enumerate(dossier["test_design"].get("branch_coverage_items", []), start=1):
-        rows.append(
-            {
-                "id": f"TC_{function_name}_{index:03d}",
-                "function": function_name,
-                "purpose": branch["description"],
-                "preconditions": "review required",
-                "inputs": "review required",
-                "global_initial_values": "review required",
-                "stub_settings": "review required",
-                "expected_return": "review required",
-                "expected_globals": "review required",
-                "expected_external_calls": "review required",
-                "coverage": branch["id"],
-                "judgement": "manual review",
-                "review_state": "required",
-            }
-        )
-    if not rows:
-        rows.append(
-            {
-                "id": f"TC_{function_name}_001",
-                "function": function_name,
-                "purpose": "Baseline function invocation",
-                "preconditions": "review required",
-                "inputs": "review required",
-                "global_initial_values": "review required",
-                "stub_settings": "review required",
-                "expected_return": "review required",
-                "expected_globals": "review required",
-                "expected_external_calls": "review required",
-                "coverage": "review required",
-                "judgement": "manual review",
-                "review_state": "required",
-            }
-        )
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
+    raise ValueError(
+        "Legacy CSV test-case-design generation is disabled; export test_spec.csv from the saved canonical TestSpec."
+    )
 
 
 def analyze_function_workflow(
@@ -280,6 +253,7 @@ def analyze_function_workflow(
     boundary_candidates = generate_boundary_equivalence_candidates(signature, global_access, call_report, coverage_design)
     boundary_paths = write_boundary_equivalence_candidates(out_dir, boundary_candidates)
     test_case_design = None
+    test_spec = None
     test_case_design_paths = None
     harness_skeleton = None
     build_workspace = None
@@ -289,7 +263,15 @@ def analyze_function_workflow(
     test_execution = None
     evidence_manifest = None
     if phase_rank >= _analysis_phase_rank("design"):
-        existing_test_case_design = _read_existing_json(out_dir / "reports" / "test_case_design.json")
+        canonical_test_spec_path = out_dir / "reports" / "test_spec.json"
+        existing_spec = (
+            load_test_spec(canonical_test_spec_path, mode=ContractMode.STRICT)
+            if canonical_test_spec_path.exists()
+            else None
+        )
+        existing_test_case_design = (
+            test_spec_consumer_payload(existing_spec) if existing_spec is not None else None
+        )
         test_case_design = generate_test_case_design(
             signature,
             global_access,
@@ -299,13 +281,47 @@ def analyze_function_workflow(
             dependency_policy=dependency_policy,
             existing_design=existing_test_case_design,
         )
-        test_case_design_paths = write_test_case_design_report(out_dir, test_case_design)
+        provenance = [
+            artifact_reference(out_dir, digest_paths["json"], artifact_kind="source_digest"),
+            artifact_reference(out_dir, location_paths["json"], artifact_kind="function_location"),
+            artifact_reference(out_dir, signature_paths["json"], artifact_kind="function_signature"),
+            artifact_reference(out_dir, global_access_paths["json"], artifact_kind="global_access"),
+            artifact_reference(out_dir, call_report_paths["json"], artifact_kind="call_report"),
+            artifact_reference(out_dir, dependency_policy_paths["json"], artifact_kind="dependency_policy"),
+            artifact_reference(out_dir, coverage_design_paths["json"], artifact_kind="coverage_design"),
+            artifact_reference(out_dir, boundary_paths["json"], artifact_kind="boundary_candidates"),
+        ]
+        test_spec = create_test_spec_from_design(
+            test_case_design,
+            signature.to_dict(),
+            source_path=source,
+            generated_from=provenance,
+            revision=existing_spec.revision if existing_spec is not None else 1,
+        )
+        context = build_current_artifact_context(out_dir, test_spec)
+        save_test_spec(
+            canonical_test_spec_path,
+            test_spec,
+            expected_revision=existing_spec.revision if existing_spec is not None else None,
+            current_context=context,
+        )
+        test_spec = load_test_spec(canonical_test_spec_path, mode=ContractMode.STRICT)
+        view_paths = export_test_spec_views(
+            test_spec,
+            canonical_test_spec_path.parent,
+            canonical_path=canonical_test_spec_path,
+        )
+        test_case_design_paths = {
+            "json": canonical_test_spec_path,
+            "markdown": view_paths["markdown"],
+            "csv": view_paths["csv"],
+        }
     if phase_rank >= _analysis_phase_rank("harness"):
         harness_skeleton = generate_harness_skeleton(
             signature,
             global_access,
             call_report,
-            test_case_design,
+            test_spec_consumer_payload(test_spec),
             out_dir,
             dependency_policy=dependency_policy,
         )
@@ -375,7 +391,7 @@ def analyze_function_workflow(
         "status": boundary_candidates.status,
     }
     if test_case_design is not None and test_case_design_paths is not None:
-        dossier["test_case_design"] = {
+        dossier["test_spec"] = {
             "json": str(test_case_design_paths["json"]),
             "markdown": str(test_case_design_paths["markdown"]),
             "csv": str(test_case_design_paths["csv"]),
@@ -467,8 +483,6 @@ def analyze_function_workflow(
     write_dependency_policy(out_dir, dependency_policy)
     write_coverage_design(out_dir, coverage_design)
     write_boundary_equivalence_candidates(out_dir, boundary_candidates)
-    if test_case_design is not None:
-        write_test_case_design_report(out_dir, test_case_design)
     _write_json(out_dir / "generated" / "prompt_pack.json", {"function_dossier": dossier})
     return dossier
 
@@ -481,6 +495,7 @@ def generate_harness_skeleton_from_reports(
     out: Path | str,
     overwrite: bool = False,
     dependency_policy_path: Path | str | None = None,
+    allow_legacy_alias: bool = False,
 ):
     call_report_path = Path(call_report_path)
     policy_path = Path(dependency_policy_path) if dependency_policy_path else call_report_path.parent / "dependency_policy.json"
@@ -489,12 +504,82 @@ def generate_harness_skeleton_from_reports(
         _read_json(Path(function_signature_path)),
         _read_json(Path(global_access_path)),
         _read_json(call_report_path),
-        _read_json(Path(test_case_design_path)),
+        load_test_spec_for_consumer(
+            Path(test_case_design_path),
+            function_signature_path=Path(function_signature_path),
+            allow_legacy_alias=allow_legacy_alias,
+        ),
         Path(out),
         overwrite=overwrite,
         dependency_policy=dependency_policy,
     )
     return report
+
+
+def load_test_spec_for_consumer(
+    path: Path | str,
+    *,
+    function_signature_path: Path | str | None = None,
+    allow_legacy_alias: bool = False,
+) -> dict[str, Any]:
+    path = Path(path)
+    if path.suffix.lower() != ".json":
+        raise ValueError("Generated Markdown/CSV test-spec views are never accepted as inputs.")
+    raw = _read_json(path)
+    if raw.get("artifact_kind") == "test_spec":
+        spec = load_test_spec(
+            path,
+            mode=ContractMode.COMPATIBLE if allow_legacy_alias else ContractMode.STRICT,
+        )
+        if path.name != "test_spec.json" or path.parent.name != "reports":
+            raise ValueError("Canonical TEST_SPEC must be read from workspace reports/test_spec.json.")
+        context = build_current_artifact_context(path.parent.parent, spec)
+        violations = validate_test_spec(spec, current_context=context)
+        if violations:
+            detail = "; ".join(
+                f"{item.code} at {item.json_path}: {item.message}"
+                for item in violations
+            )
+            raise ValueError(f"Stale canonical test_spec: {detail}")
+        return test_spec_consumer_payload(spec)
+    if not allow_legacy_alias or raw.get("schema_version") != "0.1":
+        raise ValueError("Expected canonical TEST_SPEC v1.1; only --test-case-design accepts the v0.1 legacy alias.")
+    if function_signature_path is None:
+        raise ValueError("Legacy test-case-design migration requires an explicit function signature artifact.")
+    signature_path = Path(function_signature_path)
+    signature_payload = _read_json(signature_path)
+    source = raw.get("source")
+    if not isinstance(source, dict) or not source.get("path"):
+        raise ValueError("Legacy test-case-design has no lossless source identity.")
+    source_path = str(source["path"]).replace("\\", "/")
+    if Path(source_path).is_absolute() or ":" in source_path[:3] or ".." in Path(source_path).parts:
+        raise ValueError("Legacy test-case-design source path has no verified workspace-relative mapping.")
+    signature_source = signature_payload.get("data")
+    if isinstance(signature_source, dict):
+        signature_source = signature_source.get("source")
+    else:
+        signature_source = signature_payload.get("source")
+    if not isinstance(signature_source, dict):
+        raise ValueError("Function signature artifact has no source identity.")
+    signature_source_path = str(signature_source.get("path") or "").replace("\\", "/")
+    if (
+        source_path != signature_source_path
+        or str(source.get("sha256") or "") != str(signature_source.get("sha256") or "")
+    ):
+        raise ValueError("Legacy test-case-design source identity does not exactly match the supplied function signature artifact.")
+    reference = ArtifactReference(
+        artifact_kind="function_signature",
+        path=signature_path.name,
+        sha256=hashlib.sha256(signature_path.read_bytes()).hexdigest(),
+    )
+    spec = create_test_spec_from_design(
+        raw,
+        signature_payload,
+        source_path=source_path,
+        generated_from=[reference],
+        revision=int(raw.get("revision") or 1),
+    )
+    return test_spec_consumer_payload(spec)
 
 
 def generate_build_workspace_from_reports(
@@ -547,13 +632,12 @@ def generate_build_workspace_from_workspace(
 def generate_test_design_from_dossier(dossier_path: Path | str, output_format: str = "csv", out: Path | str | None = None) -> Path | dict[str, Path]:
     dossier_path = Path(dossier_path)
     dossier = json.loads(dossier_path.read_text(encoding="utf-8"))
-    existing_design = _existing_test_case_design_payload(dossier, dossier_path)
-    if existing_design is not None:
-        target = _test_design_target(dossier_path.parent, output_format, out)
-        return write_test_case_design_payload_format(target, existing_design, output_format)
-    report = _generate_test_case_report_from_dossier_payload(dossier, dossier_path)
-    target = _test_design_target(dossier_path.parent, output_format, out)
-    return write_test_case_design_format(target, report, output_format)
+    canonical = _dossier_artifact_path(dossier, dossier_path, "test_spec")
+    if canonical is None or not canonical.is_file():
+        raise ValueError("Dossier has no canonical reports/test_spec.json; regenerate the design phase first.")
+    load_test_spec_for_consumer(canonical)
+    spec = load_test_spec(canonical, mode=ContractMode.STRICT)
+    return _export_test_spec_selection(spec, canonical, output_format, out)
 
 
 def generate_test_design_from_reports(
@@ -567,37 +651,81 @@ def generate_test_design_from_reports(
 ) -> Path | dict[str, Path]:
     paths = [Path(item) for item in (function_signature_path, global_access_path, call_report_path, coverage_design_path, boundary_candidates_path)]
     report = generate_test_case_design_from_payloads(*[_read_json(path) for path in paths])
-    target_root = paths[3].parent
-    target = _test_design_target(target_root, output_format, out)
-    return write_test_case_design_format(target, report, output_format)
-
-
-def _generate_test_case_report_from_dossier_payload(dossier: dict[str, Any], dossier_path: Path):
-    paths = [
-        _dossier_artifact_path(dossier, dossier_path, "function_signature"),
-        _dossier_artifact_path(dossier, dossier_path, "global_access"),
-        _dossier_artifact_path(dossier, dossier_path, "call_report"),
-        _dossier_artifact_path(dossier, dossier_path, "coverage_design"),
-        _dossier_artifact_path(dossier, dossier_path, "boundary_equivalence_candidates"),
+    reports = paths[0].parent.resolve()
+    if reports.name != "reports":
+        raise ValueError("Explicit test-design inputs must come from one workspace reports directory.")
+    if any(path.parent.resolve() != reports for path in paths):
+        raise ValueError("Explicit test-design inputs must share one reports directory.")
+    workspace = reports.parent
+    request = _read_json(workspace / "input" / "request.json")
+    source_path = str(request.get("source") or "")
+    if not source_path:
+        raise ValueError("Canonical test-spec generation requires input/request.json source identity.")
+    reference_files = (
+        ("source_digest", "source_digest.json"),
+        ("function_location", "function_location.json"),
+        ("function_signature", "function_signature.json"),
+        ("global_access", "global_access.json"),
+        ("call_report", "call_report.json"),
+        ("dependency_policy", "dependency_policy.json"),
+        ("coverage_design", "coverage_design.json"),
+        ("boundary_candidates", "boundary_equivalence_candidates.json"),
+    )
+    references = [
+        artifact_reference(workspace, reports / filename, artifact_kind=kind)
+        for kind, filename in reference_files
+        if (reports / filename).is_file()
     ]
-    if any(path is None for path in paths):
-        target = dossier_path.with_name("test_case_design.csv")
-        write_test_case_design(target, dossier)
-        return _legacy_report_from_csv_dossier(dossier, dossier_path)
-    return generate_test_case_design_from_payloads(*[_read_json(path) for path in paths if path is not None])
+    canonical = reports / "test_spec.json"
+    existing = load_test_spec(canonical, mode=ContractMode.STRICT) if canonical.exists() else None
+    spec = create_test_spec_from_design(
+        report,
+        _read_json(paths[0]),
+        source_path=source_path,
+        generated_from=references,
+        revision=existing.revision if existing is not None else 1,
+    )
+    context = build_current_artifact_context(workspace, spec)
+    save_test_spec(
+        canonical,
+        spec,
+        expected_revision=existing.revision if existing is not None else None,
+        current_context=context,
+    )
+    saved = load_test_spec(canonical, mode=ContractMode.STRICT)
+    return _export_test_spec_selection(saved, canonical, output_format, out)
 
 
-def _existing_test_case_design_payload(dossier: dict[str, Any], dossier_path: Path) -> dict[str, Any] | None:
-    path = _dossier_artifact_path(dossier, dossier_path, "test_case_design")
-    if path is None or not path.exists():
-        return None
-    try:
-        payload = _read_json(path)
-    except (OSError, json.JSONDecodeError):
-        return None
-    if isinstance(payload.get("test_cases"), list):
-        return payload
-    return None
+def _export_test_spec_selection(
+    spec,
+    canonical: Path,
+    output_format: str,
+    out: Path | str | None,
+) -> Path | dict[str, Path]:
+    canonical = canonical.resolve()
+    if output_format == "json":
+        if out is not None and Path(out).resolve() != canonical:
+            raise ValueError("JSON output is fixed at the sole editable reports/test_spec.json contract.")
+        return canonical
+    requested = Path(out) if out is not None else None
+    if output_format == "all":
+        target_dir = requested or canonical.parent
+        views = export_test_spec_views(spec, target_dir, canonical_path=canonical)
+        return {"json": canonical, **views}
+    if output_format not in {"md", "csv"}:
+        raise ValueError(f"Unsupported test design format: {output_format}")
+    target_dir = (
+        requested.parent
+        if requested is not None and requested.suffix
+        else requested or canonical.parent
+    )
+    views = export_test_spec_views(spec, target_dir, canonical_path=canonical)
+    source_view = views["markdown" if output_format == "md" else "csv"]
+    if requested is not None and requested.suffix and requested.resolve() != source_view.resolve():
+        requested.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_view, requested)
+        return requested
+    return source_view
 
 
 def _dossier_artifact_path(dossier: dict[str, Any], dossier_path: Path, artifact_kind: str) -> Path | None:
@@ -635,22 +763,6 @@ def _resolve_dossier_relative_path(dossier: dict[str, Any], dossier_path: Path, 
         if candidate.exists():
             return candidate
     return candidates[0] if candidates else path
-
-
-def _legacy_report_from_csv_dossier(dossier: dict[str, Any], dossier_path: Path):
-    from ..test_design.test_case_models import CoverageTestDesignSummary, TestCaseDesignReport, TestCaseGenerationPolicy
-
-    function_name = dossier.get("target", {}).get("function", "unknown")
-    return TestCaseDesignReport(
-        source_path=Path(dossier.get("target", {}).get("source", "")),
-        source_sha256="",
-        function_name=function_name,
-        status="partial",
-        generation_policy=TestCaseGenerationPolicy(),
-        test_cases=[],
-        additional_case_candidates=[],
-        coverage_summary=CoverageTestDesignSummary(0, 0, [], {}),
-    )
 
 
 def _read_json(path: Path) -> dict[str, Any]:

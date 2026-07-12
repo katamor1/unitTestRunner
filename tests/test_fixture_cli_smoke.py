@@ -75,7 +75,7 @@ class FixtureCliSmokeTests(unittest.TestCase):
             self.assertEqual("passed", analyzed_payload["data"]["outcome"])
             self.assertEqual("design", analyzed_payload["data"]["details"]["phase"])
             self.assertTrue((output / "reports" / "function_signature.json").is_file())
-            self.assertTrue((output / "reports" / "test_case_design.json").is_file())
+            self.assertTrue((output / "reports" / "test_spec.json").is_file())
 
 
 if __name__ == "__main__":

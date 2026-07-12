@@ -16,7 +16,7 @@ DSW_FIXTURES = Path(__file__).parent / "fixtures" / "vc6_dsw"
 def valid_test_spec() -> dict:
     return {
         "artifact_kind": "test_spec",
-        "schema_version": "1.0.0",
+        "schema_version": "1.1.0",
         "producer": {
             "name": "unit-test-runner",
             "version": "0.1.0",
@@ -64,6 +64,7 @@ def valid_test_spec() -> dict:
 def valid_cli_result() -> dict:
     payload = valid_test_spec()
     payload["artifact_kind"] = "cli_result"
+    payload["schema_version"] = "1.0.0"
     payload["subject"] = {"invocation_id": "inv-contract-001"}
     payload["data"] = {
         "invocation_id": "inv-contract-001",
@@ -86,6 +87,7 @@ def valid_cli_result() -> dict:
 def artifact_payload(kind: ArtifactKind, data: dict) -> dict:
     payload = valid_test_spec()
     payload["artifact_kind"] = kind.value
+    payload["schema_version"] = "1.0.0"
     payload["data"] = data
     return payload
 

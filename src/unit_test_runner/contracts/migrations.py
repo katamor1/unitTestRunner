@@ -56,6 +56,9 @@ def migrate_payload(
             f"Unsupported source version for {kind.value}: {source_version or '<missing>'}"
         )
 
+    if kind is ArtifactKind.TEST_SPEC and source_version == "1.0.0":
+        return _migrate_test_spec_v1_0(source, target_version)
+
     subject = _legacy_subject(source)
     if kind is ArtifactKind.TEST_SPEC:
         data = _migrate_test_spec_data(source, subject)
@@ -219,6 +222,91 @@ def _migrate_test_spec_data(
     elif subject.get("function_id"):
         data["spec_id"] = f"spec-{subject['function_id'].removeprefix('fn_')}"
     return data
+
+
+_TEST_SPEC_V1_1_CASE_FIELDS = {
+    "test_case_id",
+    "title",
+    "target_function",
+    "purpose",
+    "priority",
+    "case_kind",
+    "preconditions",
+    "input_assignments",
+    "state_setups",
+    "stub_setups",
+    "dependency_overrides",
+    "execution_steps",
+    "expected_observations",
+    "coverage_links",
+    "candidate_links",
+    "confidence",
+    "warnings",
+    "review_item_ids",
+}
+_TEST_SPEC_AUTHORITY_FIELDS = {
+    "approved",
+    "approval",
+    "approval_status",
+    "is_approved",
+    "review_status",
+    "review_decision",
+}
+
+
+def _migrate_test_spec_v1_0(
+    payload: Mapping[str, Any],
+    target_version: str,
+) -> dict[str, Any]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        raise ValueError("test_spec v1.0 data must be an object.")
+    for collection in ("test_cases", "additional_case_candidates"):
+        cases = data.get(collection)
+        if not isinstance(cases, list):
+            continue
+        for index, case in enumerate(cases):
+            if not isinstance(case, Mapping):
+                continue
+            unknown = set(case) - _TEST_SPEC_V1_1_CASE_FIELDS
+            if unknown:
+                names = ", ".join(sorted(str(item) for item in unknown))
+                raise ValueError(
+                    f"Lossless test_spec v1.0 migration cannot represent unknown fields at $.data.{collection}[{index}]: {names}."
+                )
+    authority_path = _first_test_spec_authority_path(data)
+    if authority_path is not None:
+        raise ValueError(
+            f"Lossless test_spec v1.0 migration cannot preserve embedded review authority at {authority_path}; review_decisions.json is authoritative."
+        )
+    migrated = copy.deepcopy(dict(payload))
+    migrated["schema_version"] = target_version
+    extensions = migrated.get("extensions")
+    normalized_extensions = copy.deepcopy(dict(extensions)) if isinstance(extensions, Mapping) else {}
+    normalized_extensions["migration"] = {
+        "source_version": "1.0.0",
+        "source_artifact_kind": ArtifactKind.TEST_SPEC.value,
+        "in_memory_only": True,
+    }
+    migrated["extensions"] = normalized_extensions
+    return migrated
+
+
+def _first_test_spec_authority_path(value: Any, path: str = "$.data") -> str | None:
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            child_path = f"{path}.{key}"
+            if str(key).lower() in _TEST_SPEC_AUTHORITY_FIELDS:
+                return child_path
+            nested = _first_test_spec_authority_path(child, child_path)
+            if nested is not None:
+                return nested
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            nested = _first_test_spec_authority_path(child, f"{path}[{index}]")
+            if nested is not None:
+                return nested
+    return None
 
 
 def _migrate_cli_result_data(payload: Mapping[str, Any]) -> dict[str, Any]:

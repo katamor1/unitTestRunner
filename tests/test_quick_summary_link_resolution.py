@@ -45,6 +45,12 @@ class QuickSummaryLinkResolutionTests(unittest.TestCase):
                     ],
                 },
                 "diagnostics": [],
+                "test_spec": {
+                    "status": "generated",
+                    "json": str(reports / "test_spec.json"),
+                    "markdown": str(reports / "test_spec.md"),
+                    "csv": str(reports / "test_spec.csv"),
+                },
             }
 
             paths = write_quick_summary(out_dir, dossier, "harness", "harness_skeleton_generated")
@@ -58,6 +64,10 @@ class QuickSummaryLinkResolutionTests(unittest.TestCase):
             self.assertIn("## リンク解決", markdown)
             self.assertIn("解決済みライブラリ: 1", markdown)
             self.assertIn("ライブラリ提供関数: 2", markdown)
+            test_spec_step = next(item for item in summary["steps"] if item["id"] == "test_spec")
+            self.assertEqual("generated", test_spec_step["status"])
+            self.assertEqual(str(reports / "test_spec.json"), summary["reports"]["test_spec_json"])
+            self.assertNotIn("test_case_design", json.dumps(summary))
 
 
 if __name__ == "__main__":

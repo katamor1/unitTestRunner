@@ -20,6 +20,7 @@ class TestCaseReconcilerTests(unittest.TestCase):
                     "title": "Reviewed lower boundary",
                     "purpose": "Manual purpose",
                     "review_status": "approved",
+                    "review_item_ids": ["review-expected-001"],
                     "expected_observations": [
                         {
                             "observation_kind": "return_value",
@@ -42,6 +43,7 @@ class TestCaseReconcilerTests(unittest.TestCase):
                     "title": "Generated lower boundary",
                     "purpose": "Generated purpose",
                     "review_status": "review_required",
+                    "review_item_ids": ["review-generated-001"],
                     "expected_observations": [
                         {
                             "observation_kind": "return_value",
@@ -80,7 +82,11 @@ class TestCaseReconcilerTests(unittest.TestCase):
         self.assertEqual("TC_Control_Update_001", report.updated_test_cases[0].test_case_id)
         self.assertIn("expected_observations", report.updated_test_cases[0].preserved_fields)
         self.assertEqual("CONTROL_OK", updated["test_cases"][0]["expected_observations"][0]["expected_expression"])
-        self.assertEqual("approved", updated["test_cases"][0]["review_status"])
+        self.assertEqual(
+            ["review-expected-001"],
+            updated["test_cases"][0]["review_item_ids"],
+        )
+        self.assertNotIn("review_status", updated["test_cases"][0])
 
     def test_reconciler_marks_incompatible_signature_change_blocked(self):
         previous_design = {

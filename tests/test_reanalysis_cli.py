@@ -53,11 +53,8 @@ class ReanalysisCliTests(unittest.TestCase):
                 "--out",
                 str(out_dir),
             )
-            design_path = out_dir / "reports" / "test_case_design.json"
-            previous_design = json.loads(design_path.read_text(encoding="utf-8"))
-            previous_design["test_cases"][0]["review_status"] = "approved"
-            previous_design["test_cases"][0]["expected_observations"][0]["expected_expression"] = "CONTROL_OK"
-            design_path.write_text(json.dumps(previous_design, indent=2) + "\n", encoding="utf-8")
+            design_path = out_dir / "reports" / "test_spec.json"
+            before_design = design_path.read_bytes()
 
             source_path = product / "src" / "control.c"
             source_text = source_path.read_text(encoding="utf-8")
@@ -95,8 +92,7 @@ class ReanalysisCliTests(unittest.TestCase):
             ):
                 self.assertTrue(Path(reports[key]).exists(), key)
             self.assertTrue((out_dir / "reports" / "reanalysis" / "current" / "coverage_design.json").exists())
-            after_design = json.loads(design_path.read_text(encoding="utf-8"))
-            self.assertEqual("approved", after_design["test_cases"][0]["review_status"])
+            self.assertEqual(before_design, design_path.read_bytes())
             self.assertFalse((out_dir / "reports" / "updated_test_case_design.json").exists())
 
     def test_analyze_function_reuse_existing_tests_rejects_run_tests(self):
@@ -191,8 +187,8 @@ class ReanalysisCliTests(unittest.TestCase):
                 str(current_out),
                 "--previous-dossier",
                 str(previous_out / "reports" / "function_dossier.json"),
-                "--previous-test-case-design",
-                str(previous_out / "reports" / "test_case_design.json"),
+                "--previous-test-spec",
+                str(previous_out / "reports" / "test_spec.json"),
             )
 
             impact = json.loads((current_out / "reports" / "change_impact_report.json").read_text(encoding="utf-8"))
@@ -249,8 +245,8 @@ class ReanalysisCliTests(unittest.TestCase):
                 str(current_out),
                 "--previous-dossier",
                 str(previous_out / "reports" / "function_dossier.json"),
-                "--previous-test-case-design",
-                str(previous_out / "reports" / "test_case_design.json"),
+                "--previous-test-spec",
+                str(previous_out / "reports" / "test_spec.json"),
             )
 
             impact = json.loads((current_out / "reports" / "change_impact_report.json").read_text(encoding="utf-8"))
@@ -258,7 +254,7 @@ class ReanalysisCliTests(unittest.TestCase):
             self.assertIn("source_digest", impact["previous_snapshot"]["artifacts"])
             self.assertIn("function_signature", impact["previous_snapshot"]["artifacts"])
 
-    def test_reconcile_test_cases_cli_writes_updated_design_when_requested(self):
+    def test_reconcile_test_cases_cli_rejects_untyped_legacy_design_as_alternate_contract(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
             previous_design = temp / "previous_design.json"
@@ -312,12 +308,13 @@ class ReanalysisCliTests(unittest.TestCase):
                 "--out",
                 str(out),
                 "--generate-updated-test-case-design",
+                check=False,
             )
 
             payload = json.loads(completed.stdout)
-            updated_path = Path(payload["data"]["details"]["reports"]["updated_test_case_design_json"])
-            self.assertTrue(out.exists())
-            self.assertTrue(updated_path.exists())
+            self.assertNotEqual(0, completed.returncode)
+            self.assertEqual("error", payload["data"]["outcome"])
+            self.assertFalse(out.with_name("updated_test_case_design.json").exists())
 
 
 if __name__ == "__main__":

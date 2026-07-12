@@ -36,9 +36,6 @@ def write_reanalysis_reports(
     paths["test_case_reconciliation_report_md"].write_text(render_test_case_reconciliation_markdown(reconciliation_payload), encoding="utf-8")
     _write_json(paths["regression_selection_json"], selection_payload)
     paths["regression_selection_csv"].write_text(render_regression_selection_csv(selection_payload), encoding="utf-8", newline="")
-    if updated_test_case_design is not None:
-        paths["updated_test_case_design_json"] = reports / "updated_test_case_design.json"
-        _write_json(paths["updated_test_case_design_json"], updated_test_case_design)
     return paths
 
 

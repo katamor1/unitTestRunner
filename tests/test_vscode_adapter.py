@@ -84,11 +84,12 @@ class VscodeAdapterTests(unittest.TestCase):
         self.assertIn("analyze-function", analyze_args)
         self.assertIn("--finalize-dossier", analyze_args)
 
-    def test_vscode_plan_uses_current_test_case_design_names(self):
+    def test_vscode_plan_uses_canonical_test_spec_names(self):
         plan = (REPO_ROOT / "docs" / "implementation" / "step18_vscode_thin_adapter_plan.md").read_text(encoding="utf-8")
 
         self.assertIn("generate-test-design", plan)
-        self.assertIn("test_case_design.csv", plan)
+        self.assertIn("test_spec.csv", plan)
+        self.assertNotIn("test_case_design.csv", plan)
         self.assertIn("unitTestRunner.generateTestDesign", plan)
         self.assertNotIn("generate-test-draft", plan)
         self.assertNotIn("test_case_draft", plan)

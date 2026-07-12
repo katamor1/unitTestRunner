@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import os
 import json
 import platform
 import sys
@@ -53,6 +55,14 @@ from unit_test_runner.reports.source_membership_markdown import render_source_me
 from unit_test_runner.vc6 import discover_workspace, map_source_to_projects
 from unit_test_runner.vc6.dsp_parser import parse_dsp as parse_dsp_project
 from unit_test_runner.vc6.source_membership import map_source_membership
+from unit_test_runner.test_spec import (
+    TestSpecContractError,
+    build_current_artifact_context,
+    load_test_spec,
+    update_test_spec,
+    validate_test_spec,
+)
+from unit_test_runner.contracts import ContractMode
 
 from .errors import CLIError
 from .artifacts import (
@@ -102,6 +112,8 @@ def dispatch(args: argparse.Namespace) -> CLIResult:
         "finalize-dossier": handle_finalize_dossier,
         "prepare-review": handle_prepare_review,
         "generate-test-design": handle_generate_test_design,
+        "get-test-spec": handle_get_test_spec,
+        "update-test-spec": handle_update_test_spec,
         "reconcile-test-cases": handle_reconcile_test_cases,
         "select-regression-tests": handle_select_regression_tests,
         "suite-register": handle_suite_register,
@@ -317,7 +329,7 @@ def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
         "call_report",
         "coverage_design",
         "boundary_equivalence_candidates",
-        "test_case_design",
+        "test_spec",
         "harness_skeleton",
         "build_workspace",
         "build_probe",
@@ -484,7 +496,7 @@ def _analysis_artifacts(root: Path, payload: dict[str, Any]) -> list[ProducedArt
 def _analysis_phase_outputs(payload: dict[str, Any]) -> list[tuple[Path, str | None]]:
     outputs: list[tuple[Path, str | None]] = []
     section_specs: dict[str, dict[str, str | None]] = {
-        "test_case_design": {
+        "test_spec": {
             "json": None,
             "markdown": ArtifactKind.TEST_SPEC.value,
             "csv": ArtifactKind.TEST_SPEC.value,
@@ -595,7 +607,7 @@ def _run_reanalysis(args: argparse.Namespace) -> CLIResult:
             args.out,
             project_name=args.project,
             previous_dossier_path=args.previous_dossier,
-            previous_test_case_design_path=args.previous_test_case_design,
+            previous_test_case_design_path=(args.previous_test_spec or args.previous_test_case_design),
             policy=policy,
         )
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
@@ -606,7 +618,7 @@ def _run_reanalysis(args: argparse.Namespace) -> CLIResult:
         "status": result["status"],
         "reports": reports,
         "previous_dossier": str(result["previous_dossier"]),
-        "previous_test_case_design": str(result["previous_test_case_design"]),
+        "previous_test_spec": str(result["previous_test_case_design"]),
     }
     return CLIResult(
         status="reanalysis_completed",
@@ -635,14 +647,16 @@ def _run_reanalysis(args: argparse.Namespace) -> CLIResult:
 
 
 def handle_generate_harness_skeleton(args: argparse.Namespace) -> CLIResult:
+    spec_argument = args.test_spec or args.test_case_design
     report = generate_harness_skeleton_from_reports(
         _existing_file(args.function_signature, "function-signature", args.command),
         _existing_file(args.global_access, "global-access", args.command),
         _existing_file(args.call_report, "call-report", args.command),
-        _existing_file(args.test_case_design, "test-case-design", args.command),
+        _existing_file(spec_argument, "test-spec", args.command),
         Path(args.out),
         overwrite=args.overwrite,
         dependency_policy_path=_existing_file(args.dependency_policy, "dependency-policy", args.command) if args.dependency_policy else None,
+        allow_legacy_alias=bool(args.test_case_design),
     )
     payload = {
         "harness_skeleton": {
@@ -971,13 +985,17 @@ def handle_generate_test_design(args: argparse.Namespace) -> CLIResult:
         )
     if isinstance(result, dict):
         design_value: str | dict[str, str] = {key: str(value) for key, value in result.items()}
-        artifact_root = Path(args.out).resolve() if args.out else next(iter(result.values())).parent.resolve()
+        resolved_outputs = [Path(value).resolve() for value in result.values()]
+        artifact_root = Path(os.path.commonpath([str(path) for path in resolved_outputs])).resolve()
+        if artifact_root.is_file() or artifact_root.suffix:
+            artifact_root = artifact_root.parent
         design_outputs = [
             (
                 Path(value),
                 None if Path(value).suffix.lower() == ".json" else ArtifactKind.TEST_SPEC.value,
             )
-            for value in result.values()
+            for key, value in result.items()
+            if not (args.dossier and key == "json")
         ]
     else:
         design_value = str(result)
@@ -988,9 +1006,9 @@ def handle_generate_test_design(args: argparse.Namespace) -> CLIResult:
                 None if Path(result).suffix.lower() == ".json" else ArtifactKind.TEST_SPEC.value,
             )
         ]
-    payload = {"test_case_design": design_value}
+    payload = {"test_spec": design_value}
     return CLIResult(
-        status="test_case_design_generated",
+        status="test_spec_generated",
         exit_code=EXIT_OK,
         command=args.command,
         message="Test design generated.",
@@ -1001,6 +1019,68 @@ def handle_generate_test_design(args: argparse.Namespace) -> CLIResult:
     )
 
 
+def handle_get_test_spec(args: argparse.Namespace) -> CLIResult:
+    workspace = _existing_dir(args.workspace, "workspace", args.command)
+    path = workspace / "reports" / "test_spec.json"
+    try:
+        spec = load_test_spec(path, mode=ContractMode.STRICT)
+        context = build_current_artifact_context(workspace, spec)
+        violations = validate_test_spec(spec, current_context=context)
+        if violations:
+            raise TestSpecContractError(violations)
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise CLIError(str(error), EXIT_INPUT_ERROR, args.command) from error
+    return CLIResult(
+        status="test_spec_loaded",
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Canonical test specification loaded and validated.",
+        data={
+            "workspace": str(workspace),
+            "path": "reports/test_spec.json",
+            "spec_id": spec.spec_id,
+            "revision": spec.revision,
+            "sha256": digest,
+            "test_spec": spec.to_payload(),
+        },
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
+    )
+
+
+def handle_update_test_spec(args: argparse.Namespace) -> CLIResult:
+    workspace = _existing_dir(args.workspace, "workspace", args.command)
+    path = workspace / "reports" / "test_spec.json"
+    patch_path = _existing_file(args.patch, "patch", args.command)
+    try:
+        current = load_test_spec(path, mode=ContractMode.STRICT)
+        context = build_current_artifact_context(workspace, current)
+        patch = _read_json(patch_path)
+        updated, artifact = update_test_spec(
+            path,
+            patch,
+            expected_revision=args.expected_revision,
+            current_context=context,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise CLIError(str(error), EXIT_INPUT_ERROR, args.command) from error
+    return CLIResult(
+        status="test_spec_updated",
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Canonical test specification updated.",
+        data={
+            "workspace": str(workspace),
+            "path": artifact.path,
+            "spec_id": updated.spec_id,
+            "revision": updated.revision,
+            "sha256": artifact.sha256,
+        },
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
+        artifacts=[artifact],
+    )
+
+
 def handle_reconcile_test_cases(args: argparse.Namespace) -> CLIResult:
     policy = ReanalysisPolicy(
         generate_updated_test_case_design=args.generate_updated_test_case_design,
@@ -1008,9 +1088,9 @@ def handle_reconcile_test_cases(args: argparse.Namespace) -> CLIResult:
     )
     try:
         result = reconcile_test_case_reports(
-            _existing_file(args.previous_test_case_design, "previous-test-case-design", args.command),
+            _existing_file(args.previous_test_spec or args.previous_test_case_design, "previous-test-spec", args.command),
             _existing_file(args.previous_coverage_design, "previous-coverage-design", args.command),
-            _existing_file(args.current_test_case_design, "current-test-case-design", args.command),
+            _existing_file(args.current_test_spec or args.current_test_case_design, "current-test-spec", args.command),
             _existing_file(args.current_coverage_design, "current-coverage-design", args.command),
             _existing_file(args.current_boundary_candidates, "current-boundary-candidates", args.command),
             Path(args.out),

@@ -100,12 +100,17 @@ class DependencyPolicyWorkflowTests(unittest.TestCase):
             policy_path = out_dir / "reports" / "dependency_policy.json"
             markdown_path = out_dir / "reports" / "dependency_policy.md"
             dossier = json.loads((out_dir / "reports" / "function_dossier.json").read_text(encoding="utf-8"))
-            design = json.loads((out_dir / "reports" / "test_case_design.json").read_text(encoding="utf-8"))
+            design = json.loads((out_dir / "reports" / "test_spec.json").read_text(encoding="utf-8"))
 
             self.assertTrue(policy_path.exists())
             self.assertTrue(markdown_path.exists())
             self.assertIn("dependency_policy", dossier)
-            self.assertIn("dependency_overrides", design["test_cases"][0])
+            cases = (
+                design["data"]["test_cases"]
+                + design["data"]["additional_case_candidates"]
+            )
+            self.assertTrue(cases)
+            self.assertIn("dependency_overrides", cases[0])
 
 
 if __name__ == "__main__":
