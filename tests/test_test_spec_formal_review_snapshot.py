@@ -97,6 +97,22 @@ class TestSpecFormalReviewSnapshotTests(unittest.TestCase):
                 },
             )
 
+    def test_oversized_ascii_array_index_is_a_typed_patch_error(self):
+        oversized_index = "9" * 5000
+
+        with self.assertRaises(InvalidTestSpecPatchError):
+            apply_test_spec_patch(
+                TestSpec.from_payload(copied_payload()),
+                {
+                    "operations": [
+                        replace(
+                            f"/expected_observations/{oversized_index}/expected_expression",
+                            "BAD",
+                        )
+                    ]
+                },
+            )
+
     def test_save_artifact_describes_writer_snapshot_after_interleaved_newer_commit(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)

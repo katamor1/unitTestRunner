@@ -152,7 +152,7 @@ def _canonicalize_pointer(
                 raise InvalidTestSpecPatchError(
                     f"Patch path requires an ASCII array index: {segment}"
                 )
-            index = int(segment)
+            index = _array_index(segment)
             if index >= len(current):
                 raise InvalidTestSpecPatchError(
                     f"Array index outside patch target: {segment}"
@@ -168,6 +168,15 @@ def _canonicalize_pointer(
 
 def _is_prefix(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
     return len(left) <= len(right) and right[: len(left)] == left
+
+
+def _array_index(segment: str) -> int:
+    try:
+        return int(segment)
+    except ValueError as error:
+        raise InvalidTestSpecPatchError(
+            f"Array index is outside the supported numeric range: {segment[:32]}"
+        ) from error
 
 
 def _find_case(data: Mapping[str, Any], case_id: str) -> dict[str, Any]:
@@ -190,7 +199,7 @@ def _replace_existing(container: Any, segments: tuple[str, ...], value: Any) -> 
                 raise InvalidTestSpecPatchError(f"Unknown patch path: /{'/'.join(segments)}")
             current = current[segment]
         elif isinstance(current, list) and _ARRAY_INDEX_SEGMENT.fullmatch(segment):
-            index = int(segment)
+            index = _array_index(segment)
             if index >= len(current):
                 raise InvalidTestSpecPatchError(f"Array index outside patch target: {segment}")
             current = current[index]
@@ -202,7 +211,7 @@ def _replace_existing(container: Any, segments: tuple[str, ...], value: Any) -> 
             raise InvalidTestSpecPatchError(f"Unknown patch path: /{'/'.join(segments)}")
         current[leaf] = value
     elif isinstance(current, list) and _ARRAY_INDEX_SEGMENT.fullmatch(leaf):
-        index = int(leaf)
+        index = _array_index(leaf)
         if index >= len(current):
             raise InvalidTestSpecPatchError(f"Array index outside patch target: {leaf}")
         current[index] = value
