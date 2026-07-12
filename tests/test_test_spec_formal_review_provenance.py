@@ -67,6 +67,114 @@ def replace_reference_bytes(
 
 
 class TestSpecFormalReviewProvenanceTests(unittest.TestCase):
+    def test_all_raw_v01_secondary_collections_reject_nested_wrong_types(self):
+        mutations = {
+            "source_digest": (
+                "source_digest.json",
+                lambda payload: payload["preprocessor"]["includes"][0].__setitem__(
+                    "exists", "BROKEN"
+                ),
+            ),
+            "function_location": (
+                "function_location.json",
+                lambda payload: payload["function"]["selected_candidate"][
+                    "conditional_context"
+                ].__setitem__("directives", [42]),
+            ),
+            "function_signature": (
+                "function_signature.json",
+                lambda payload: payload["function"]["parameters"][0][
+                    "type"
+                ].__setitem__("pointer_level", "BROKEN"),
+            ),
+            "global_access": (
+                "global_access.json",
+                lambda payload: payload["file_scope_declarations"][0].__setitem__(
+                    "name", 42
+                ),
+            ),
+            "call_report": (
+                "call_report.json",
+                lambda payload: payload["stub_candidates"][0].__setitem__(
+                    "name", 42
+                ),
+            ),
+            "dependency_policy": (
+                "dependency_policy.json",
+                lambda payload: payload["external_objects"][0].__setitem__(
+                    "symbol", 42
+                ),
+            ),
+            "coverage_design": (
+                "coverage_design.json",
+                lambda payload: payload["switches"][0]["cases"][0].__setitem__(
+                    "case_id", 42
+                ),
+            ),
+            "boundary_candidates": (
+                "boundary_equivalence_candidates.json",
+                lambda payload: payload["stub_return_candidates"][0].__setitem__(
+                    "call_name", 42
+                ),
+            ),
+        }
+        for artifact_kind, (filename, mutate) in mutations.items():
+            with self.subTest(artifact_kind=artifact_kind), tempfile.TemporaryDirectory() as temp_dir:
+                canonical = analyze(Path(temp_dir))
+                artifact_path = canonical.parent / filename
+                payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+                mutate(payload)
+                replacement = (
+                    json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+                ).encode("utf-8")
+                replace_reference_bytes(
+                    canonical,
+                    artifact_kind=artifact_kind,
+                    replacement=replacement,
+                )
+                if artifact_kind == "function_signature":
+                    spec_payload = json.loads(canonical.read_text(encoding="utf-8"))
+                    spec_payload["data"]["function"]["signature_sha256"] = (
+                        signature_sha256(payload)
+                    )
+                    canonical.write_text(
+                        json.dumps(spec_payload, indent=2, ensure_ascii=False)
+                        + "\n",
+                        encoding="utf-8",
+                    )
+
+                with self.assertRaises(ValueError):
+                    load_test_spec_for_consumer(canonical)
+
+    def test_call_stub_candidate_rejects_missing_unknown_and_nested_wrong_type(self):
+        mutations = {
+            "missing": lambda candidate: candidate.pop("name"),
+            "unknown": lambda candidate: candidate.__setitem__(
+                "unexpected_field", "BROKEN"
+            ),
+            "nested-wrong-type": lambda candidate: candidate.__setitem__(
+                "related_calls", [42]
+            ),
+        }
+        for mutation, mutate in mutations.items():
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temp_dir:
+                canonical = analyze(Path(temp_dir))
+                call_report = canonical.parent / "call_report.json"
+                payload = json.loads(call_report.read_text(encoding="utf-8"))
+                self.assertTrue(payload["stub_candidates"])
+                mutate(payload["stub_candidates"][0])
+                replacement = (
+                    json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+                ).encode("utf-8")
+                replace_reference_bytes(
+                    canonical,
+                    artifact_kind="call_report",
+                    replacement=replacement,
+                )
+
+                with self.assertRaises(ValueError):
+                    load_test_spec_for_consumer(canonical)
+
     def test_all_raw_v01_provenance_kinds_reject_wrong_nested_field_types(self):
         mutations = {
             "source_digest": (

@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import re
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any, Mapping
 
 from unit_test_runner.contracts import ContractViolation
 
 from .models import TestSpecContractError
 from .path_safety import assert_no_reparse_components, lexical_absolute
+from .source_binding import (
+    normalized_relative_source,
+    source_declarations_match,
+)
 
 
 _TOP_LEVEL_FIELDS = {
@@ -65,7 +70,9 @@ def load_legacy_test_case_design_view(
     legacy = _read_object(legacy_path, "legacy_alias_invalid")
     signature = _read_object(signature_path, "legacy_companion_invalid")
     violations = _legacy_shape_violations(legacy)
-    violations.extend(_identity_violations(legacy, signature))
+    violations.extend(
+        _identity_violations(legacy, signature, legacy_file_path=legacy_path)
+    )
     if violations:
         raise TestSpecContractError(tuple(violations))
     return copy.deepcopy(legacy)
@@ -210,6 +217,8 @@ def _authority_violations(
 def _identity_violations(
     legacy: Mapping[str, Any],
     signature_payload: Mapping[str, Any],
+    *,
+    legacy_file_path: Path,
 ) -> list[ContractViolation]:
     signature_data = signature_payload.get("data")
     signature = signature_data if isinstance(signature_data, Mapping) else signature_payload
@@ -249,12 +258,19 @@ def _identity_violations(
     signature_hash = str(signature_source.get("sha256") or "")
     legacy_name = str(legacy_function.get("name") or "")
     signature_name = str(signature_function.get("name") or "")
-    valid_relative = bool(legacy_path) and not PurePosixPath(legacy_path).is_absolute() and ".." not in PurePosixPath(legacy_path).parts and not re.match(r"^[A-Za-z]:", legacy_path)
-    path_matches = signature_path == legacy_path or signature_path.endswith(
-        "/" + legacy_path
+    request_root, request_relative = _request_source_binding(
+        legacy_path=legacy_file_path,
+        source_sha256=legacy_hash,
+    )
+    path_matches = source_declarations_match(
+        legacy_path,
+        signature_path,
+        request_root=request_root,
+        request_relative=request_relative,
     )
     if (
-        not valid_relative
+        not legacy_path
+        or not signature_path
         or not path_matches
         or not _SHA256_RE.fullmatch(legacy_hash)
         or legacy_hash == "0" * 64
@@ -285,3 +301,37 @@ def _identity_violations(
                     )
                 ]
     return []
+
+
+def _request_source_binding(
+    *,
+    legacy_path: Path,
+    source_sha256: str,
+) -> tuple[Path | None, str | None]:
+    reports = legacy_path.parent
+    if reports.name != "reports":
+        return None, None
+    workspace = reports.parent
+    request_path = workspace / "input" / "request.json"
+    try:
+        assert_no_reparse_components(request_path, workspace)
+        request = _read_object(request_path, "legacy_request_invalid")
+        request_root_raw = request.get("workspace")
+        request_source_raw = request.get("source")
+        if not isinstance(request_root_raw, str) or not isinstance(
+            request_source_raw, str
+        ):
+            return None, None
+        request_source = normalized_relative_source(request_source_raw)
+        request_root = lexical_absolute(Path(request_root_raw).expanduser())
+        source_file = assert_no_reparse_components(
+            request_root / Path(request_source),
+            request_root,
+        )
+        if not source_file.is_file():
+            return None, None
+        if hashlib.sha256(source_file.read_bytes()).hexdigest() != source_sha256:
+            return None, None
+        return request_root, request_source
+    except (OSError, ValueError, TestSpecContractError):
+        return None, None

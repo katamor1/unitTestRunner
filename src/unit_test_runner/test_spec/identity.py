@@ -17,6 +17,7 @@ from unit_test_runner.contracts.registry import get_contract
 
 from .models import ArtifactReference, CurrentArtifactContext, TestSpec
 from .path_safety import assert_no_reparse_components, lexical_absolute
+from .source_binding import declared_source_matches_selected
 
 
 _TOP_LEVEL_PROVENANCE_FILES = (
@@ -112,6 +113,13 @@ _LEGACY_ALLOWED_FIELDS: dict[str, set[str]] = {
 
 def _nullable(shape: Any) -> tuple[str, Any]:
     return ("nullable", shape)
+
+
+def _closed(
+    required: dict[str, Any],
+    optional: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    return ("closed-object", required, optional or {})
 
 
 _POSITION_SHAPE = {"line": int, "column": int, "offset": int}
@@ -318,6 +326,445 @@ _LEGACY_PRIMARY_RECORD_SHAPES: dict[str, tuple[tuple[tuple[str, ...], Any], ...]
     "dependency_policy": ((('dependencies',), [_DEPENDENCY_SHAPE]),),
     "coverage_design": ((('coverage_items',), [_COVERAGE_ITEM_SHAPE]),),
     "boundary_candidates": ((('input_candidates',), [_INPUT_CANDIDATE_SHAPE]),),
+}
+
+
+_RAW_WARNING_SHAPE = _closed(
+    {"code": str, "message": str},
+    {
+        "line_number": int,
+        "column": int,
+        "text": str,
+    },
+)
+_RAW_PREPROCESSOR_DIRECTIVE_SHAPE = {
+    "kind": str,
+    "line_number": int,
+    "column": int,
+    "raw": str,
+    "argument": str,
+    "active_state": str,
+    "nesting_level": int,
+}
+_RAW_INCLUDE_SHAPE = {
+    "target": str,
+    "style": str,
+    "line_number": int,
+    "resolved_candidates": [str],
+    "exists": _nullable(bool),
+    "active_state": str,
+}
+_RAW_MACRO_SHAPE = {
+    "name": str,
+    "value": _nullable(str),
+    "parameters": _nullable([str]),
+    "line_number": int,
+    "is_function_like": bool,
+    "active_state": str,
+}
+_RAW_TOKEN_SHAPE = {
+    "kind": str,
+    "value": str,
+    "line_number": int,
+    "column": int,
+    "start_offset": int,
+    "end_offset": int,
+}
+_RAW_TOKEN_SUMMARY_SHAPE = {
+    "identifier_count": int,
+    "keyword_count": int,
+    "number_count": int,
+    "operator_count": int,
+    "punctuation_count": int,
+    "unknown_count": int,
+}
+_RAW_CONDITIONAL_CONTEXT_SHAPE = {
+    "active_state": str,
+    "nesting_level": int,
+    "directives": [_RAW_PREPROCESSOR_DIRECTIVE_SHAPE],
+}
+_RAW_FUNCTION_CANDIDATE_SHAPE = {
+    "name": str,
+    "kind": str,
+    "confidence": str,
+    "header_range": _RANGE_SHAPE,
+    "body_range": _nullable(_RANGE_SHAPE),
+    "full_range": _RANGE_SHAPE,
+    "opening_brace": _nullable(_POSITION_SHAPE),
+    "closing_brace": _nullable(_POSITION_SHAPE),
+    "storage_class_hint": _nullable(str),
+    "conditional_context": _nullable(_RAW_CONDITIONAL_CONTEXT_SHAPE),
+    "signature_preview": str,
+    "reason": str,
+}
+_RAW_TYPE_INFO_SHAPE = {
+    "raw": str,
+    "normalized": str,
+    "base_type": _nullable(str),
+    "qualifiers": [str],
+    "storage_class": _nullable(str),
+    "pointer_level": int,
+    "is_const_pointer": _nullable(bool),
+    "is_struct": bool,
+    "is_union": bool,
+    "is_enum": bool,
+    "is_typedef_like": bool,
+    "is_function_pointer": bool,
+    "is_array": bool,
+    "array_dimensions": [str],
+    "confidence": str,
+}
+_RAW_SIGNATURE_PARAMETER_SHAPE = {
+    "index": int,
+    "name": _nullable(str),
+    "type": _RAW_TYPE_INFO_SHAPE,
+    "raw": str,
+    "direction_hint": str,
+    "is_variadic": bool,
+    "is_void": bool,
+    "default_value": _nullable(str),
+    "confidence": str,
+    "warnings": [_RAW_WARNING_SHAPE],
+}
+_RAW_PARAMETER_ACCESS_SHAPE = {
+    "parameter_name": str,
+    "access_kind": str,
+    "position": _POSITION_SHAPE,
+    "expression_range": _RANGE_SHAPE,
+    "access_path": _nullable(str),
+    "direction_hint_before_body": str,
+    "body_access_hint": str,
+    "confidence": str,
+    "evidence": str,
+}
+_RAW_GLOBAL_SIDE_EFFECT_SHAPE = {
+    "kind": str,
+    "name": _nullable(str),
+    "position": _POSITION_SHAPE,
+    "expression_range": _RANGE_SHAPE,
+    "reason": str,
+    "confidence": str,
+    "evidence": str,
+}
+_RAW_CALL_ARGUMENT_SHAPE = {
+    "index": int,
+    "raw": str,
+    "expression_range": _RANGE_SHAPE,
+    "identifiers": [_IDENTIFIER_USE_SHAPE],
+    "argument_kind": str,
+    "passing_mode_hint": str,
+    "confidence": str,
+    "warnings": [_RAW_WARNING_SHAPE],
+}
+_RAW_FUNCTION_CALL_SHAPE = {
+    "call_id": str,
+    "name": str,
+    "target_kind": str,
+    "call_range": _RANGE_SHAPE,
+    "name_position": _POSITION_SHAPE,
+    "arguments": [_RAW_CALL_ARGUMENT_SHAPE],
+    "return_usage": _RETURN_USAGE_SHAPE,
+    "nesting_level": int,
+    "conditional_context": _nullable(_RAW_CONDITIONAL_CONTEXT_SHAPE),
+    "confidence": str,
+    "evidence": str,
+    "warnings": [_RAW_WARNING_SHAPE],
+    "link_provider": _nullable(_LINK_PROVIDER_SHAPE),
+    "link_providers": [_LINK_PROVIDER_SHAPE],
+}
+_RAW_STUB_CANDIDATE_SHAPE = {
+    "name": str,
+    "reason": str,
+    "target_kind": str,
+    "call_count": int,
+    "return_value_control_needed": bool,
+    "argument_capture_needed": bool,
+    "side_effect_control_needed": bool,
+    "related_calls": [str],
+    "confidence": str,
+    "tags": [str],
+}
+_RAW_CALL_SIDE_EFFECT_SHAPE = {
+    "call_id": str,
+    "call_name": str,
+    "kind": str,
+    "argument_index": _nullable(int),
+    "related_identifier": _nullable(str),
+    "reason": str,
+    "confidence": str,
+    "evidence": str,
+}
+_RAW_EXTERNAL_OBJECT_SHAPE = {
+    "symbol": str,
+    "type_raw": str,
+    "configured_mode": str,
+    "resolved_mode": str,
+    "review_status": str,
+    "declaration_header": _nullable(str),
+    "definition_source": _nullable(str),
+    "definition_candidates": [str],
+    "evidence": [_DEPENDENCY_EVIDENCE_SHAPE],
+    "warnings": [str],
+}
+_RAW_CONDITION_OPERAND_SHAPE = {
+    "raw": str,
+    "operand_kind": str,
+    "resolved_as": str,
+    "name": _nullable(str),
+    "literal_value": _nullable(str),
+    "position": _POSITION_SHAPE,
+    "confidence": str,
+}
+_RAW_CONDITION_EXPRESSION_SHAPE = {
+    "condition_id": str,
+    "raw": str,
+    "expression_range": _RANGE_SHAPE,
+    "condition_kind": str,
+    "operands": [_RAW_CONDITION_OPERAND_SHAPE],
+    "operators": [str],
+    "related_variables": [str],
+    "related_calls": [str],
+    "complexity": str,
+    "active_state": str,
+    "confidence": str,
+    "warnings": [_RAW_WARNING_SHAPE],
+}
+_RAW_BRANCH_SHAPE = {
+    "branch_id": str,
+    "kind": str,
+    "condition": _nullable(_RAW_CONDITION_EXPRESSION_SHAPE),
+    "branch_range": _RANGE_SHAPE,
+    "body_range": _nullable(_RANGE_SHAPE),
+    "parent_branch_id": _nullable(str),
+    "nesting_level": int,
+    "has_else": bool,
+    "else_branch_id": _nullable(str),
+    "active_state": str,
+    "confidence": str,
+    "evidence": str,
+}
+_RAW_CASE_SHAPE = {
+    "case_id": str,
+    "label_raw": str,
+    "label_kind": str,
+    "label_value": _nullable(str),
+    "case_range": _RANGE_SHAPE,
+    "body_range": _nullable(_RANGE_SHAPE),
+    "fallthrough_candidate": bool,
+    "confidence": str,
+}
+_RAW_SWITCH_SHAPE = {
+    "switch_id": str,
+    "expression": _RAW_CONDITION_EXPRESSION_SHAPE,
+    "switch_range": _RANGE_SHAPE,
+    "cases": [_RAW_CASE_SHAPE],
+    "has_default": bool,
+    "active_state": str,
+    "confidence": str,
+}
+_RAW_LOOP_SHAPE = {
+    "loop_id": str,
+    "kind": str,
+    "condition": _nullable(_RAW_CONDITION_EXPRESSION_SHAPE),
+    "initializer_raw": _nullable(str),
+    "increment_raw": _nullable(str),
+    "loop_range": _RANGE_SHAPE,
+    "body_range": _nullable(_RANGE_SHAPE),
+    "coverage_hints": [str],
+    "active_state": str,
+    "confidence": str,
+}
+_RAW_TERNARY_SHAPE = {
+    "ternary_id": str,
+    "condition": _RAW_CONDITION_EXPRESSION_SHAPE,
+    "true_expression_raw": str,
+    "false_expression_raw": str,
+    "expression_range": _RANGE_SHAPE,
+    "confidence": str,
+}
+_RAW_RETURN_PATH_SHAPE = {
+    "return_id": str,
+    "return_range": _RANGE_SHAPE,
+    "expression_raw": _nullable(str),
+    "return_kind": str,
+    "related_variables": [str],
+    "related_calls": [str],
+    "active_state": str,
+    "confidence": str,
+    "evidence": str,
+}
+_RAW_STATE_CANDIDATE_SHAPE = {
+    "candidate_id": str,
+    "variable_name": str,
+    "scope": str,
+    "value_expression": str,
+    "value_kind": str,
+    "related_condition_id": _nullable(str),
+    "related_coverage_ids": [str],
+    "setup_hint": str,
+    "confidence": str,
+    "review_required": bool,
+    "evidence": str,
+}
+_RAW_STUB_RETURN_CANDIDATE_SHAPE = {
+    "candidate_id": str,
+    "call_name": str,
+    "value_expression": str,
+    "value_kind": str,
+    "related_call_id": _nullable(str),
+    "related_condition_id": _nullable(str),
+    "related_coverage_ids": [str],
+    "purpose": str,
+    "confidence": str,
+    "review_required": bool,
+    "evidence": str,
+}
+_RAW_EQUIVALENCE_CLASS_SHAPE = {
+    "class_id": str,
+    "target_name": str,
+    "target_kind": str,
+    "class_name": str,
+    "representative_values": [str],
+    "description": str,
+    "related_conditions": [str],
+    "related_coverage_ids": [str],
+    "confidence": str,
+    "review_required": bool,
+}
+_RAW_BOUNDARY_GROUP_SHAPE = {
+    "group_id": str,
+    "target_name": str,
+    "boundary_expression": str,
+    "operator": str,
+    "candidates": [str],
+    "related_condition_id": str,
+    "confidence": str,
+    "review_required": bool,
+}
+_RAW_COVERAGE_LINK_SHAPE = {
+    "coverage_id": str,
+    "candidate_ids": [str],
+    "link_reason": str,
+    "confidence": str,
+}
+_RAW_BOUNDARY_WARNING_SHAPE = _closed(
+    {"code": str, "message": str},
+    {"related_condition_id": str, "text": str},
+)
+
+
+_LEGACY_PAYLOAD_SHAPES: dict[str, Any] = {
+    "source_digest": _closed(
+        {
+            "schema_version": str,
+            "source": {
+                "path": str,
+                "encoding": str,
+                "newline": _nullable(str),
+                "sha256": str,
+                "line_count": int,
+                "warnings": [_RAW_WARNING_SHAPE],
+            },
+            "masking": {
+                "masked_source_path": _nullable(str),
+                "masked_ranges": [_MASKED_RANGE_SHAPE],
+            },
+            "preprocessor": {
+                "includes": [_RAW_INCLUDE_SHAPE],
+                "macros": [_RAW_MACRO_SHAPE],
+                "directives": [_RAW_PREPROCESSOR_DIRECTIVE_SHAPE],
+            },
+            "token_summary": _RAW_TOKEN_SUMMARY_SHAPE,
+            "warnings": [_RAW_WARNING_SHAPE],
+        },
+        {"tokens": [_RAW_TOKEN_SHAPE]},
+    ),
+    "function_location": {
+        "schema_version": str,
+        "source": {"path": str},
+        "function": {
+            "name": str,
+            "status": str,
+            "selected_candidate": _nullable(_RAW_FUNCTION_CANDIDATE_SHAPE),
+            "candidates": [_RAW_FUNCTION_CANDIDATE_SHAPE],
+            "candidate_count": int,
+        },
+        "warnings": [_RAW_WARNING_SHAPE],
+    },
+    "function_signature": {
+        "schema_version": str,
+        "source": {"path": str, "sha256": str},
+        "function": {
+            "name": str,
+            "status": str,
+            "style": str,
+            "confidence": str,
+            "signature_range": _RANGE_SHAPE,
+            "header_text_raw": str,
+            "header_text_normalized": str,
+            "storage_class": _nullable(str),
+            "calling_convention": _nullable(str),
+            "return_type": _RAW_TYPE_INFO_SHAPE,
+            "parameters": [_RAW_SIGNATURE_PARAMETER_SHAPE],
+            "takes_no_parameters": bool,
+        },
+        "warnings": [_RAW_WARNING_SHAPE],
+    },
+    "global_access": {
+        "schema_version": str,
+        "source": {"path": str, "sha256": str},
+        "function": {"name": str, "status": str},
+        "file_scope_declarations": [_VARIABLE_DECLARATION_SHAPE],
+        "local_declarations": [_VARIABLE_DECLARATION_SHAPE],
+        "parameter_accesses": [_RAW_PARAMETER_ACCESS_SHAPE],
+        "global_accesses": [_GLOBAL_ACCESS_SHAPE],
+        "unresolved_identifiers": [_IDENTIFIER_USE_SHAPE],
+        "side_effect_candidates": [_RAW_GLOBAL_SIDE_EFFECT_SHAPE],
+        "warnings": [_RAW_WARNING_SHAPE],
+    },
+    "call_report": {
+        "schema_version": str,
+        "source": {"path": str, "sha256": str},
+        "function": {"name": str, "status": str},
+        "calls": [_RAW_FUNCTION_CALL_SHAPE],
+        "stub_candidates": [_RAW_STUB_CANDIDATE_SHAPE],
+        "side_effect_candidates": [_RAW_CALL_SIDE_EFFECT_SHAPE],
+        "unresolved_calls": [_RAW_FUNCTION_CALL_SHAPE],
+        "warnings": [_RAW_WARNING_SHAPE],
+    },
+    "dependency_policy": {
+        "schema_version": str,
+        "source": {"path": str},
+        "function": {"name": str, "status": str},
+        "dependencies": [_DEPENDENCY_SHAPE],
+        "external_objects": [_RAW_EXTERNAL_OBJECT_SHAPE],
+        "warnings": [str],
+    },
+    "coverage_design": {
+        "schema_version": str,
+        "source": {"path": str, "sha256": str},
+        "function": {"name": str, "status": str},
+        "branches": [_RAW_BRANCH_SHAPE],
+        "switches": [_RAW_SWITCH_SHAPE],
+        "loops": [_RAW_LOOP_SHAPE],
+        "ternaries": [_RAW_TERNARY_SHAPE],
+        "return_paths": [_RAW_RETURN_PATH_SHAPE],
+        "condition_expressions": [_RAW_CONDITION_EXPRESSION_SHAPE],
+        "coverage_items": [_COVERAGE_ITEM_SHAPE],
+        "warnings": [_RAW_WARNING_SHAPE],
+    },
+    "boundary_candidates": {
+        "schema_version": str,
+        "source": {"path": str, "sha256": str},
+        "function": {"name": str, "status": str},
+        "input_candidates": [_INPUT_CANDIDATE_SHAPE],
+        "state_candidates": [_RAW_STATE_CANDIDATE_SHAPE],
+        "stub_return_candidates": [_RAW_STUB_RETURN_CANDIDATE_SHAPE],
+        "equivalence_classes": [_RAW_EQUIVALENCE_CLASS_SHAPE],
+        "boundary_groups": [_RAW_BOUNDARY_GROUP_SHAPE],
+        "coverage_links": [_RAW_COVERAGE_LINK_SHAPE],
+        "warnings": [_RAW_BOUNDARY_WARNING_SHAPE],
+    },
 }
 
 
@@ -577,17 +1024,12 @@ def _validate_legacy_primary_records(
     artifact_kind: str,
     payload: Mapping[str, Any],
 ) -> None:
-    for path, shape in _LEGACY_PRIMARY_RECORD_SHAPES[artifact_kind]:
-        value: Any = payload
-        rendered_path = "$"
-        for segment in path:
-            if not isinstance(value, Mapping) or segment not in value:
-                raise ValueError(
-                    f"Legacy {artifact_kind} provenance is missing {rendered_path}.{segment}."
-                )
-            value = value[segment]
-            rendered_path = f"{rendered_path}.{segment}"
-        _validate_json_shape(value, shape, rendered_path, artifact_kind)
+    _validate_json_shape(
+        dict(payload),
+        _LEGACY_PAYLOAD_SHAPES[artifact_kind],
+        "$",
+        artifact_kind,
+    )
 
 
 def _validate_json_shape(
@@ -604,6 +1046,39 @@ def _validate_json_shape(
         if value is None:
             return
         _validate_json_shape(value, shape[1], path, artifact_kind)
+        return
+    if (
+        isinstance(shape, tuple)
+        and len(shape) == 3
+        and shape[0] == "closed-object"
+    ):
+        if type(value) is not dict:
+            raise ValueError(
+                f"Legacy {artifact_kind} provenance field {path} must be an object."
+            )
+        required, optional = shape[1], shape[2]
+        missing = set(required) - set(value)
+        unknown = set(value) - set(required) - set(optional)
+        if missing or unknown:
+            details: list[str] = []
+            if missing:
+                details.append("missing " + ", ".join(sorted(missing)))
+            if unknown:
+                details.append("unknown " + ", ".join(sorted(unknown)))
+            raise ValueError(
+                f"Legacy {artifact_kind} provenance record {path} has "
+                + "; ".join(details)
+                + "."
+            )
+        for field, child_shape in required.items():
+            _validate_json_shape(
+                value[field], child_shape, f"{path}.{field}", artifact_kind
+            )
+        for field, child_shape in optional.items():
+            if field in value:
+                _validate_json_shape(
+                    value[field], child_shape, f"{path}.{field}", artifact_kind
+                )
         return
     if isinstance(shape, list):
         if type(value) is not list:
@@ -781,16 +1256,11 @@ def _declared_source_matches(
     expected_relative: str,
     selected_source: Path,
 ) -> bool:
-    normalized = declared.replace("\\", "/")
-    is_absolute = bool(re.match(r"^[A-Za-z]:/", normalized)) or Path(
-        normalized
-    ).is_absolute()
-    if is_absolute:
-        return lexical_absolute(normalized) == lexical_absolute(selected_source)
-    try:
-        return _relative_path(normalized) == expected_relative
-    except ValueError:
-        return False
+    return declared_source_matches_selected(
+        declared,
+        expected_relative,
+        selected_source,
+    )
 
 
 def artifact_reference(

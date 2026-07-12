@@ -88,6 +88,34 @@ def write_coverage(path: Path) -> None:
 
 
 class TestSpecFormalReviewLegacyAliasTests(unittest.TestCase):
+    def test_foreign_absolute_same_suffix_companion_is_rejected_without_rewrite(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            legacy_path, signature_path = write_genuine_legacy_pair(
+                root / "reports"
+            )
+            foreign_source = root / "foreign" / "src" / "control.c"
+            foreign_source.parent.mkdir(parents=True)
+            foreign_source.write_text("same bytes", encoding="utf-8")
+            signature = json.loads(signature_path.read_text(encoding="utf-8"))
+            signature["source"]["path"] = foreign_source.as_posix()
+            signature_path.write_text(
+                json.dumps(signature, indent=2),
+                encoding="utf-8",
+            )
+            before_legacy = legacy_path.read_bytes()
+            before_signature = signature_path.read_bytes()
+
+            with self.assertRaises(TestSpecContractError):
+                load_test_spec_for_consumer(
+                    legacy_path,
+                    function_signature_path=signature_path,
+                    allow_legacy_alias=True,
+                )
+
+            self.assertEqual(before_legacy, legacy_path.read_bytes())
+            self.assertEqual(before_signature, signature_path.read_bytes())
+
     def test_legacy_alias_leaf_and_parent_symlinks_are_rejected(self):
         for mutation in ("leaf", "parent"):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temp_dir:
