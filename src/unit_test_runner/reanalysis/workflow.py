@@ -15,7 +15,9 @@ from unit_test_runner.test_spec import (
     load_test_spec,
     load_legacy_test_case_design_view,
     save_test_spec,
+    TestSpecContractError,
     test_spec_consumer_payload,
+    validate_test_spec,
 )
 
 from .coverage_diff import compare_coverage_designs
@@ -24,7 +26,9 @@ from .dependency_diff import compare_dependencies
 from .reanalysis_models import (
     AnalysisSnapshot,
     ChangeImpactReport,
+    ManualMergeItem,
     ReanalysisPolicy,
+    ReanalysisWarning,
     RegressionRecommendation,
     SnapshotArtifact,
     SourceChange,
@@ -33,7 +37,7 @@ from .reanalysis_report_writer import write_reanalysis_reports
 from .regression_selector import select_regression_tests
 from .signature_diff import compare_signatures
 from .snapshot_builder import build_analysis_snapshot
-from .test_case_reconciler import reconcile_test_cases
+from .test_case_reconciler import PROTECTED_FIELDS, reconcile_test_cases
 
 
 def reanalyze_function_workflow(
@@ -141,7 +145,6 @@ def reanalyze_function_workflow(
         ),
         warnings=previous_warnings + current_warnings,
     )
-    paths = write_reanalysis_reports(out_dir, change_impact, reconciliation, selection, None)
     canonical_path = out_dir / "reports" / "test_spec.json"
     persisted_spec = load_test_spec(canonical_path, mode=ContractMode.STRICT) if canonical_path.exists() else previous_spec
     if policy.overwrite_test_case_design:
@@ -156,9 +159,13 @@ def reanalyze_function_workflow(
             current_spec,
             persisted_spec,
             updated_design,
+            reconciliation=reconciliation,
         )
         candidate.revision = persisted_spec.revision
         context = build_current_artifact_context(out_dir, candidate)
+        violations = validate_test_spec(candidate, current_context=context)
+        if violations:
+            raise TestSpecContractError(violations)
         save_test_spec(
             canonical_path,
             candidate,
@@ -171,6 +178,9 @@ def reanalyze_function_workflow(
             canonical_path.parent,
             canonical_path=canonical_path,
         )
+    paths = write_reanalysis_reports(
+        out_dir, change_impact, reconciliation, selection, None
+    )
     result_spec = persisted_spec or current_spec
     return {
         "status": "reanalysis_completed",
@@ -189,11 +199,18 @@ def _merge_reanalysis_candidate(
     current_spec,
     previous_spec,
     updated_design: dict[str, Any],
+    *,
+    reconciliation=None,
 ):
     candidate = copy.deepcopy(current_spec)
     candidate.test_cases = copy.deepcopy(updated_design.get("test_cases") or [])
-    candidate.additional_case_candidates = copy.deepcopy(
-        current_spec.additional_case_candidates
+    previous_candidates = copy.deepcopy(
+        updated_design.get("additional_case_candidates")
+        or previous_spec.additional_case_candidates
+    )
+    candidate.additional_case_candidates, merge_conflicts = _merge_candidate_cases(
+        previous_candidates,
+        current_spec.additional_case_candidates,
     )
     candidate.review_item_ids = list(
         dict.fromkeys(
@@ -210,6 +227,34 @@ def _merge_reanalysis_candidate(
         elif isinstance(copied, dict):
             unkeyed.append(copied)
     candidate.unresolved_items = list(unresolved_by_id.values()) + unkeyed
+    executable_ids = {
+        str(case.get("test_case_id") or "")
+        for case in candidate.test_cases
+    }
+    overlapping_ids = executable_ids & {
+        str(case.get("test_case_id") or "")
+        for case in candidate.additional_case_candidates
+    }
+    if overlapping_ids:
+        retained: list[dict[str, Any]] = []
+        candidate_by_id = {
+            str(case.get("test_case_id") or ""): index
+            for index, case in enumerate(candidate.additional_case_candidates)
+        }
+        for case in candidate.test_cases:
+            case_id = str(case.get("test_case_id") or "")
+            if case_id not in overlapping_ids:
+                retained.append(case)
+                continue
+            index = candidate_by_id[case_id]
+            merged, fields = _merge_candidate_case(
+                case,
+                candidate.additional_case_candidates[index],
+            )
+            candidate.additional_case_candidates[index] = merged
+            merge_conflicts.append((case_id, "case_classification"))
+            merge_conflicts.extend((case_id, field) for field in fields)
+        candidate.test_cases = retained
     blocking_case_ids = {
         str(case_id)
         for item in candidate.unresolved_items
@@ -233,7 +278,13 @@ def _merge_reanalysis_candidate(
     for case in demoted_cases:
         case_id = str(case.get("test_case_id") or "")
         if case_id in candidates_by_id:
-            candidate.additional_case_candidates[candidates_by_id[case_id]] = case
+            index = candidates_by_id[case_id]
+            merged, fields = _merge_candidate_case(
+                case,
+                candidate.additional_case_candidates[index],
+            )
+            candidate.additional_case_candidates[index] = merged
+            merge_conflicts.extend((case_id, field) for field in fields)
         else:
             candidates_by_id[case_id] = len(candidate.additional_case_candidates)
             candidate.additional_case_candidates.append(case)
@@ -244,7 +295,168 @@ def _merge_reanalysis_candidate(
         if key not in warning_keys:
             warning_keys.add(key)
             candidate.warnings.append(copy.deepcopy(warning))
+    _record_merge_conflicts(candidate, merge_conflicts, reconciliation)
     return candidate
+
+
+def _merge_candidate_cases(
+    previous_cases: list[dict[str, Any]],
+    current_cases: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[tuple[str, str]]]:
+    current_by_id = {
+        str(case.get("test_case_id") or ""): case for case in current_cases
+    }
+    merged_cases: list[dict[str, Any]] = []
+    conflicts: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for previous in previous_cases:
+        case_id = str(previous.get("test_case_id") or "")
+        seen.add(case_id)
+        current = current_by_id.get(case_id)
+        if current is None:
+            merged_cases.append(copy.deepcopy(previous))
+            continue
+        merged, fields = _merge_candidate_case(previous, current)
+        merged_cases.append(merged)
+        conflicts.extend((case_id, field) for field in fields)
+    for current in current_cases:
+        case_id = str(current.get("test_case_id") or "")
+        if case_id not in seen:
+            merged_cases.append(copy.deepcopy(current))
+    return merged_cases, conflicts
+
+
+def _merge_candidate_case(
+    previous: dict[str, Any],
+    current: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    merged = copy.deepcopy(previous)
+    conflicts: list[str] = []
+    for field, current_value in current.items():
+        if field == "test_case_id":
+            continue
+        if field == "coverage_links":
+            merged[field] = copy.deepcopy(current_value)
+            continue
+        if field in {"review_item_ids", "candidate_links"}:
+            previous_values = list(previous.get(field) or [])
+            merged[field] = list(
+                dict.fromkeys(previous_values + list(current_value or []))
+            )
+            continue
+        if field == "warnings":
+            values = list(previous.get(field) or []) + list(current_value or [])
+            unique: dict[str, Any] = {}
+            for value in values:
+                key = json.dumps(value, sort_keys=True, ensure_ascii=False)
+                unique.setdefault(key, copy.deepcopy(value))
+            merged[field] = list(unique.values())
+            continue
+        if field in PROTECTED_FIELDS:
+            if field not in previous:
+                merged[field] = copy.deepcopy(current_value)
+            elif previous[field] != current_value:
+                conflicts.append(field)
+            continue
+        merged[field] = copy.deepcopy(current_value)
+    return merged, conflicts
+
+
+def _record_merge_conflicts(
+    candidate,
+    conflicts: list[tuple[str, str]],
+    reconciliation=None,
+) -> None:
+    seen: set[tuple[str, str]] = set()
+    unresolved_ids = {
+        str(item.get("item_id") or "")
+        for item in candidate.unresolved_items
+        if isinstance(item, dict)
+    }
+    warning_keys = {
+        json.dumps(item, sort_keys=True, ensure_ascii=False)
+        for item in candidate.warnings
+    }
+    cases_by_id = {
+        str(case.get("test_case_id") or ""): case
+        for case in candidate.additional_case_candidates
+    }
+    for case_id, field_name in conflicts:
+        key = (case_id, field_name)
+        if key in seen:
+            continue
+        seen.add(key)
+        suffix = hashlib.sha256(
+            f"{case_id}\0{field_name}".encode("utf-8")
+        ).hexdigest()[:12]
+        item_id = f"review-reanalysis-conflict-{suffix}"
+        if item_id not in candidate.review_item_ids:
+            candidate.review_item_ids.append(item_id)
+        case = cases_by_id.get(case_id)
+        if case is not None:
+            case["review_item_ids"] = list(
+                dict.fromkeys(list(case.get("review_item_ids") or []) + [item_id])
+            )
+        unresolved = {
+                "item_id": item_id,
+                "item_kind": "reanalysis_merge_conflict",
+                "description": (
+                    f"Manual {field_name} for {case_id} differs from the current "
+                    "generated proposal."
+                ),
+                "related_test_case_ids": [case_id],
+                "reason": "manual_and_generated_values_differ",
+                "suggested_action": (
+                    "Review the preserved manual value against the generated proposal."
+                ),
+                "severity": "blocking",
+            }
+        if item_id not in unresolved_ids:
+            candidate.unresolved_items.append(unresolved)
+            unresolved_ids.add(item_id)
+        warning = {
+                "code": "reanalysis_merge_conflict",
+                "message": (
+                    f"Preserved manual {field_name} for {case_id}; review is required."
+                ),
+                "related_test_case_id": case_id,
+                "field_name": field_name,
+            }
+        warning_key = json.dumps(warning, sort_keys=True, ensure_ascii=False)
+        if warning_key not in warning_keys:
+            candidate.warnings.append(warning)
+            warning_keys.add(warning_key)
+        if reconciliation is not None:
+            reconciliation.status = "review_required"
+            if not any(
+                item.item_id == item_id
+                for item in reconciliation.manual_merge_items
+            ):
+                reconciliation.manual_merge_items.append(
+                    ManualMergeItem(
+                        item_id=item_id,
+                        test_case_id=case_id,
+                        field_name=field_name,
+                        previous_value=None,
+                        proposed_value=None,
+                        reason="manual_and_generated_values_differ",
+                        suggested_action=(
+                            "Review the preserved manual value against the generated proposal."
+                        ),
+                    )
+                )
+            if not any(
+                item.code == "reanalysis_merge_conflict"
+                and item.related_test_case_id == case_id
+                for item in reconciliation.warnings
+            ):
+                reconciliation.warnings.append(
+                    ReanalysisWarning(
+                        "reanalysis_merge_conflict",
+                        f"Manual candidate fields for {case_id} require review.",
+                        related_test_case_id=case_id,
+                    )
+                )
 
 
 def _is_blocking_unresolved(item: Any) -> bool:

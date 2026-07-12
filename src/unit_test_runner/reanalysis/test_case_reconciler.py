@@ -16,12 +16,20 @@ from .reanalysis_models import (
 
 PROTECTED_FIELDS = [
     "title",
+    "target_function",
     "purpose",
+    "priority",
+    "case_kind",
     "preconditions",
     "input_assignments",
     "state_setups",
     "stub_setups",
+    "dependency_overrides",
+    "execution_steps",
     "expected_observations",
+    "candidate_links",
+    "confidence",
+    "warnings",
     "review_item_ids",
 ]
 
