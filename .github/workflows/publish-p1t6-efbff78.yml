@@ -1,0 +1,44 @@
+name: Publish Phase 1 Task 6 efbff78 checkpoint
+
+on:
+  push:
+    branches:
+      - codex/p1t6-upload-efbff78
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout upload branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reassemble and verify bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat docs/checkpoints/p1t6-bundle/part00.b64 \
+              docs/checkpoints/p1t6-bundle/part01.b64 \
+            | base64 --decode > "$RUNNER_TEMP/p1t6.bundle"
+          test "$(sha256sum "$RUNNER_TEMP/p1t6.bundle" | awk '{print $1}')" = \
+            "2da8b42282dce234ab301cdb16654732acbd26b908df4f07f47553fdf8ab2f02"
+          git bundle verify "$RUNNER_TEMP/p1t6.bundle"
+          git fetch "$RUNNER_TEMP/p1t6.bundle" \
+            refs/heads/codex/p1t6-review-decisions-readiness:refs/remotes/bundle/p1t6
+          test "$(git rev-parse refs/remotes/bundle/p1t6)" = \
+            "efbff7825b94afda01d86d15b8f0ec6be520225b"
+
+      - name: Publish task branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin \
+            refs/remotes/bundle/p1t6:refs/heads/codex/p1t6-review-decisions-readiness
