@@ -100,9 +100,9 @@ def _view_identity(markdown: Path, csv_path: Path) -> tuple[int, str]:
         rows = list(csv.DictReader(handle))
     if not rows:
         raise AssertionError("Generated TestSpec CSV has no rows.")
-    if int(rows[0]["revision"]) != revision:
+    if any(int(row["revision"]) != revision for row in rows):
         raise AssertionError("Markdown and CSV revisions differ.")
-    if rows[0]["canonical_sha256"] != sha256:
+    if any(row["canonical_sha256"] != sha256 for row in rows):
         raise AssertionError("Markdown and CSV canonical hashes differ.")
     return revision, sha256
 
@@ -310,6 +310,15 @@ class TestSpecFormalReviewWriterSnapshotTests(unittest.TestCase):
                 canonical.parent / "test_spec.csv",
             )
             self.assertEqual(3, revision)
+            self.assertFalse((canonical.parent / ".test_spec.json.lock").exists())
+            self.assertEqual(
+                [],
+                [
+                    item.name
+                    for item in canonical.parent.iterdir()
+                    if item.name.endswith(".tmp")
+                ],
+            )
 
     def test_dossier_analyze_uses_its_rev2_snapshot_after_rev3_interleave(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -296,7 +296,7 @@ class TestSpecFormalReviewReanalysisTests(unittest.TestCase):
                 side_effect=invalid_merge,
             ), mock.patch.object(
                 workflow_module,
-                "save_test_spec",
+                "save_test_spec_snapshot",
                 side_effect=AssertionError("invalid candidate reached save"),
             ) as save:
                 with self.assertRaises(TestSpecContractError):
@@ -330,7 +330,7 @@ class TestSpecFormalReviewReanalysisTests(unittest.TestCase):
                 phase="design",
             )
             canonical = out / "reports" / "test_spec.json"
-            original_save = workflow_module.save_test_spec
+            original_save = workflow_module.save_test_spec_snapshot
             concurrent_bytes = None
 
             def interleaved_save(path, candidate, *, expected_revision, current_context):
@@ -354,7 +354,7 @@ class TestSpecFormalReviewReanalysisTests(unittest.TestCase):
 
             with mock.patch.object(
                 workflow_module,
-                "save_test_spec",
+                "save_test_spec_snapshot",
                 side_effect=interleaved_save,
             ):
                 with self.assertRaises(StaleRevisionError):

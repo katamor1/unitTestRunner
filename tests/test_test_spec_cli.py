@@ -9,16 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from unit_test_runner.test_spec import (
-    ArtifactReference,
-    CurrentArtifactContext,
-    TestSpec,
-    save_test_spec,
-    signature_sha256,
-    stable_function_id,
-)
-
-from tests.spec_support import copied_payload
+from tests.spec_support import write_canonical_test_spec
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -41,202 +32,21 @@ def run_module(*args: str):
 def create_workspace(root: Path) -> Path:
     source = root / "src" / "control.c"
     source.parent.mkdir(parents=True)
-    source.write_text("int Control_Update(int mode) { return mode; }\n", encoding="utf-8")
-    reports = root / "reports"
-    reports.mkdir()
-    source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
-    source_identity = {"path": "src/control.c", "sha256": source_sha256}
-    function_identity = {"name": "Control_Update", "status": "fixture"}
-    position = {"line": 1, "column": 1, "offset": 0}
-    source_range = {"start": dict(position), "end": dict(position)}
-    type_info = {
-        "raw": "int",
-        "normalized": "int",
-        "base_type": "int",
-        "qualifiers": [],
-        "storage_class": None,
-        "pointer_level": 0,
-        "is_const_pointer": None,
-        "is_struct": False,
-        "is_union": False,
-        "is_enum": False,
-        "is_typedef_like": False,
-        "is_function_pointer": False,
-        "is_array": False,
-        "array_dimensions": [],
-        "confidence": "high",
-    }
-    signature_payload = {
-        "schema_version": "0.1",
-        "source": source_identity,
-        "function": {
-            "name": "Control_Update",
-            "status": "parsed",
-            "style": "ansi",
-            "confidence": "high",
-            "signature_range": source_range,
+    source.write_text(
+        "int Control_Update(int mode) { return mode; }\n",
+        encoding="utf-8",
+    )
+    return write_canonical_test_spec(
+        root,
+        source_path="src/control.c",
+        function_name="Control_Update",
+        test_case_id="tc-control-update-001",
+        expected_expression="OK",
+        function_fields={
             "header_text_raw": "int Control_Update(int mode)",
             "header_text_normalized": "int Control_Update(int mode)",
-            "storage_class": None,
-            "calling_convention": None,
-            "return_type": type_info,
-            "parameters": [],
-            "takes_no_parameters": True,
         },
-        "warnings": [],
-    }
-    provenance_payloads = {
-        "source_digest": (
-            "source_digest.json",
-            {
-                "schema_version": "0.1",
-                "source": {
-                    "path": "src/control.c",
-                    "encoding": "utf-8",
-                    "newline": "LF",
-                    "sha256": source_sha256,
-                    "line_count": 1,
-                    "warnings": [],
-                },
-                "masking": {
-                    "masked_source_path": None,
-                    "masked_ranges": [],
-                },
-                "preprocessor": {
-                    "includes": [],
-                    "macros": [],
-                    "directives": [],
-                },
-                "token_summary": {},
-                "warnings": [],
-                "tokens": [],
-            },
-        ),
-        "function_location": (
-            "function_location.json",
-            {
-                "schema_version": "0.1",
-                "source": {"path": "src/control.c"},
-                "function": {
-                    "name": "Control_Update",
-                    "status": "not_found",
-                    "selected_candidate": None,
-                    "candidates": [],
-                    "candidate_count": 0,
-                },
-                "warnings": [],
-            },
-        ),
-        "function_signature": ("function_signature.json", signature_payload),
-        "global_access": (
-            "global_access.json",
-            {
-                "schema_version": "0.1",
-                "source": source_identity,
-                "function": function_identity,
-                "file_scope_declarations": [],
-                "local_declarations": [],
-                "parameter_accesses": [],
-                "global_accesses": [],
-                "unresolved_identifiers": [],
-                "side_effect_candidates": [],
-                "warnings": [],
-            },
-        ),
-        "call_report": (
-            "call_report.json",
-            {
-                "schema_version": "0.1",
-                "source": source_identity,
-                "function": function_identity,
-                "calls": [],
-                "stub_candidates": [],
-                "side_effect_candidates": [],
-                "unresolved_calls": [],
-                "warnings": [],
-            },
-        ),
-        "dependency_policy": (
-            "dependency_policy.json",
-            {
-                "schema_version": "0.1",
-                "source": {"path": "src/control.c"},
-                "function": function_identity,
-                "dependencies": [],
-                "external_objects": [],
-                "warnings": [],
-            },
-        ),
-        "coverage_design": (
-            "coverage_design.json",
-            {
-                "schema_version": "0.1",
-                "source": source_identity,
-                "function": function_identity,
-                "branches": [],
-                "switches": [],
-                "loops": [],
-                "ternaries": [],
-                "return_paths": [],
-                "condition_expressions": [],
-                "coverage_items": [],
-                "warnings": [],
-            },
-        ),
-        "boundary_candidates": (
-            "boundary_equivalence_candidates.json",
-            {
-                "schema_version": "0.1",
-                "source": source_identity,
-                "function": function_identity,
-                "input_candidates": [],
-                "state_candidates": [],
-                "stub_return_candidates": [],
-                "equivalence_classes": [],
-                "boundary_groups": [],
-                "coverage_links": [],
-                "warnings": [],
-            },
-        ),
-    }
-    references = []
-    for artifact_kind, (filename, artifact_payload) in provenance_payloads.items():
-        artifact_path = reports / filename
-        artifact_path.write_text(
-            json.dumps(artifact_payload, indent=2) + "\n", encoding="utf-8"
-        )
-        references.append(
-            ArtifactReference(
-                artifact_kind=artifact_kind,
-                path=f"reports/{filename}",
-                sha256=hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
-            )
-        )
-    payload = copied_payload()
-    function_id = stable_function_id("src/control.c", "Control_Update")
-    payload["subject"] = {
-        "function_id": function_id,
-        "source_path": "src/control.c",
-        "source_sha256": signature_payload["source"]["sha256"],
-    }
-    payload["data"]["source"] = dict(signature_payload["source"])
-    payload["data"]["function"] = {
-        "function_id": function_id,
-        "name": "Control_Update",
-        "signature_sha256": signature_sha256(signature_payload),
-    }
-    payload["data"]["generated_from"] = [item.to_dict() for item in references]
-    context = CurrentArtifactContext(
-        source_path="src/control.c",
-        source_sha256=signature_payload["source"]["sha256"],
-        function_id=function_id,
-        function_name="Control_Update",
-        signature_sha256=signature_sha256(signature_payload),
-        workspace_root=root,
-        generated_from=tuple(references),
     )
-    save_test_spec(reports / "test_spec.json", TestSpec.from_payload(payload), expected_revision=None, current_context=context)
-    return reports / "test_spec.json"
 
 
 class TestSpecCliTests(unittest.TestCase):
@@ -244,7 +54,9 @@ class TestSpecCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             create_workspace(workspace)
-            get_result = run_module("--json", "get-test-spec", "--workspace", str(workspace))
+            get_result = run_module(
+                "--json", "get-test-spec", "--workspace", str(workspace)
+            )
 
             self.assertEqual(0, get_result.returncode, get_result.stderr)
             get_payload = json.loads(get_result.stdout)
@@ -254,12 +66,29 @@ class TestSpecCliTests(unittest.TestCase):
 
             patch_path = workspace / "patch.json"
             patch_path.write_text(
-                json.dumps({"operations": [{"op": "replace", "case_id": "tc-control-update-001", "path": "/title", "value": "CLI updated"}]}),
+                json.dumps(
+                    {
+                        "operations": [
+                            {
+                                "op": "replace",
+                                "case_id": "tc-control-update-001",
+                                "path": "/title",
+                                "value": "CLI updated",
+                            }
+                        ]
+                    }
+                ),
                 encoding="utf-8",
             )
             update_result = run_module(
-                "--json", "update-test-spec", "--workspace", str(workspace),
-                "--patch", str(patch_path), "--expected-revision", "1",
+                "--json",
+                "update-test-spec",
+                "--workspace",
+                str(workspace),
+                "--patch",
+                str(patch_path),
+                "--expected-revision",
+                "1",
             )
 
             self.assertEqual(0, update_result.returncode, update_result.stderr)
@@ -277,15 +106,13 @@ class TestSpecCliTests(unittest.TestCase):
             artifact = next(
                 item for item in artifacts if item["artifact_kind"] == "test_spec"
             )
-            self.assertEqual("test_spec", artifact["artifact_kind"])
             self.assertEqual("reports/test_spec.json", artifact["path"])
-            self.assertEqual(hashlib.sha256((workspace / artifact["path"]).read_bytes()).hexdigest(), artifact["sha256"])
-            for view_artifact in artifacts:
+            for produced in artifacts:
                 self.assertEqual(
                     hashlib.sha256(
-                        (workspace / view_artifact["path"]).read_bytes()
+                        (workspace / produced["path"]).read_bytes()
                     ).hexdigest(),
-                    view_artifact["sha256"],
+                    produced["sha256"],
                 )
 
     def test_stale_revision_and_malformed_patch_are_explicit_nonzero_errors_without_partial_write(self):
@@ -293,12 +120,32 @@ class TestSpecCliTests(unittest.TestCase):
             workspace = Path(temp_dir)
             spec_path = create_workspace(workspace)
             patch_path = workspace / "patch.json"
-            patch_path.write_text(json.dumps({"operations": [{"op": "replace", "case_id": "missing", "path": "/title", "value": "x"}]}), encoding="utf-8")
+            patch_path.write_text(
+                json.dumps(
+                    {
+                        "operations": [
+                            {
+                                "op": "replace",
+                                "case_id": "missing",
+                                "path": "/title",
+                                "value": "x",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
             before = spec_path.read_bytes()
 
             invalid = run_module(
-                "--json", "update-test-spec", "--workspace", str(workspace),
-                "--patch", str(patch_path), "--expected-revision", "1",
+                "--json",
+                "update-test-spec",
+                "--workspace",
+                str(workspace),
+                "--patch",
+                str(patch_path),
+                "--expected-revision",
+                "1",
             )
 
             self.assertNotEqual(0, invalid.returncode)

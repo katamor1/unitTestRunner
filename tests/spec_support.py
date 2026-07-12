@@ -117,6 +117,241 @@ def current_context(workspace: Path | None = None):
     )
 
 
+def raw_v01_provenance_fixtures(
+    *,
+    source_path: str,
+    source_sha256: str,
+    function_name: str,
+    function_fields: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Return complete raw v0.1 producer shapes for canonical fixture workspaces."""
+    position = {"line": 1, "column": 1, "offset": 0}
+    source_range = {"start": copy.deepcopy(position), "end": copy.deepcopy(position)}
+    type_info = {
+        "raw": "int",
+        "normalized": "int",
+        "base_type": "int",
+        "qualifiers": [],
+        "storage_class": None,
+        "pointer_level": 0,
+        "is_const_pointer": None,
+        "is_struct": False,
+        "is_union": False,
+        "is_enum": False,
+        "is_typedef_like": False,
+        "is_function_pointer": False,
+        "is_array": False,
+        "array_dimensions": [],
+        "confidence": "high",
+    }
+    overrides = copy.deepcopy(function_fields or {})
+    return_type_override = overrides.pop("return_type", None)
+    if isinstance(return_type_override, dict):
+        type_info = _deep_fixture_merge(type_info, return_type_override)
+    signature_function = {
+        "name": function_name,
+        "status": "parsed",
+        "style": "ansi",
+        "confidence": "high",
+        "signature_range": source_range,
+        "header_text_raw": f"int {function_name}(void)",
+        "header_text_normalized": f"int {function_name}(void)",
+        "storage_class": None,
+        "calling_convention": None,
+        "return_type": type_info,
+        "parameters": [],
+        "takes_no_parameters": True,
+    }
+    signature_function = _deep_fixture_merge(signature_function, overrides)
+    signature_function["name"] = function_name
+    signature_function["takes_no_parameters"] = not bool(
+        signature_function.get("parameters")
+    )
+    source_identity = {"path": source_path, "sha256": source_sha256}
+    function_identity = {"name": function_name, "status": "fixture"}
+    return {
+        "source_digest": {
+            "schema_version": "0.1",
+            "source": {
+                "path": source_path,
+                "encoding": "utf-8",
+                "newline": "LF",
+                "sha256": source_sha256,
+                "line_count": 1,
+                "warnings": [],
+            },
+            "masking": {"masked_source_path": None, "masked_ranges": []},
+            "preprocessor": {"includes": [], "macros": [], "directives": []},
+            "token_summary": {},
+            "warnings": [],
+            "tokens": [],
+        },
+        "function_location": {
+            "schema_version": "0.1",
+            "source": {"path": source_path},
+            "function": {
+                "name": function_name,
+                "status": "not_found",
+                "selected_candidate": None,
+                "candidates": [],
+                "candidate_count": 0,
+            },
+            "warnings": [],
+        },
+        "function_signature": {
+            "schema_version": "0.1",
+            "source": copy.deepcopy(source_identity),
+            "function": signature_function,
+            "warnings": [],
+        },
+        "global_access": {
+            "schema_version": "0.1",
+            "source": copy.deepcopy(source_identity),
+            "function": copy.deepcopy(function_identity),
+            "file_scope_declarations": [],
+            "local_declarations": [],
+            "parameter_accesses": [],
+            "global_accesses": [],
+            "unresolved_identifiers": [],
+            "side_effect_candidates": [],
+            "warnings": [],
+        },
+        "call_report": {
+            "schema_version": "0.1",
+            "source": copy.deepcopy(source_identity),
+            "function": copy.deepcopy(function_identity),
+            "calls": [],
+            "stub_candidates": [],
+            "side_effect_candidates": [],
+            "unresolved_calls": [],
+            "warnings": [],
+        },
+        "dependency_policy": {
+            "schema_version": "0.1",
+            "source": {"path": source_path},
+            "function": copy.deepcopy(function_identity),
+            "dependencies": [],
+            "external_objects": [],
+            "warnings": [],
+        },
+        "coverage_design": {
+            "schema_version": "0.1",
+            "source": copy.deepcopy(source_identity),
+            "function": copy.deepcopy(function_identity),
+            "branches": [],
+            "switches": [],
+            "loops": [],
+            "ternaries": [],
+            "return_paths": [],
+            "condition_expressions": [],
+            "coverage_items": [],
+            "warnings": [],
+        },
+        "boundary_candidates": {
+            "schema_version": "0.1",
+            "source": copy.deepcopy(source_identity),
+            "function": copy.deepcopy(function_identity),
+            "input_candidates": [],
+            "state_candidates": [],
+            "stub_return_candidates": [],
+            "equivalence_classes": [],
+            "boundary_groups": [],
+            "coverage_links": [],
+            "warnings": [],
+        },
+    }
+
+
+def complete_raw_v01_fixture(
+    artifact_kind: str,
+    payload: dict[str, Any],
+    defaults: dict[str, Any],
+) -> dict[str, Any]:
+    completed = _deep_fixture_merge(defaults, payload)
+    if artifact_kind == "call_report":
+        for collection in ("calls", "unresolved_calls"):
+            completed[collection] = [
+                _deep_fixture_merge(_function_call_fixture(item), item)
+                for item in completed[collection]
+            ]
+    elif artifact_kind == "dependency_policy":
+        completed["dependencies"] = [
+            _deep_fixture_merge(_dependency_fixture(item), item)
+            for item in completed["dependencies"]
+        ]
+    return completed
+
+
+def _deep_fixture_merge(defaults: Any, supplied: Any) -> Any:
+    if isinstance(defaults, dict) and isinstance(supplied, dict):
+        merged = copy.deepcopy(defaults)
+        for key, value in supplied.items():
+            merged[key] = (
+                _deep_fixture_merge(merged[key], value)
+                if key in merged
+                else copy.deepcopy(value)
+            )
+        return merged
+    return copy.deepcopy(supplied)
+
+
+def _function_call_fixture(item: dict[str, Any]) -> dict[str, Any]:
+    position = {"line": 1, "column": 1, "offset": 0}
+    source_range = {"start": copy.deepcopy(position), "end": copy.deepcopy(position)}
+    return {
+        "call_id": str(item.get("call_id") or "CALL_FIXTURE"),
+        "name": str(item.get("name") or "FixtureCall"),
+        "target_kind": str(item.get("target_kind") or "external_function"),
+        "call_range": copy.deepcopy(source_range),
+        "name_position": copy.deepcopy(position),
+        "arguments": [],
+        "return_usage": {
+            "usage_kind": "ignored",
+            "consumer_range": None,
+            "assigned_to": None,
+            "compared_with": None,
+            "evidence": "fixture",
+            "confidence": "high",
+        },
+        "nesting_level": 0,
+        "conditional_context": None,
+        "confidence": "high",
+        "evidence": "fixture",
+        "warnings": [],
+        "link_provider": None,
+        "link_providers": [],
+    }
+
+
+def _dependency_fixture(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "callee": str(item.get("callee") or "FixtureCall"),
+        "target_kind": str(item.get("target_kind") or "external_function"),
+        "configured_mode": "stub",
+        "resolved_mode": "stub",
+        "review_status": "resolved",
+        "signature": {
+            "resolution": "exact",
+            "return_type_raw": "int",
+            "return_type_canonical": "int",
+            "return_type_category": "scalar",
+            "calling_convention": None,
+            "parameters": [],
+            "prototype": None,
+            "declaration_source": None,
+            "definition_source": None,
+            "conflicts": [],
+            "confidence": "high",
+        },
+        "implementation_source": None,
+        "related_call_ids": [],
+        "rewrite_sites": [],
+        "evidence": [],
+        "shared_globals": [],
+        "warnings": [],
+    }
+
+
 def write_canonical_test_spec(
     workspace: Path,
     *,
@@ -144,77 +379,18 @@ def write_canonical_test_spec(
     reports = workspace / "reports"
     reports.mkdir(parents=True, exist_ok=True)
     source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
-    signature_function = {
-        "name": function_name,
-        "header_text_normalized": f"int {function_name}(void)",
-        "parameters": [],
-    }
-    signature_function.update(function_fields or {})
-    signature_function["name"] = function_name
-    signature_payload = {
-        "schema_version": "0.1",
-        "source": {"path": source_path, "sha256": source_sha},
-        "function": signature_function,
-        "warnings": [],
-    }
+    fixture_payloads = raw_v01_provenance_fixtures(
+        source_path=source_path,
+        source_sha256=source_sha,
+        function_name=function_name,
+        function_fields=function_fields,
+    )
+    signature_payload = fixture_payloads["function_signature"]
     signature_path = reports / "function_signature.json"
     signature_path.write_text(
         json.dumps(signature_payload, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    source_identity = {"path": source_path, "sha256": source_sha}
-    function_identity = {"name": function_name, "status": "fixture"}
-    fixture_payloads = {
-        "source_digest": {
-            "schema_version": "0.1",
-            "source": source_identity,
-            "masking": {},
-            "preprocessor": {},
-            "token_summary": {},
-            "warnings": [],
-        },
-        "function_location": {
-            "schema_version": "0.1",
-            "source": {"path": source_path},
-            "function": {**function_identity, "candidates": []},
-            "warnings": [],
-        },
-        "global_access": {
-            "schema_version": "0.1",
-            "source": source_identity,
-            "function": function_identity,
-            "global_accesses": [],
-            "warnings": [],
-        },
-        "call_report": {
-            "schema_version": "0.1",
-            "source": source_identity,
-            "function": function_identity,
-            "calls": [],
-            "warnings": [],
-        },
-        "dependency_policy": {
-            "schema_version": "0.1",
-            "source": {"path": source_path},
-            "function": function_identity,
-            "dependencies": [],
-            "warnings": [],
-        },
-        "coverage_design": {
-            "schema_version": "0.1",
-            "source": source_identity,
-            "function": function_identity,
-            "coverage_items": [],
-            "warnings": [],
-        },
-        "boundary_candidates": {
-            "schema_version": "0.1",
-            "source": source_identity,
-            "function": function_identity,
-            "input_candidates": [],
-            "warnings": [],
-        },
-    }
     function_id = stable_function_id(source_path, function_name)
     signature_hash = signature_sha256(signature_payload)
     reference = ArtifactReference(
@@ -234,11 +410,11 @@ def write_canonical_test_spec(
     ):
         artifact_path = reports / filename
         if artifact_path.is_file():
-            artifact_payload = json.loads(artifact_path.read_text(encoding="utf-8"))
-            artifact_payload.setdefault("schema_version", "0.1")
-            artifact_payload.setdefault("source", copy.deepcopy(source_identity))
-            artifact_payload.setdefault("function", copy.deepcopy(function_identity))
-            artifact_payload.setdefault("warnings", [])
+            artifact_payload = complete_raw_v01_fixture(
+                artifact_kind,
+                json.loads(artifact_path.read_text(encoding="utf-8")),
+                fixture_payloads[artifact_kind],
+            )
         else:
             artifact_payload = copy.deepcopy(fixture_payloads[artifact_kind])
         artifact_path.write_text(
