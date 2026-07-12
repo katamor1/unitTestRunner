@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - codex/bootstrap-publish-p1t6-c581
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
