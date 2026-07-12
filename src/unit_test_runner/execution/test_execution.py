@@ -202,6 +202,45 @@ def execute_test_run(request: TestRunRequest) -> TestExecutionReport:
     return report
 
 
+def validate_test_run_preflight(
+    workspace: Path | str,
+    executable: Path | str | None = None,
+    *,
+    allow_placeholder_tests: bool = True,
+) -> tuple[list[TestExecutionWarning], list[ExecutionReviewItem]]:
+    workspace = Path(workspace).resolve()
+    reports = workspace / "reports"
+    test_case_design = _read_json(reports / "test_case_design.json")
+    harness_report = _read_json(reports / "harness_skeleton_report.json")
+    build_probe = _read_json(reports / "build_probe_report.json")
+    build_workspace = _read_json(reports / "build_workspace_report.json")
+    _workspace_relative_source_path(workspace, build_workspace)
+    executable_info = resolve_executable(workspace, executable, build_probe)
+    if executable is not None and not executable_info.exists:
+        message = executable_info.warnings[0].message if executable_info.warnings else "Explicit executable does not exist."
+        raise ValueError(message)
+    policy = TestExecutionPolicy(
+        run_tests=True,
+        dry_run=False,
+        allow_placeholder_tests=allow_placeholder_tests,
+    )
+    status, warnings, review_items = validate_execution_preconditions(
+        build_probe,
+        executable_info,
+        policy,
+    )
+    placeholder_items = _placeholder_review_items(harness_report, test_case_design)
+    if placeholder_items and not allow_placeholder_tests:
+        warnings.append(
+            TestExecutionWarning(
+                "placeholder_tests_not_allowed",
+                "未確定の期待値を含むため、テスト実行はブロックされます。",
+            )
+        )
+        review_items.extend(placeholder_items)
+    return warnings, review_items
+
+
 def prepare_evidence_from_existing_run(
     workspace: Path,
     run_id: str | None = None,

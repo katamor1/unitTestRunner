@@ -27,7 +27,7 @@ from ..c_analyzer.signature_writer import write_function_signature
 from ..c_analyzer.source_digest import build_source_digest, write_source_digest
 from ..harness import generate_harness_skeleton
 from ..dependency_policy import analyze_dependency_policy, write_dependency_policy
-from ..execution import prepare_test_execution_evidence
+from ..execution import classify_test_execution, prepare_test_execution_evidence
 from ..path_utils import normalize_relative
 from ..test_design import generate_test_design
 from ..test_design.test_case_design_generator import generate_test_case_design, generate_test_case_design_from_payloads
@@ -409,6 +409,10 @@ def analyze_function_workflow(
             "iteration_status": build_completion_iteration.status,
         }
     if test_execution is not None and evidence_manifest is not None:
+        execution_state, green = classify_test_execution(
+            test_execution,
+            execution_requested=run_tests,
+        )
         execution_paths = test_execution.run_paths
         evidence_paths = evidence_manifest.evidence_paths
         execution_json = (
@@ -426,18 +430,6 @@ def analyze_function_workflow(
             if execution_paths is not None
             else out_dir / "reports" / "test_result.csv"
         )
-        parsed = test_execution.parsed_result
-        green = bool(
-            test_execution.executed
-            and test_execution.status == "passed"
-            and parsed is not None
-            and parsed.total > 0
-            and parsed.passed == parsed.total
-            and parsed.failed == 0
-            and parsed.inconclusive == 0
-            and parsed.crashed == 0
-            and parsed.not_run == 0
-        )
         dossier["test_execution"] = {
             "run_id": execution_paths.run_id if execution_paths is not None else None,
             "json": str(execution_json),
@@ -447,7 +439,7 @@ def analyze_function_workflow(
             "stderr_log": str(execution_paths.stderr_log) if execution_paths is not None else None,
             "combined_log": str(execution_paths.combined_log) if execution_paths is not None else None,
             "latest_run_pointer": str(out_dir / "reports" / "latest_run.json"),
-            "status": test_execution.status,
+            "status": execution_state.value,
             "executed": test_execution.executed,
             "green": green,
         }
@@ -465,7 +457,7 @@ def analyze_function_workflow(
                 else out_dir / "reports" / "evidence_package.md"
             ),
             "latest_evidence_pointer": str(out_dir / "reports" / "latest_evidence.json"),
-            "status": evidence_manifest.summary.test_execution_status,
+            "status": execution_state.value,
         }
     _write_json(out_dir / "reports" / "function_dossier.json", dossier)
     _write_markdown_reports(out_dir, dossier, copied_files)

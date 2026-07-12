@@ -77,7 +77,7 @@ def write_suite_run_csv(path: Path, report: SuiteRunReport) -> None:
                     "inconclusive_tests": result.inconclusive_tests,
                     "unresolved_review_count": result.unresolved_review_count,
                     "workspace": result.workspace.as_posix(),
-                    "report_path": result.report_path.as_posix(),
+                    "report_path": result.report_path.as_posix() if result.report_path is not None else "",
                     "error": result.error or "",
                 }
             )

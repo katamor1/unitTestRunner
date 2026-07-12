@@ -107,7 +107,7 @@ class SuiteRunEntryResult:
     failed_tests: int
     inconclusive_tests: int
     unresolved_review_count: int
-    report_path: Path
+    report_path: Path | None
     error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -123,8 +123,9 @@ class SuiteRunEntryResult:
             "failed_tests": self.failed_tests,
             "inconclusive_tests": self.inconclusive_tests,
             "unresolved_review_count": self.unresolved_review_count,
-            "report_path": _path_text(self.report_path),
         }
+        if self.report_path is not None:
+            payload["report_path"] = _path_text(self.report_path)
         if self.error:
             payload["error"] = self.error
         return payload

@@ -252,7 +252,22 @@ class CliExecutionExitCodeTests(unittest.TestCase):
                     },
                 }
                 paths["json"].write_text(
-                    json.dumps({"schema_version": "0.1", **fixture}),
+                    json.dumps(
+                        {
+                            "schema_version": "0.1",
+                            "suite_id": "suite-001",
+                            "selector": {"kind": "all"},
+                            "policy": {
+                                "run_tests": True,
+                                "dry_run": False,
+                                "timeout_seconds": 60,
+                                "fail_fast": False,
+                                "require_green": True,
+                            },
+                            "results": [],
+                            **fixture,
+                        }
+                    ),
                     encoding="utf-8",
                 )
                 report_value = SimpleNamespace(

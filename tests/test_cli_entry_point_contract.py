@@ -20,6 +20,7 @@ sys.path.insert(0, str(SRC_ROOT))
 from unit_test_runner.build.build_models import BuildProbeReport, BuildWorkspaceReport
 from unit_test_runner.cli import exit_codes
 from unit_test_runner.cli.commands import _build_probe_result, handle_build_probe
+from unit_test_runner.cli.errors import CLIError
 from unit_test_runner.cli.main import main
 from unit_test_runner.cli.outcomes import DomainOutcome
 from unit_test_runner.cli.result import CLIResult
@@ -116,6 +117,54 @@ class CliEntryPointContractTests(unittest.TestCase):
         self.assertEqual(1, payload["data"]["exit_code"])
         self.assertEqual("analyze-function", payload["data"]["command"])
         self.assertIn("required", payload["data"]["errors"][0]["message"])
+
+    def test_preexecution_test_commands_preserve_json_input_error_exit(self):
+        for command, required_option in [
+            ("run-tests", "--workspace"),
+            ("suite-run", "--suite"),
+        ]:
+            with self.subTest(command=command):
+                completed = run_module("--json", command)
+
+                self.assertEqual(exit_codes.EXIT_INPUT_ERROR, completed.returncode)
+                self.assertEqual("", completed.stderr)
+                payload = json.loads(completed.stdout)
+                self.assertEqual("command", payload["data"]["outcome_kind"])
+                self.assertEqual("error", payload["data"]["outcome"])
+                self.assertEqual(exit_codes.EXIT_INPUT_ERROR, payload["data"]["exit_code"])
+                self.assertIn(required_option, payload["data"]["errors"][0]["message"])
+
+    def test_dispatched_input_and_internal_errors_use_explicit_command_outcomes(self):
+        cases = [
+            (
+                CLIError("invalid execution input", exit_codes.EXIT_INPUT_ERROR, "run-tests"),
+                exit_codes.EXIT_INPUT_ERROR,
+                "invalid execution input",
+            ),
+            (RuntimeError("execution crashed"), exit_codes.EXIT_INTERNAL_ERROR, "execution crashed"),
+        ]
+        for error, expected_exit, expected_message in cases:
+            stdout = io.StringIO()
+            with self.subTest(error=type(error).__name__), mock.patch(
+                "unit_test_runner.cli.main.dispatch",
+                side_effect=error,
+            ), redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "--json",
+                        "run-tests",
+                        "--workspace",
+                        str(REPO_ROOT),
+                        "--plan",
+                    ]
+                )
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(expected_exit, exit_code)
+            self.assertEqual("command", payload["data"]["outcome_kind"])
+            self.assertEqual("error", payload["data"]["outcome"])
+            self.assertEqual(expected_exit, payload["data"]["exit_code"])
+            self.assertIn(expected_message, payload["data"]["errors"][0]["message"])
 
     def test_missing_file_exits_two_and_json_stdout_is_machine_parseable(self):
         completed = run_module(
@@ -416,6 +465,7 @@ class CliEntryPointContractTests(unittest.TestCase):
             command="prepare-review",
             message="ok",
             data={"review": {"reports": {"function_dossier_md": "reports/function_dossier.md"}}},
+            outcome=DomainOutcome("command", RunOutcome.PASSED, None),
         )
 
         payload = result.to_dict()

@@ -10,17 +10,7 @@ from unit_test_runner.contracts import ArtifactKind, RunOutcome, validate_payloa
 from unit_test_runner.execution.test_result_writer import current_producer_commit
 
 from .artifacts import ExpectedArtifact, ProducedArtifact
-from .exit_codes import (
-    EXIT_BUILD_PROBE_FAILED,
-    EXIT_ENVIRONMENT_WARNING,
-    EXIT_INTERNAL_ERROR,
-    EXIT_NOT_IMPLEMENTED,
-    EXIT_TESTS_BLOCKED,
-    EXIT_TESTS_CANCELLED,
-    EXIT_TESTS_FAILED,
-    EXIT_TESTS_INCONCLUSIVE,
-    EXIT_TESTS_TIMED_OUT,
-)
+from .exit_codes import EXIT_NOT_IMPLEMENTED
 from .outcomes import DomainOutcome
 
 
@@ -44,7 +34,9 @@ class CLIResult:
     producer_commit: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        outcome = self.outcome or _infer_outcome(self)
+        if self.outcome is None:
+            raise ValueError("CLI v1 results require an explicit DomainOutcome.")
+        outcome = self.outcome
         payload = {
             "artifact_kind": ArtifactKind.CLI_RESULT.value,
             "schema_version": "1.0.0",
@@ -109,70 +101,8 @@ def not_implemented(command: str, planned_item: str) -> CLIResult:
         command=command,
         message="This command is defined but not implemented yet.",
         data={"planned_item": planned_item},
+        outcome=DomainOutcome("command", RunOutcome.ERROR, None),
     )
-
-
-def _infer_outcome(result: CLIResult) -> DomainOutcome:
-    nested = result.data.get("test_execution")
-    if result.command in {"run-tests", "prepare-evidence"} and isinstance(nested, dict):
-        state = _canonical_outcome(nested.get("status"))
-        if state is not None:
-            return DomainOutcome("test_run", state, _legacy_green(state, nested))
-
-    state = _canonical_outcome(result.status)
-    if state is not None:
-        kind = "test_run" if result.command in {"run-tests", "suite-run"} else "command"
-        return DomainOutcome(kind, state, _legacy_green(state, nested))
-
-    exit_outcomes = {
-        EXIT_TESTS_FAILED: RunOutcome.FAILED,
-        EXIT_TESTS_INCONCLUSIVE: RunOutcome.INCONCLUSIVE,
-        EXIT_TESTS_TIMED_OUT: RunOutcome.TIMED_OUT,
-        EXIT_TESTS_BLOCKED: RunOutcome.BLOCKED,
-        EXIT_TESTS_CANCELLED: RunOutcome.CANCELLED,
-    }
-    if result.command in {"run-tests", "suite-run"} and result.exit_code in exit_outcomes:
-        state = exit_outcomes[result.exit_code]
-        return DomainOutcome("test_run", state, state is RunOutcome.PASSED)
-    if result.exit_code == 0:
-        return DomainOutcome("command", RunOutcome.PASSED, None)
-    if result.exit_code == EXIT_BUILD_PROBE_FAILED or "failed" in result.status:
-        return DomainOutcome("command", RunOutcome.FAILED, None)
-    if result.exit_code == EXIT_ENVIRONMENT_WARNING or "blocked" in result.status:
-        return DomainOutcome("command", RunOutcome.BLOCKED, None)
-    return DomainOutcome("command", RunOutcome.ERROR, None)
-
-
-def _canonical_outcome(value: Any) -> RunOutcome | None:
-    aliases = {
-        "tests_passed": RunOutcome.PASSED,
-        "tests_failed": RunOutcome.FAILED,
-        "tests_blocked": RunOutcome.BLOCKED,
-        "tests_timed_out": RunOutcome.TIMED_OUT,
-        "tests_cancelled": RunOutcome.CANCELLED,
-        "tests_error": RunOutcome.ERROR,
-        "not_run": RunOutcome.PLANNED,
-        "timeout": RunOutcome.TIMED_OUT,
-        "internal_error": RunOutcome.ERROR,
-        "error": RunOutcome.ERROR,
-    }
-    text = str(value or "")
-    if text in aliases:
-        return aliases[text]
-    try:
-        return RunOutcome(text)
-    except ValueError:
-        return None
-
-
-def _legacy_green(state: RunOutcome, nested: Any) -> bool | None:
-    if state is RunOutcome.PLANNED:
-        return None
-    if state is not RunOutcome.PASSED:
-        return False
-    if isinstance(nested, dict) and nested.get("executed") is False:
-        return False
-    return True
 
 
 def _diagnostics(

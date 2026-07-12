@@ -15,6 +15,7 @@ sys.path.insert(0, str(SRC_ROOT))
 
 from unit_test_runner.cli.artifacts import (
     ExpectedArtifact,
+    ProducedArtifact,
     build_expected_artifact,
     build_produced_artifact,
 )
@@ -24,7 +25,9 @@ from unit_test_runner.cli.commands import (
     handle_suite_run,
 )
 from unit_test_runner.cli.errors import CLIError
+from unit_test_runner.cli.outcomes import DomainOutcome
 from unit_test_runner.cli.parser import ArgumentParseError, build_parser
+from unit_test_runner.cli.result import CLIResult
 from unit_test_runner.contracts import RunOutcome
 from unit_test_runner.contracts import ArtifactKind
 from unit_test_runner.execution.evidence_paths import EvidencePaths
@@ -42,37 +45,75 @@ class CliArtifactReferenceTests(unittest.TestCase):
     def test_produced_file_uses_final_bytes_and_actual_json_contract_identity(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir).resolve()
-            report = root / "runs" / "run-001" / "test_execution_report.json"
+            report = root / "results" / "cli_result.json"
             report.parent.mkdir(parents=True)
-            payload = {
-                "artifact_kind": ArtifactKind.TEST_EXECUTION_REPORT.value,
-                "schema_version": "1.0.0",
-                "data": {"outcome": "passed"},
-            }
+            payload = CLIResult(
+                status="ok",
+                exit_code=0,
+                command="doctor",
+                message="ok",
+                outcome=DomainOutcome("command", RunOutcome.PASSED, None),
+                invocation_id="inv-artifact-001",
+                producer_commit="6c3aecac794f18bffd4307213481cbfaf270cdba",
+            ).to_dict()
             final_bytes = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
             report.write_bytes(final_bytes)
 
             artifact = build_produced_artifact(
                 root,
                 report,
-                kind=ArtifactKind.TEST_EXECUTION_REPORT.value,
+                kind=ArtifactKind.CLI_RESULT.value,
             )
 
-            self.assertEqual(ArtifactKind.TEST_EXECUTION_REPORT.value, artifact.kind)
-            self.assertEqual("runs/run-001/test_execution_report.json", artifact.path)
+            self.assertEqual(ArtifactKind.CLI_RESULT.value, artifact.kind)
+            self.assertEqual("results/cli_result.json", artifact.path)
             self.assertTrue(artifact.exists)
             self.assertEqual(hashlib.sha256(final_bytes).hexdigest(), artifact.sha256)
             self.assertEqual("1.0.0", artifact.schema_version)
             self.assertEqual(
                 {
-                    "artifact_kind": ArtifactKind.TEST_EXECUTION_REPORT.value,
-                    "path": "runs/run-001/test_execution_report.json",
+                    "artifact_kind": ArtifactKind.CLI_RESULT.value,
+                    "path": "results/cli_result.json",
                     "exists": True,
                     "sha256": hashlib.sha256(final_bytes).hexdigest(),
                     "schema_version": "1.0.0",
                 },
                 artifact.to_dict(),
             )
+
+    def test_typed_json_requires_recognized_supported_and_valid_contract_identity(self):
+        valid = CLIResult(
+            status="ok",
+            exit_code=0,
+            command="doctor",
+            message="ok",
+            outcome=DomainOutcome("command", RunOutcome.PASSED, None),
+            invocation_id="inv-artifact-002",
+            producer_commit="6c3aecac794f18bffd4307213481cbfaf270cdba",
+        ).to_dict()
+        mutations = {
+            "missing_kind": lambda payload: payload.pop("artifact_kind"),
+            "missing_version": lambda payload: payload.pop("schema_version"),
+            "unknown_kind": lambda payload: payload.update(artifact_kind="unknown_kind"),
+            "unsupported_version": lambda payload: payload.update(schema_version="9.9.9"),
+            "schema_invalid": lambda payload: payload["data"].pop("command"),
+            "semantic_invalid": lambda payload: payload["data"].update(
+                outcome_kind="test_run",
+                outcome="failed",
+                green=False,
+                exit_code=0,
+            ),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir).resolve()
+                path = root / "result.json"
+                payload = json.loads(json.dumps(valid))
+                mutate(payload)
+                path.write_text(json.dumps(payload), encoding="utf-8")
+
+                with self.assertRaises(ValueError):
+                    build_produced_artifact(root, path, kind=None)
 
     def test_missing_non_file_and_escaped_paths_are_rejected_as_produced(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -117,7 +158,20 @@ class CliArtifactReferenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir).resolve()
             legacy = root / "legacy.json"
-            legacy.write_text('{"schema_version":"0.1"}\n', encoding="utf-8")
+            legacy.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "status": "ok",
+                        "command": "doctor",
+                        "exit_code": 0,
+                        "data": {},
+                        "warnings": [],
+                        "errors": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
 
             with self.assertRaisesRegex(ValueError, "contract identity"):
                 build_produced_artifact(
@@ -129,6 +183,15 @@ class CliArtifactReferenceTests(unittest.TestCase):
             artifact = build_produced_artifact(root, legacy, kind=None)
             self.assertEqual("untyped_json", artifact.kind)
             self.assertEqual("0.1", artifact.schema_version)
+
+            for invalid in (
+                {"schema_version": "0.1"},
+                {"schema_version": "0.1", "status": "ok", "command": "doctor"},
+                {"schema_version": "0.2", "status": "ok", "command": "doctor", "exit_code": 0, "data": {}, "warnings": [], "errors": []},
+            ):
+                legacy.write_text(json.dumps(invalid), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    build_produced_artifact(root, legacy, kind=None)
 
     def test_explicit_output_allowlist_excludes_existing_input_paths(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -176,7 +239,7 @@ class CliArtifactReferenceTests(unittest.TestCase):
             self.assertNotIn("exists", expected.to_dict())
             self.assertNotIn("sha256", expected.to_dict())
 
-    def test_run_tests_uses_only_originating_run_and_evidence_paths(self):
+    def test_run_tests_uses_only_immutable_originating_paths_and_never_reads_latest_aliases(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir).resolve()
             run_root = workspace / "runs" / "run-origin"
@@ -267,9 +330,24 @@ class CliArtifactReferenceTests(unittest.TestCase):
                 treat_placeholder_as_inconclusive=True,
             )
 
+            def immutable_artifact(root, path, *, kind):
+                relative = Path(path).resolve().relative_to(Path(root).resolve()).as_posix()
+                if relative in {"reports/latest_run.json", "reports/latest_evidence.json"}:
+                    raise AssertionError(f"mutable alias was read: {relative}")
+                return ProducedArtifact(
+                    kind=kind,
+                    path=relative,
+                    exists=True,
+                    sha256="a" * 64,
+                    schema_version="1.0.0" if Path(path).suffix.lower() == ".json" else None,
+                )
+
             with mock.patch(
                 "unit_test_runner.cli.commands.prepare_test_execution_evidence",
                 return_value=(report, manifest),
+            ), mock.patch(
+                "unit_test_runner.cli.commands.build_produced_artifact",
+                side_effect=immutable_artifact,
             ):
                 result = handle_run_tests(args)
 
@@ -285,8 +363,6 @@ class CliArtifactReferenceTests(unittest.TestCase):
                     "evidence/evidence-origin/source_run.json",
                     "evidence/evidence-origin/evidence_manifest.json",
                     "evidence/evidence-origin/evidence_package.md",
-                    "reports/latest_run.json",
-                    "reports/latest_evidence.json",
                 },
                 produced,
             )
@@ -315,6 +391,7 @@ class CliArtifactReferenceTests(unittest.TestCase):
         for mode in ("plan", "dry_run"):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temp_dir:
                 workspace = Path(temp_dir).resolve()
+                self._write_plan_workspace(workspace)
                 existing = [
                     workspace / "runs" / "run-existing" / "test_execution_report.json",
                     workspace / "evidence" / "evidence-existing" / "evidence_manifest.json",
@@ -375,6 +452,87 @@ class CliArtifactReferenceTests(unittest.TestCase):
                     self.assertIn("deprecated_dry_run_alias", diagnostic_codes)
                 else:
                     self.assertNotIn("deprecated_dry_run_alias", diagnostic_codes)
+
+    def test_run_plan_rejects_missing_reports_and_explicit_executable_without_writes(self):
+        cases = ("missing_report", "missing_executable")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temp_dir:
+                workspace = Path(temp_dir).resolve()
+                executable = self._write_plan_workspace(workspace)
+                if case == "missing_report":
+                    (workspace / "reports" / "harness_skeleton_report.json").unlink()
+                elif case == "missing_executable":
+                    executable = workspace / "bin" / "missing.exe"
+                before = self._tree_hashes(workspace)
+                args = Namespace(
+                    command="run-tests",
+                    workspace=str(workspace),
+                    executable=str(executable),
+                    run=False,
+                    plan=True,
+                    dry_run=False,
+                    timeout=60,
+                    run_id="run-plan",
+                    allow_placeholder_tests=True,
+                    treat_placeholder_as_inconclusive=True,
+                )
+
+                with mock.patch(
+                    "unit_test_runner.cli.commands.prepare_test_execution_evidence",
+                    side_effect=AssertionError("plan must not prepare execution or evidence"),
+                ), self.assertRaises(CLIError):
+                    handle_run_tests(args)
+
+                self.assertEqual(before, self._tree_hashes(workspace))
+
+    def test_run_plan_reports_valid_blockers_without_writes(self):
+        for case, expected_code in (
+            ("failed_build_probe", "build_probe_not_successful"),
+            ("placeholder", "placeholder_tests_not_allowed"),
+        ):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temp_dir:
+                workspace = Path(temp_dir).resolve()
+                executable = self._write_plan_workspace(workspace)
+                if case == "failed_build_probe":
+                    (workspace / "reports" / "build_probe_report.json").write_text(
+                        json.dumps({"function": {"status": "failed"}}),
+                        encoding="utf-8",
+                    )
+                else:
+                    (workspace / "reports" / "harness_skeleton_report.json").write_text(
+                        json.dumps(
+                            {
+                                "function": {"name": "sample"},
+                                "unresolved_placeholders": [{"name": "expected_value"}],
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                before = self._tree_hashes(workspace)
+                args = Namespace(
+                    command="run-tests",
+                    workspace=str(workspace),
+                    executable=str(executable),
+                    run=False,
+                    plan=True,
+                    dry_run=False,
+                    timeout=60,
+                    run_id="run-plan",
+                    allow_placeholder_tests=False,
+                    treat_placeholder_as_inconclusive=True,
+                )
+
+                result = handle_run_tests(args)
+
+                self.assertEqual(before, self._tree_hashes(workspace))
+                envelope = result.to_dict()
+                self.assertEqual("planned", envelope["data"]["outcome"])
+                self.assertIsNone(envelope["data"]["green"])
+                self.assertEqual(0, envelope["data"]["exit_code"])
+                self.assertIn(
+                    expected_code,
+                    {item["code"] for item in envelope["data"]["diagnostics"]},
+                )
 
     def test_suite_plan_and_dry_run_alias_do_not_write_reports_or_run_entries(self):
         for mode in ("plan", "dry_run"):
@@ -475,6 +633,162 @@ class CliArtifactReferenceTests(unittest.TestCase):
             with self.assertRaisesRegex(CLIError, "missing-entry"):
                 handle_suite_run(args)
             self.assertEqual(before, self._tree_hashes(root))
+
+    def test_suite_plan_validates_selected_entry_prerequisites_without_writes(self):
+        for case in ("missing_workspace", "missing_dossier", "missing_execution_preflight"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir).resolve()
+                workspace = root / "workspace"
+                dossier = workspace / "reports" / "function_dossier.json"
+                if case != "missing_workspace":
+                    workspace.mkdir(parents=True)
+                if case == "missing_execution_preflight":
+                    dossier.parent.mkdir(parents=True, exist_ok=True)
+                    dossier.write_text(
+                        json.dumps({"target": {"function": "sample", "source": "src/sample.c"}}),
+                        encoding="utf-8",
+                    )
+                suite = root / "suite_manifest.json"
+                suite.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "0.1",
+                            "suite_id": "suite",
+                            "entries": [
+                                {
+                                    "entry_id": "sample-entry",
+                                    "enabled": True,
+                                    "tags": ["selected"],
+                                    "function": {"name": "sample", "source": "src/sample.c"},
+                                    "workspace": str(workspace),
+                                    "dossier": str(dossier),
+                                    "test_execution_report": str(
+                                        workspace / "reports" / "test_execution_report.json"
+                                    ),
+                                    "registered_at": "2026-07-12T00:00:00Z",
+                                }
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                before = self._tree_hashes(root)
+                args = Namespace(
+                    command="suite-run",
+                    suite=str(suite),
+                    entry_ids=["sample-entry"],
+                    tag=None,
+                    all=False,
+                    run=False,
+                    plan=True,
+                    dry_run=False,
+                    fail_fast=False,
+                    timeout=60,
+                    require_green=False,
+                )
+
+                with mock.patch(
+                    "unit_test_runner.cli.commands.run_suite",
+                    side_effect=AssertionError("suite plan must not execute entries"),
+                ), self.assertRaises(CLIError):
+                    handle_suite_run(args)
+
+                self.assertEqual(before, self._tree_hashes(root))
+
+    def test_suite_plan_reports_entry_scoped_blockers_without_writes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            workspace = root / "workspace"
+            self._write_plan_workspace(workspace)
+            dossier = workspace / "reports" / "function_dossier.json"
+            dossier.write_text(
+                json.dumps({"target": {"function": "sample", "source": "src/sample.c"}}),
+                encoding="utf-8",
+            )
+            (workspace / "reports" / "build_probe_report.json").write_text(
+                json.dumps({"function": {"status": "failed"}}),
+                encoding="utf-8",
+            )
+            suite = root / "suite_manifest.json"
+            suite.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "0.1",
+                        "suite_id": "suite",
+                        "entries": [
+                            {
+                                "entry_id": "sample-entry",
+                                "enabled": True,
+                                "tags": ["selected"],
+                                "function": {"name": "sample", "source": "src/sample.c"},
+                                "workspace": str(workspace),
+                                "dossier": str(dossier),
+                                "test_execution_report": str(
+                                    workspace / "reports" / "test_execution_report.json"
+                                ),
+                                "registered_at": "2026-07-12T00:00:00Z",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            before = self._tree_hashes(root)
+            args = Namespace(
+                command="suite-run",
+                suite=str(suite),
+                entry_ids=["sample-entry"],
+                tag=None,
+                all=False,
+                run=False,
+                plan=True,
+                dry_run=False,
+                fail_fast=False,
+                timeout=60,
+                require_green=False,
+            )
+
+            result = handle_suite_run(args)
+
+            self.assertEqual(before, self._tree_hashes(root))
+            envelope = result.to_dict()
+            self.assertEqual("planned", envelope["data"]["outcome"])
+            self.assertEqual(0, envelope["data"]["exit_code"])
+            blockers = [
+                item
+                for item in envelope["data"]["diagnostics"]
+                if item["code"] == "suite_entry_build_probe_not_successful"
+            ]
+            self.assertEqual(1, len(blockers))
+            self.assertIn("sample-entry", blockers[0]["message"])
+
+    def _write_plan_workspace(self, workspace: Path) -> Path:
+        reports = workspace / "reports"
+        source = workspace / "src" / "sample.c"
+        executable = workspace / "bin" / "utr_probe.exe"
+        reports.mkdir(parents=True, exist_ok=True)
+        source.parent.mkdir(parents=True, exist_ok=True)
+        executable.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("int sample(void) { return 0; }\n", encoding="utf-8")
+        executable.write_bytes(b"runner")
+        payloads = {
+            "test_case_design.json": {
+                "function": {"name": "sample"},
+                "test_cases": [],
+            },
+            "harness_skeleton_report.json": {
+                "function": {"name": "sample"},
+                "unresolved_placeholders": [],
+            },
+            "build_probe_report.json": {"function": {"status": "succeeded"}},
+            "build_workspace_report.json": {
+                "function": {"name": "sample"},
+                "source": {"path": "src/sample.c"},
+            },
+        }
+        for name, payload in payloads.items():
+            (reports / name).write_text(json.dumps(payload), encoding="utf-8")
+        return executable
 
 
 if __name__ == "__main__":

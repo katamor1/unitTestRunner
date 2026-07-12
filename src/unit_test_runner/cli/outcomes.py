@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from unit_test_runner.contracts import RunOutcome
+from unit_test_runner.execution.outcome import classify_test_execution
 
 from .exit_codes import (
     EXIT_INTERNAL_ERROR,
@@ -44,14 +45,10 @@ def classify_test_run(
     *,
     execution_requested: bool,
 ) -> tuple[DomainOutcome, int]:
-    if not execution_requested:
-        outcome = DomainOutcome("test_run", RunOutcome.PLANNED, None)
-        return outcome, EXIT_OK
-
-    state = _canonical_outcome(report.status)
-    green = _is_green(report) if state is RunOutcome.PASSED else False
-    if state is RunOutcome.PASSED and not green:
-        state = RunOutcome.INCONCLUSIVE
+    state, green = classify_test_execution(
+        report,
+        execution_requested=execution_requested,
+    )
     outcome = DomainOutcome("test_run", state, green)
     return outcome, _EXIT_BY_OUTCOME[state]
 
@@ -103,16 +100,3 @@ def _canonical_outcome(value: str) -> RunOutcome:
         return RunOutcome(value)
     except ValueError:
         return RunOutcome.ERROR
-
-
-def _is_green(report: TestExecutionReport) -> bool:
-    summary = report.parsed_result
-    if not report.executed or summary is None or summary.total <= 0:
-        return False
-    return (
-        summary.passed == summary.total
-        and summary.failed == 0
-        and summary.inconclusive == 0
-        and getattr(summary, "crashed", 0) == 0
-        and getattr(summary, "not_run", 0) == 0
-    )

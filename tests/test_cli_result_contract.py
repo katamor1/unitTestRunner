@@ -16,6 +16,17 @@ from unit_test_runner.contracts import ArtifactKind, RunOutcome, validate_payloa
 
 
 class CliResultContractTests(unittest.TestCase):
+    def test_v1_result_requires_an_explicit_domain_outcome(self):
+        result = CLIResult(
+            status="ok",
+            exit_code=0,
+            command="doctor",
+            message="Environment check completed.",
+        )
+
+        with self.assertRaisesRegex(ValueError, "explicit DomainOutcome"):
+            result.to_dict()
+
     def test_cli_result_serializes_and_validates_one_v1_contract_envelope(self):
         produced = ProducedArtifact(
             kind=ArtifactKind.TEST_EXECUTION_REPORT.value,

@@ -20,6 +20,7 @@ from unit_test_runner.dsw_parser import discover_dsw_workspaces, parse_dsw as pa
 from unit_test_runner.execution import (
     prepare_evidence_from_existing_run,
     prepare_test_execution_evidence,
+    validate_test_run_preflight,
 )
 from unit_test_runner.path_utils import normalize_relative
 from unit_test_runner.reanalysis import (
@@ -33,7 +34,7 @@ from unit_test_runner.suite import (
     register_workspace,
     remove_entry,
     run_suite,
-    validate_suite_selection,
+    validate_suite_plan,
 )
 from unit_test_runner.reanalysis.reanalysis_models import ReanalysisPolicy
 from unit_test_runner.dossier import (
@@ -56,6 +57,7 @@ from .errors import CLIError
 from .artifacts import (
     ExpectedArtifact,
     ProducedArtifact,
+    UnclaimableUntypedJsonError,
     build_expected_artifact,
     build_produced_artifact,
 )
@@ -152,6 +154,7 @@ def handle_doctor(args: argparse.Namespace) -> CLIResult:
             "checks": checks,
         },
         warnings=warnings,
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -171,6 +174,7 @@ def handle_discover_projects(args: argparse.Namespace) -> CLIResult:
                 data=result,
                 human_output=_render_discovery_summary(result, Path(args.out) if args.out else None),
                 artifacts=_optional_output_artifacts(args.out, ArtifactKind.DSW_DISCOVERY.value),
+                outcome=DomainOutcome("command", RunOutcome.PASSED, None),
             )
         result = discover_workspace(workspace, dsw)
         if args.out:
@@ -192,6 +196,7 @@ def handle_discover_projects(args: argparse.Namespace) -> CLIResult:
                 Path(args.out) if args.out else None,
             ),
             artifacts=_optional_output_artifacts(args.out, ArtifactKind.DSW_DISCOVERY.value),
+            outcome=DomainOutcome("command", RunOutcome.PASSED, None),
         )
 
     workspace_arg = _existing_path(args.workspace, "workspace", args.command)
@@ -212,6 +217,7 @@ def handle_discover_projects(args: argparse.Namespace) -> CLIResult:
         data=result,
         human_output=_render_discovery_summary(result, Path(args.out) if args.out else None),
         artifacts=_optional_output_artifacts(args.out, ArtifactKind.DSW_DISCOVERY.value),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -233,6 +239,7 @@ def handle_map_source(args: argparse.Namespace) -> CLIResult:
             data=payload,
             legacy_payload=payload,
             artifacts=_optional_output_artifacts(args.out, ArtifactKind.SOURCE_MEMBERSHIP.value),
+            outcome=DomainOutcome("command", RunOutcome.PASSED, None),
         )
 
     membership = map_source_membership(dsw, args.source, args.project, args.configuration)
@@ -247,6 +254,7 @@ def handle_map_source(args: argparse.Namespace) -> CLIResult:
         data=payload,
         human_output=_render_source_membership_summary(payload, Path(args.out) if args.out else None),
         artifacts=_optional_output_artifacts(args.out, ArtifactKind.SOURCE_MEMBERSHIP.value),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -260,6 +268,7 @@ def handle_list_functions(args: argparse.Namespace) -> CLIResult:
         message="Functions listed.",
         data=payload,
         legacy_payload=payload,
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -318,7 +327,7 @@ def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
     ):
         if key in dossier:
             payload[key] = dossier[key]
-    execution_outcome: DomainOutcome | None = None
+    execution_outcome = DomainOutcome("command", RunOutcome.PASSED, None)
     execution_exit = EXIT_OK
     if args.run_tests and isinstance(payload.get("test_execution"), dict):
         execution = payload["test_execution"]
@@ -394,13 +403,15 @@ def _artifacts_from_explicit_outputs(
         if resolved in seen:
             continue
         seen.add(resolved)
-        artifacts.append(
-            build_produced_artifact(
+        try:
+            artifact = build_produced_artifact(
                 resolved_root,
                 resolved,
                 kind=kind,
             )
-        )
+        except UnclaimableUntypedJsonError:
+            continue
+        artifacts.append(artifact)
     return artifacts
 
 
@@ -502,13 +513,11 @@ def _analysis_phase_outputs(payload: dict[str, Any]) -> list[tuple[Path, str | N
             "stdout_log": "test_execution_log",
             "stderr_log": "test_execution_log",
             "combined_log": "test_execution_log",
-            "latest_run_pointer": ArtifactKind.LATEST_RUN_POINTER.value,
         },
         "evidence": {
             "manifest_json": ArtifactKind.EVIDENCE_MANIFEST.value,
             "package_markdown": "evidence_package",
             "source_run_json": ArtifactKind.EVIDENCE_SOURCE_RUN.value,
-            "latest_evidence_pointer": ArtifactKind.LATEST_EVIDENCE_POINTER.value,
         },
     }
     for section_name, fields in section_specs.items():
@@ -620,6 +629,7 @@ def _run_reanalysis(args: argparse.Namespace) -> CLIResult:
                 },
             ),
         ),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -660,6 +670,7 @@ def handle_generate_harness_skeleton(args: argparse.Namespace) -> CLIResult:
         data=payload,
         legacy_payload=payload,
         artifacts=_artifacts_from_explicit_outputs(output_root, harness_outputs),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -719,6 +730,13 @@ def handle_build_probe(args: argparse.Namespace) -> CLIResult:
             artifacts=_optional_output_artifacts(
                 args.out,
                 ArtifactKind.BUILD_PROBE_REPORT.value,
+            ),
+            outcome=DomainOutcome(
+                "command",
+                RunOutcome.FAILED
+                if payload.get("returncode", 0) not in {0, None}
+                else RunOutcome.PASSED,
+                None,
             ),
         )
 
@@ -798,6 +816,15 @@ def _build_probe_result(command: str, workspace: Path, workspace_report, probe_r
                 ]
             ),
         ),
+        outcome=DomainOutcome(
+            "command",
+            RunOutcome.PASSED
+            if exit_code == EXIT_OK
+            else RunOutcome.BLOCKED
+            if exit_code == EXIT_ENVIRONMENT_WARNING
+            else RunOutcome.FAILED,
+            None,
+        ),
     )
 
 
@@ -839,6 +866,7 @@ def handle_analyze_build_errors(args: argparse.Namespace) -> CLIResult:
         data=payload,
         legacy_payload=payload,
         artifacts=_completion_artifacts(workspace),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -876,6 +904,7 @@ def handle_complete_build(args: argparse.Namespace) -> CLIResult:
         data=payload,
         legacy_payload=payload,
         artifacts=_completion_artifacts(workspace),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -967,6 +996,7 @@ def handle_generate_test_design(args: argparse.Namespace) -> CLIResult:
         data=payload,
         legacy_payload=payload,
         artifacts=_artifacts_from_explicit_outputs(artifact_root, design_outputs),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -1008,6 +1038,7 @@ def handle_reconcile_test_cases(args: argparse.Namespace) -> CLIResult:
                 },
             ),
         ),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -1030,6 +1061,7 @@ def handle_select_regression_tests(args: argparse.Namespace) -> CLIResult:
         data=payload,
         legacy_payload=payload,
         artifacts=_optional_output_artifacts(args.out, ArtifactKind.REGRESSION_SELECTION.value),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -1058,6 +1090,7 @@ def handle_suite_register(args: argparse.Namespace) -> CLIResult:
         data=payload,
         legacy_payload=payload,
         artifacts=_optional_output_artifacts(args.suite, ArtifactKind.SUITE_MANIFEST.value),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -1078,6 +1111,7 @@ def handle_suite_list(args: argparse.Namespace) -> CLIResult:
         message="Suite entries listed.",
         data=payload,
         legacy_payload=payload,
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -1099,6 +1133,7 @@ def handle_suite_remove(args: argparse.Namespace) -> CLIResult:
         data=payload,
         legacy_payload=payload,
         artifacts=_optional_output_artifacts(args.suite, ArtifactKind.SUITE_MANIFEST.value),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -1106,7 +1141,7 @@ def handle_suite_run(args: argparse.Namespace) -> CLIResult:
     suite_path = _existing_file(args.suite, "suite", args.command)
     if not getattr(args, "run", False):
         try:
-            validate_suite_selection(
+            _, plan_diagnostics = validate_suite_plan(
                 suite_path,
                 entry_ids=args.entry_ids,
                 tag=args.tag,
@@ -1114,7 +1149,7 @@ def handle_suite_run(args: argparse.Namespace) -> CLIResult:
             )
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             raise CLIError(str(exc), EXIT_INPUT_ERROR, args.command) from exc
-        return _plan_suite_run(args, suite_path)
+        return _plan_suite_run(args, suite_path, plan_diagnostics)
     policy = SuiteRunPolicy(
         run_tests=True,
         dry_run=False,
@@ -1153,7 +1188,11 @@ def handle_suite_run(args: argparse.Namespace) -> CLIResult:
     )
 
 
-def _plan_suite_run(args: argparse.Namespace, suite_path: Path) -> CLIResult:
+def _plan_suite_run(
+    args: argparse.Namespace,
+    suite_path: Path,
+    blocker_diagnostics: list[dict[str, str]] | None = None,
+) -> CLIResult:
     root = suite_path.parent
     expected = [
         build_expected_artifact(
@@ -1172,7 +1211,7 @@ def _plan_suite_run(args: argparse.Namespace, suite_path: Path) -> CLIResult:
             kind=ArtifactKind.SUITE_RUN_REPORT.value,
         ),
     ]
-    diagnostics = []
+    diagnostics = list(blocker_diagnostics or [])
     if getattr(args, "dry_run", False):
         diagnostics.append(
             {
@@ -1221,7 +1260,31 @@ def _suite_selector_details(args: argparse.Namespace) -> dict[str, Any]:
 def handle_run_tests(args: argparse.Namespace) -> CLIResult:
     workspace = _existing_dir(args.workspace, "workspace", args.command)
     if not getattr(args, "run", False):
-        return _plan_test_run(args, workspace)
+        try:
+            warnings, review_items = validate_test_run_preflight(
+                workspace,
+                Path(args.executable) if args.executable else None,
+                allow_placeholder_tests=args.allow_placeholder_tests,
+            )
+        except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError) as exc:
+            raise CLIError(str(exc), EXIT_INPUT_ERROR, args.command) from exc
+        blocker_diagnostics = [
+            {
+                "code": warning.code,
+                "severity": "warning",
+                "message": warning.message,
+            }
+            for warning in warnings
+        ]
+        blocker_diagnostics.extend(
+            {
+                "code": item.item_kind,
+                "severity": item.severity if item.severity in {"info", "warning", "error"} else "warning",
+                "message": item.description,
+            }
+            for item in review_items
+        )
+        return _plan_test_run(args, workspace, blocker_diagnostics)
     report, manifest = prepare_test_execution_evidence(
         workspace,
         executable=Path(args.executable) if args.executable else None,
@@ -1253,7 +1316,11 @@ def handle_run_tests(args: argparse.Namespace) -> CLIResult:
     )
 
 
-def _plan_test_run(args: argparse.Namespace, workspace: Path) -> CLIResult:
+def _plan_test_run(
+    args: argparse.Namespace,
+    workspace: Path,
+    blocker_diagnostics: list[dict[str, str]] | None = None,
+) -> CLIResult:
     expected: list[ExpectedArtifact] = []
     run_id = getattr(args, "run_id", None)
     if run_id:
@@ -1278,7 +1345,7 @@ def _plan_test_run(args: argparse.Namespace, workspace: Path) -> CLIResult:
             ]
         except ValueError as error:
             raise CLIError(str(error), EXIT_INPUT_ERROR, args.command) from error
-    diagnostics = []
+    diagnostics = list(blocker_diagnostics or [])
     if getattr(args, "dry_run", False):
         diagnostics.append(
             {
@@ -1317,7 +1384,6 @@ def _run_artifacts(workspace: Path, report, manifest) -> list[ProducedArtifact]:
                 (run_paths.stdout_log, "test_execution_log"),
                 (run_paths.stderr_log, "test_execution_log"),
                 (run_paths.combined_log, "test_execution_log"),
-                (workspace / "reports" / "latest_run.json", ArtifactKind.LATEST_RUN_POINTER.value),
             ]
         )
     if evidence_paths is not None:
@@ -1326,7 +1392,6 @@ def _run_artifacts(workspace: Path, report, manifest) -> list[ProducedArtifact]:
                 (evidence_paths.source_run, ArtifactKind.EVIDENCE_SOURCE_RUN.value),
                 (evidence_paths.evidence_manifest, ArtifactKind.EVIDENCE_MANIFEST.value),
                 (evidence_paths.evidence_package, "evidence_package"),
-                (workspace / "reports" / "latest_evidence.json", ArtifactKind.LATEST_EVIDENCE_POINTER.value),
             ]
         )
     return [
@@ -1405,7 +1470,6 @@ def _evidence_artifacts(workspace: Path, paths) -> list[ProducedArtifact]:
         (paths.source_run, ArtifactKind.EVIDENCE_SOURCE_RUN.value),
         (paths.evidence_manifest, ArtifactKind.EVIDENCE_MANIFEST.value),
         (paths.evidence_package, "evidence_package"),
-        (workspace / "reports" / "latest_evidence.json", ArtifactKind.LATEST_EVIDENCE_POINTER.value),
     ]
     return [
         build_produced_artifact(workspace, path, kind=kind)
@@ -1436,6 +1500,7 @@ def handle_finalize_dossier(args: argparse.Namespace) -> CLIResult:
             artifact_root,
             _review_outputs(payload["reports"]),
         ),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -1458,6 +1523,7 @@ def handle_prepare_review(args: argparse.Namespace) -> CLIResult:
                 for path in paths.values()
             ],
         ),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 

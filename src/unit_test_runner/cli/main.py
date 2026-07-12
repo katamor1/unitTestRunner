@@ -28,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
             command=exc.command,
             message=exc.message,
             errors=[exc.message],
+            outcome=DomainOutcome("command", RunOutcome.ERROR, None),
         )
         if "--json" in raw_argv:
             _write_stream(sys.stdout, result.to_json())
@@ -51,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
             command=exc.command,
             message=exc.message,
             errors=[exc.message],
+            outcome=DomainOutcome("command", RunOutcome.ERROR, None),
         )
         logging.error(exc.message)
     except Exception as exc:  # pragma: no cover - kept as CLI safety net
@@ -62,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
             command=getattr(args, "command", "unknown"),
             message="An unexpected internal error occurred.",
             errors=[str(exc)],
+            outcome=DomainOutcome("command", RunOutcome.ERROR, None),
         )
 
     json_output = None

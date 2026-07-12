@@ -966,6 +966,12 @@ class ContractValidationTests(unittest.TestCase):
             {(item.code, item.json_path) for item in violations},
         )
 
+    def test_suite_contract_allows_missing_report_path_when_no_run_was_published(self):
+        payload = valid_suite_run_report()
+        payload["data"]["results"][0].pop("report_path")
+
+        self.assertEqual((), validate_payload(ArtifactKind.SUITE_RUN_REPORT, payload))
+
     def test_suite_manifest_allows_provenance_roots_to_be_absolute(self):
         payload = artifact_payload(
             ArtifactKind.SUITE_MANIFEST,

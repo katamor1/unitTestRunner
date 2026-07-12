@@ -49,6 +49,8 @@ class SuiteCliTests(unittest.TestCase):
                 "Control",
                 "--out",
                 str(out_dir),
+                "--phase",
+                "execution",
             )
 
             registered = run_cli("--json", "suite-register", "--suite", str(suite_path), "--workspace", str(out_dir), "--tags", "regression,selected")
@@ -105,6 +107,8 @@ class SuiteCliTests(unittest.TestCase):
                 "Control",
                 "--out",
                 str(out_dir),
+                "--phase",
+                "execution",
             )
             run_cli("--json", "suite-register", "--suite", str(suite_path), "--workspace", str(out_dir), "--tags", "selected")
 

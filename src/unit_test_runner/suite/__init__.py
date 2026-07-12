@@ -6,6 +6,7 @@ from .manager import (
     remove_entry,
     run_suite,
     validate_suite_selection,
+    validate_suite_plan,
 )
 from .models import SuiteEntry, SuiteManifest, SuiteRunEntryResult, SuiteRunPolicy, SuiteRunReport
 
@@ -22,4 +23,5 @@ __all__ = [
     "remove_entry",
     "run_suite",
     "validate_suite_selection",
+    "validate_suite_plan",
 ]

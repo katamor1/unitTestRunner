@@ -1198,8 +1198,7 @@
         "failed_tests",
         "inconclusive_tests",
         "not_run_tests",
-        "unresolved_review_count",
-        "report_path"
+        "unresolved_review_count"
       ],
       "properties": {
         "entry_id": {

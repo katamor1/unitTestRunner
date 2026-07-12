@@ -6,6 +6,8 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +39,51 @@ def run_module(*args):
 
 
 class DossierReviewWorkflowTests(unittest.TestCase):
+    def test_execution_outcome_is_normalized_before_dossier_persistence(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            out_dir = Path(temp_dir) / "normalized-execution"
+            execution = SimpleNamespace(
+                status="passed",
+                executed=False,
+                parsed_result=SimpleNamespace(
+                    total=0,
+                    passed=0,
+                    failed=0,
+                    inconclusive=0,
+                    crashed=0,
+                    not_run=0,
+                ),
+                run_paths=None,
+            )
+            manifest = SimpleNamespace(
+                summary=SimpleNamespace(test_execution_status="passed"),
+                evidence_paths=None,
+            )
+
+            with mock.patch(
+                "unit_test_runner.dossier.workflow.prepare_test_execution_evidence",
+                return_value=(execution, manifest),
+            ):
+                returned = analyze_function_workflow(
+                    VC6_FIXTURE_ROOT,
+                    VC6_FIXTURE_ROOT / "Product.dsw",
+                    "src/control.c",
+                    "Control_Update",
+                    "Win32 Debug",
+                    out_dir,
+                    "Control",
+                    run_tests=True,
+                    phase="execution",
+                )
+
+            persisted = json.loads(
+                (out_dir / "reports" / "function_dossier.json").read_text(encoding="utf-8")
+            )
+            for dossier in (returned, persisted):
+                self.assertEqual("inconclusive", dossier["test_execution"]["status"])
+                self.assertFalse(dossier["test_execution"]["green"])
+                self.assertEqual("inconclusive", dossier["evidence"]["status"])
+
     def prepare_workspace(self, temp_dir):
         out_dir = Path(temp_dir) / "Control_Update"
         analyze_function_workflow(

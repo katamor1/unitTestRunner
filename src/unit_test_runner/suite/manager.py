@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from unit_test_runner.contracts import RunOutcome
-from unit_test_runner.execution import prepare_test_execution_evidence
+from unit_test_runner.execution import prepare_test_execution_evidence, validate_test_run_preflight
 from unit_test_runner.vc6.debug_workspace_writer import write_vc6_debug_suite
 
 from .models import SuiteEntry, SuiteManifest, SuiteRunEntryResult, SuiteRunPolicy, SuiteRunReport
@@ -107,6 +107,53 @@ def validate_suite_selection(
     return selected
 
 
+def validate_suite_plan(
+    suite_path: Path | str,
+    *,
+    entry_ids: list[str] | None = None,
+    tag: str | None = None,
+    all_entries: bool = False,
+) -> tuple[list[SuiteEntry], list[dict[str, str]]]:
+    selected = validate_suite_selection(
+        suite_path,
+        entry_ids=entry_ids,
+        tag=tag,
+        all_entries=all_entries,
+    )
+    diagnostics: list[dict[str, str]] = []
+    for entry in selected:
+        warnings, review_items = _validate_entry_preconditions(entry)
+        diagnostics.extend(
+            {
+                "code": f"suite_entry_{warning.code}",
+                "severity": "warning",
+                "message": f"[{entry.entry_id}] {warning.message}",
+            }
+            for warning in warnings
+        )
+        diagnostics.extend(
+            {
+                "code": f"suite_entry_{item.item_kind}",
+                "severity": item.severity if item.severity in {"info", "warning", "error"} else "warning",
+                "message": f"[{entry.entry_id}] {item.description}",
+            }
+            for item in review_items
+        )
+    return selected, diagnostics
+
+
+def _validate_entry_preconditions(
+    entry: SuiteEntry,
+) -> tuple[list[Any], list[Any]]:
+    workspace = _existing_dir(entry.workspace, f"suite entry {entry.entry_id} workspace")
+    dossier_path = _existing_file(entry.dossier, f"suite entry {entry.entry_id} dossier")
+    dossier = _read_json(dossier_path)
+    target = _target_from_dossier(dossier)
+    if entry.function.get("name") != target["name"] or entry.function.get("source") != target["source"]:
+        raise ValueError(f"Suite entry {entry.entry_id} does not match its dossier target.")
+    return validate_test_run_preflight(workspace)
+
+
 def run_suite(
     suite_path: Path | str,
     *,
@@ -158,7 +205,7 @@ def _run_entry(entry: SuiteEntry, policy: SuiteRunPolicy) -> SuiteRunEntryResult
         report_path = (
             run_paths.execution_report
             if run_paths is not None
-            else entry.test_execution_report
+            else None
         )
         return SuiteRunEntryResult(
             entry_id=entry.entry_id,
@@ -187,7 +234,7 @@ def _run_entry(entry: SuiteEntry, policy: SuiteRunPolicy) -> SuiteRunEntryResult
             failed_tests=0,
             inconclusive_tests=0,
             unresolved_review_count=0,
-            report_path=entry.workspace / "reports" / "test_execution_report.json",
+            report_path=None,
             error=str(exc),
         )
 
