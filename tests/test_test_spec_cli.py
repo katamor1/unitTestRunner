@@ -47,11 +47,71 @@ def create_workspace(root: Path) -> Path:
     signature_payload = {
         "schema_version": "0.1",
         "source": {"path": "src/control.c", "sha256": hashlib.sha256(source.read_bytes()).hexdigest()},
-        "function": {"name": "Control_Update", "header_text_normalized": "int Control_Update(int mode)"},
+        "function": {
+            "name": "Control_Update",
+            "header_text_normalized": "int Control_Update(int mode)",
+            "parameters": [],
+        },
         "warnings": [],
     }
-    signature_path = reports / "function_signature.json"
-    signature_path.write_text(json.dumps(signature_payload, indent=2) + "\n", encoding="utf-8")
+    source_identity = dict(signature_payload["source"])
+    function_identity = {"name": "Control_Update", "status": "fixture"}
+    provenance_payloads = {
+        "source_digest": (
+            "source_digest.json",
+            {
+                "schema_version": "0.1",
+                "source": source_identity,
+                "masking": {},
+                "preprocessor": {},
+                "token_summary": {},
+                "warnings": [],
+            },
+        ),
+        "function_location": (
+            "function_location.json",
+            {
+                "schema_version": "0.1",
+                "source": {"path": "src/control.c"},
+                "function": {**function_identity, "candidates": []},
+                "warnings": [],
+            },
+        ),
+        "function_signature": ("function_signature.json", signature_payload),
+        "global_access": (
+            "global_access.json",
+            {"schema_version": "0.1", "source": source_identity, "function": function_identity, "global_accesses": [], "warnings": []},
+        ),
+        "call_report": (
+            "call_report.json",
+            {"schema_version": "0.1", "source": source_identity, "function": function_identity, "calls": [], "warnings": []},
+        ),
+        "dependency_policy": (
+            "dependency_policy.json",
+            {"schema_version": "0.1", "source": {"path": "src/control.c"}, "function": function_identity, "dependencies": [], "warnings": []},
+        ),
+        "coverage_design": (
+            "coverage_design.json",
+            {"schema_version": "0.1", "source": source_identity, "function": function_identity, "coverage_items": [], "warnings": []},
+        ),
+        "boundary_candidates": (
+            "boundary_equivalence_candidates.json",
+            {"schema_version": "0.1", "source": source_identity, "function": function_identity, "input_candidates": [], "warnings": []},
+        ),
+    }
+    references = []
+    for artifact_kind, (filename, artifact_payload) in provenance_payloads.items():
+        artifact_path = reports / filename
+        artifact_path.write_text(
+            json.dumps(artifact_payload, indent=2) + "\n", encoding="utf-8"
+        )
+        references.append(
+            ArtifactReference(
+                artifact_kind=artifact_kind,
+                path=f"reports/{filename}",
+                sha256=hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
+            )
+        )
     payload = copied_payload()
     function_id = stable_function_id("src/control.c", "Control_Update")
     payload["subject"] = {
@@ -65,12 +125,7 @@ def create_workspace(root: Path) -> Path:
         "name": "Control_Update",
         "signature_sha256": signature_sha256(signature_payload),
     }
-    reference = ArtifactReference(
-        artifact_kind="function_signature",
-        path="reports/function_signature.json",
-        sha256=hashlib.sha256(signature_path.read_bytes()).hexdigest(),
-    )
-    payload["data"]["generated_from"] = [reference.to_dict()]
+    payload["data"]["generated_from"] = [item.to_dict() for item in references]
     context = CurrentArtifactContext(
         source_path="src/control.c",
         source_sha256=signature_payload["source"]["sha256"],
@@ -78,7 +133,7 @@ def create_workspace(root: Path) -> Path:
         function_name="Control_Update",
         signature_sha256=signature_sha256(signature_payload),
         workspace_root=root,
-        generated_from=(reference,),
+        generated_from=tuple(references),
     )
     save_test_spec(reports / "test_spec.json", TestSpec.from_payload(payload), expected_revision=None, current_context=context)
     return reports / "test_spec.json"

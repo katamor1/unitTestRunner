@@ -6,10 +6,13 @@ import re
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
+from unit_test_runner.contracts import ArtifactKind, migrate_payload, validate_payload
+from unit_test_runner.contracts.registry import get_contract
+
 from .models import ArtifactReference, CurrentArtifactContext, TestSpec
 
 
-_CANONICAL_PROVENANCE_FILES = (
+_TOP_LEVEL_PROVENANCE_FILES = (
     ("source_digest", "source_digest.json"),
     ("function_location", "function_location.json"),
     ("function_signature", "function_signature.json"),
@@ -19,6 +22,85 @@ _CANONICAL_PROVENANCE_FILES = (
     ("coverage_design", "coverage_design.json"),
     ("boundary_candidates", "boundary_equivalence_candidates.json"),
 )
+_REANALYSIS_PROVENANCE_FILES = tuple(
+    item for item in _TOP_LEVEL_PROVENANCE_FILES if item[0] != "dependency_policy"
+)
+_PROVENANCE_LAYOUTS = (
+    (Path("reports"), _TOP_LEVEL_PROVENANCE_FILES),
+    (Path("reports/reanalysis/current"), _REANALYSIS_PROVENANCE_FILES),
+)
+_LEGACY_REQUIRED_FIELDS: dict[str, dict[str, type]] = {
+    "source_digest": {
+        "source": dict,
+        "masking": dict,
+        "preprocessor": dict,
+        "token_summary": dict,
+        "warnings": list,
+    },
+    "function_location": {"source": dict, "function": dict, "warnings": list},
+    "function_signature": {"source": dict, "function": dict, "warnings": list},
+    "global_access": {
+        "source": dict,
+        "function": dict,
+        "global_accesses": list,
+        "warnings": list,
+    },
+    "call_report": {
+        "source": dict,
+        "function": dict,
+        "calls": list,
+        "warnings": list,
+    },
+    "dependency_policy": {
+        "source": dict,
+        "function": dict,
+        "dependencies": list,
+        "warnings": list,
+    },
+    "coverage_design": {
+        "source": dict,
+        "function": dict,
+        "coverage_items": list,
+        "warnings": list,
+    },
+    "boundary_candidates": {
+        "source": dict,
+        "function": dict,
+        "input_candidates": list,
+        "warnings": list,
+    },
+}
+_LEGACY_ALLOWED_FIELDS: dict[str, set[str]] = {
+    "source_digest": {
+        "schema_version", "source", "masking", "preprocessor",
+        "token_summary", "warnings", "tokens",
+    },
+    "function_location": {"schema_version", "source", "function", "warnings"},
+    "function_signature": {"schema_version", "source", "function", "warnings"},
+    "global_access": {
+        "schema_version", "source", "function", "file_scope_declarations",
+        "local_declarations", "parameter_accesses", "global_accesses",
+        "unresolved_identifiers", "side_effect_candidates", "warnings",
+    },
+    "call_report": {
+        "schema_version", "source", "function", "calls", "stub_candidates",
+        "side_effect_candidates", "unresolved_calls", "warnings",
+    },
+    "dependency_policy": {
+        "schema_version", "source", "function", "dependencies",
+        "external_objects", "warnings",
+    },
+    "coverage_design": {
+        "schema_version", "source", "function", "branches", "switches",
+        "loops", "ternaries", "return_paths", "condition_expressions",
+        "coverage_items", "warnings",
+    },
+    "boundary_candidates": {
+        "schema_version", "source", "function", "input_candidates",
+        "state_candidates", "stub_return_candidates", "equivalence_classes",
+        "boundary_groups", "coverage_links", "warnings",
+    },
+}
 
 
 def signature_sha256(payload: Mapping[str, Any]) -> str:
@@ -57,22 +139,9 @@ def build_current_artifact_context(
     workspace = Path(workspace).resolve()
     request_path = workspace / "input" / "request.json"
     request = _read_json(request_path) if request_path.is_file() else {}
-    if request.get("source"):
-        source_path = _relative_path(str(request["source"]))
-    else:
-        signature_candidates = [
-            workspace / "reports" / "function_signature.json",
-            workspace / "reports" / "reanalysis" / "current" / "function_signature.json",
-        ]
-        signature_source = None
-        for candidate in signature_candidates:
-            if candidate.is_file():
-                signature_source = _signature_source(_read_json(candidate))
-                if isinstance(signature_source, Mapping) and signature_source.get("path"):
-                    break
-        if not isinstance(signature_source, Mapping) or not signature_source.get("path"):
-            raise ValueError("Function signature artifact has no current source identity.")
-        source_path = _relative_path(str(signature_source["path"]))
+    source_path = _relative_path(spec.source.path)
+    if request.get("source") and _relative_path(str(request["source"])) != source_path:
+        raise ValueError("Canonical test spec source differs from input/request.json.")
     source_candidates = [workspace / source_path, workspace / "extracted" / source_path]
     request_workspace = request.get("workspace")
     if isinstance(request_workspace, str) and request_workspace:
@@ -90,26 +159,32 @@ def build_current_artifact_context(
         extra_root=(Path(request_workspace).expanduser().resolve() if isinstance(request_workspace, str) and request_workspace else None),
     )
     source_hash = hashlib.sha256(source_file.read_bytes()).hexdigest()
-    prefix, signature_payload = _select_current_provenance_root(
-        workspace,
-        source_path=source_path,
-        source_sha256=source_hash,
-        expected_function=(str(request.get("function") or "") or None),
-    )
+    prefix, layout, references = _saved_provenance_layout(spec)
+    expected_function = str(request.get("function") or spec.function.name)
     current_references: list[ArtifactReference] = []
-    for artifact_kind, filename in _CANONICAL_PROVENANCE_FILES:
+    signature_payload: dict[str, Any] | None = None
+    for artifact_kind, filename in layout:
         relative_path = (prefix / filename).as_posix()
-        candidate = workspace / relative_path
-        if not candidate.is_file():
-            continue
         artifact_path = _contained_file(workspace, relative_path)
-        current_references.append(
-            ArtifactReference(
-                artifact_kind=artifact_kind,
-                path=relative_path,
-                sha256=hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
+        raw_bytes = artifact_path.read_bytes()
+        digest = hashlib.sha256(raw_bytes).hexdigest()
+        reference = references[artifact_kind]
+        if digest != reference.sha256:
+            raise ValueError(
+                f"Provenance hash mismatch for {artifact_kind}: {relative_path}"
             )
+        payload = _validated_provenance_payload(
+            artifact_kind,
+            raw_bytes,
+            source_path=source_path,
+            source_sha256=source_hash,
+            function_name=expected_function,
         )
+        if artifact_kind == "function_signature":
+            signature_payload = payload
+        current_references.append(reference)
+    if signature_payload is None:
+        raise ValueError("Saved provenance has no function_signature artifact.")
     function = signature_payload.get("data")
     if isinstance(function, Mapping):
         function = function.get("function")
@@ -118,16 +193,11 @@ def build_current_artifact_context(
     if not isinstance(function, Mapping):
         raise ValueError("Function signature artifact has no current function identity.")
     function_name = str(function.get("name") or "")
-    signature_subject = signature_payload.get("subject")
-    declared_function_id = (
-        str(signature_subject.get("function_id"))
-        if isinstance(signature_subject, Mapping) and signature_subject.get("function_id")
-        else str(function.get("function_id") or "")
-    )
+    function_id = stable_function_id(source_path, function_name)
     return CurrentArtifactContext(
         source_path=source_path,
         source_sha256=source_hash,
-        function_id=declared_function_id or stable_function_id(source_path, function_name),
+        function_id=function_id,
         function_name=function_name,
         signature_sha256=signature_sha256(signature_payload),
         workspace_root=workspace,
@@ -135,49 +205,181 @@ def build_current_artifact_context(
     )
 
 
-def _select_current_provenance_root(
-    workspace: Path,
+def _saved_provenance_layout(
+    spec: TestSpec,
+) -> tuple[Path, tuple[tuple[str, str], ...], dict[str, ArtifactReference]]:
+    actual = [(item.artifact_kind, item.path) for item in spec.generated_from]
+    for prefix, layout in _PROVENANCE_LAYOUTS:
+        expected = [(kind, (prefix / filename).as_posix()) for kind, filename in layout]
+        if len(actual) == len(expected) and set(actual) == set(expected):
+            references = {item.artifact_kind: item for item in spec.generated_from}
+            if len(references) != len(spec.generated_from):
+                break
+            return prefix, layout, references
+    raise ValueError(
+        "Canonical test spec provenance must exactly match one known producing root "
+        "with no missing, duplicate, extra, or redirected artifacts."
+    )
+
+
+def _validated_provenance_payload(
+    artifact_kind: str,
+    raw_bytes: bytes,
     *,
     source_path: str,
     source_sha256: str,
-    expected_function: str | None,
-) -> tuple[Path, dict[str, Any]]:
-    candidates: list[tuple[float, Path, dict[str, Any]]] = []
-    for prefix in (Path("reports"), Path("reports/reanalysis/current")):
-        path = workspace / prefix / "function_signature.json"
-        if not path.is_file() or path.is_symlink():
-            continue
-        payload = _read_json(path)
-        source = _signature_source(payload)
-        function = _signature_function(payload)
-        if not isinstance(source, Mapping) or not isinstance(function, Mapping):
-            continue
-        if str(source.get("sha256") or "") != source_sha256:
-            continue
-        if not _source_path_matches(str(source.get("path") or ""), source_path):
-            continue
-        if expected_function and str(function.get("name") or "") != expected_function:
-            continue
-        candidates.append((path.stat().st_mtime_ns, prefix, payload))
-    if not candidates:
-        raise ValueError("No source-consistent current function signature artifact is available.")
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    if len(candidates) > 1 and candidates[0][0] == candidates[1][0]:
-        raise ValueError("Current analysis provenance root is ambiguous.")
-    _mtime, prefix, payload = candidates[0]
-    return prefix, payload
+    function_name: str,
+) -> dict[str, Any]:
+    try:
+        payload = json.loads(raw_bytes.decode("utf-8-sig"))
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(
+            f"Invalid {artifact_kind} provenance JSON: {error}"
+        ) from error
+    if not isinstance(payload, dict):
+        raise ValueError(f"{artifact_kind} provenance root must be an object.")
+    declared_kind = payload.get("artifact_kind")
+    if declared_kind is None:
+        _validate_legacy_provenance_shape(artifact_kind, payload)
+        normalized = payload
+    else:
+        if declared_kind != artifact_kind:
+            raise ValueError(
+                f"Provenance kind mismatch: expected {artifact_kind}, "
+                f"received {declared_kind!r}."
+            )
+        try:
+            kind = ArtifactKind(artifact_kind)
+        except ValueError as error:
+            raise ValueError(f"Unknown provenance artifact kind: {artifact_kind}") from error
+        contract = get_contract(kind)
+        version = str(payload.get("schema_version") or "")
+        if version == contract.current_version:
+            normalized = payload
+        elif version in contract.compatible_source_versions:
+            try:
+                normalized = migrate_payload(
+                    kind,
+                    payload,
+                    target_version=contract.current_version,
+                )
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    f"Invalid compatible {artifact_kind} provenance: {error}"
+                ) from error
+        else:
+            raise ValueError(
+                f"Unsupported {artifact_kind} provenance version: {version or '<missing>'}"
+            )
+        violations = validate_payload(kind, normalized)
+        if violations:
+            detail = "; ".join(
+                f"{item.code} at {item.json_path}: {item.message}"
+                for item in violations
+            )
+            raise ValueError(
+                f"Invalid {artifact_kind} provenance contract: {detail}"
+            )
+    _validate_provenance_identity(
+        artifact_kind,
+        normalized,
+        source_path=source_path,
+        source_sha256=source_sha256,
+        function_name=function_name,
+    )
+    return normalized
 
 
-def _signature_source(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+def _validate_legacy_provenance_shape(
+    artifact_kind: str,
+    payload: Mapping[str, Any],
+) -> None:
+    if payload.get("schema_version") != "0.1":
+        raise ValueError(
+            f"Untyped {artifact_kind} provenance must be the explicit v0.1 shape."
+        )
+    requirements = _LEGACY_REQUIRED_FIELDS.get(artifact_kind)
+    if requirements is None:
+        raise ValueError(f"Unsupported legacy provenance kind: {artifact_kind}")
+    invalid = [
+        field
+        for field, expected_type in requirements.items()
+        if not isinstance(payload.get(field), expected_type)
+    ]
+    if invalid:
+        raise ValueError(
+            f"Legacy {artifact_kind} provenance has missing or invalid fields: "
+            + ", ".join(invalid)
+        )
+    unknown = set(payload) - _LEGACY_ALLOWED_FIELDS[artifact_kind]
+    if unknown:
+        raise ValueError(
+            f"Legacy {artifact_kind} provenance has unknown fields: "
+            + ", ".join(sorted(unknown))
+        )
+    function = payload.get("function")
+    if artifact_kind == "function_location" and (
+        not isinstance(function, Mapping)
+        or not isinstance(function.get("candidates"), list)
+    ):
+        raise ValueError("Legacy function_location has no candidates array.")
+    if artifact_kind == "function_signature" and (
+        not isinstance(function, Mapping)
+        or not isinstance(function.get("parameters"), list)
+        or not isinstance(function.get("header_text_normalized"), str)
+    ):
+        raise ValueError("Legacy function_signature has no parsed signature identity.")
+
+
+def _validate_provenance_identity(
+    artifact_kind: str,
+    payload: Mapping[str, Any],
+    *,
+    source_path: str,
+    source_sha256: str,
+    function_name: str,
+) -> None:
     data = payload.get("data")
-    source = data.get("source") if isinstance(data, Mapping) else payload.get("source")
-    return source if isinstance(source, Mapping) else None
-
-
-def _signature_function(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    data = payload.get("data")
-    function = data.get("function") if isinstance(data, Mapping) else payload.get("function")
-    return function if isinstance(function, Mapping) else None
+    identity = data if isinstance(data, Mapping) else payload
+    source = identity.get("source")
+    if not isinstance(source, Mapping) or not _source_path_matches(
+        str(source.get("path") or ""), source_path
+    ):
+        raise ValueError(
+            f"{artifact_kind} provenance source path does not match {source_path}."
+        )
+    declared_sha = str(source.get("sha256") or "")
+    hash_required = artifact_kind not in {
+        "function_location",
+        "dependency_policy",
+    }
+    if (hash_required and not declared_sha) or (
+        declared_sha and declared_sha != source_sha256
+    ):
+        raise ValueError(
+            f"{artifact_kind} provenance source hash does not match current source."
+        )
+    if artifact_kind != "source_digest":
+        function = identity.get("function")
+        if not isinstance(function, Mapping) or str(function.get("name") or "") != function_name:
+            raise ValueError(
+                f"{artifact_kind} provenance function does not match {function_name}."
+            )
+    subject = payload.get("subject")
+    if isinstance(subject, Mapping):
+        subject_path = subject.get("source_path")
+        if subject_path and not _source_path_matches(str(subject_path), source_path):
+            raise ValueError(f"{artifact_kind} subject source path is inconsistent.")
+        subject_sha = subject.get("source_sha256")
+        if subject_sha and str(subject_sha) != source_sha256:
+            raise ValueError(f"{artifact_kind} subject source hash is inconsistent.")
+        subject_function = subject.get("function_id")
+        if (
+            artifact_kind != "source_digest"
+            and subject_function
+            and str(subject_function) != stable_function_id(source_path, function_name)
+        ):
+            raise ValueError(f"{artifact_kind} subject function is inconsistent.")
 
 
 def _source_path_matches(declared: str, expected_relative: str) -> bool:
@@ -203,6 +405,40 @@ def artifact_reference(
         path=relative,
         sha256=hashlib.sha256(resolved.read_bytes()).hexdigest(),
     )
+
+
+def bind_test_spec_inputs(
+    workspace: Path,
+    spec: TestSpec,
+    inputs: Mapping[str, Path | str],
+) -> None:
+    workspace = Path(workspace).resolve()
+    _prefix, _layout, references = _saved_provenance_layout(spec)
+    required = {"function_signature", "global_access", "call_report"}
+    if "dependency_policy" in references:
+        required.add("dependency_policy")
+    if set(inputs) != required:
+        raise ValueError(
+            "Harness inputs must exactly include canonical provenance kinds: "
+            + ", ".join(sorted(required))
+        )
+    for artifact_kind in sorted(required):
+        reference = references[artifact_kind]
+        supplied = Path(inputs[artifact_kind])
+        if supplied.is_symlink():
+            raise ValueError(f"Harness input must not be a symlink: {supplied}")
+        supplied_path = supplied.resolve(strict=False)
+        expected_path = (workspace / reference.path).resolve(strict=False)
+        if supplied_path != expected_path or not supplied_path.is_file():
+            raise ValueError(
+                f"Harness {artifact_kind} input must be the exact canonical "
+                f"provenance file: {reference.path}"
+            )
+        digest = hashlib.sha256(supplied_path.read_bytes()).hexdigest()
+        if digest != reference.sha256:
+            raise ValueError(
+                f"Harness {artifact_kind} input hash does not match test_spec provenance."
+            )
 
 
 def _relative_path(value: str) -> str:

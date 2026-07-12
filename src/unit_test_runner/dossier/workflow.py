@@ -34,6 +34,7 @@ from ..test_design.test_case_design_writer import write_test_case_design_format,
 from ..contracts import ContractMode
 from ..test_spec import (
     artifact_reference,
+    bind_test_spec_inputs,
     build_current_artifact_context,
     create_test_spec_from_design,
     export_test_spec_views,
@@ -496,18 +497,49 @@ def generate_harness_skeleton_from_reports(
     dependency_policy_path: Path | str | None = None,
     allow_legacy_alias: bool = False,
 ):
+    function_signature_path = Path(function_signature_path)
+    global_access_path = Path(global_access_path)
     call_report_path = Path(call_report_path)
+    test_case_design_path = Path(test_case_design_path)
     policy_path = Path(dependency_policy_path) if dependency_policy_path else call_report_path.parent / "dependency_policy.json"
+    test_payload = _read_json(test_case_design_path)
+    consumer_spec = load_test_spec_for_consumer(
+        test_case_design_path,
+        function_signature_path=function_signature_path,
+        allow_legacy_alias=allow_legacy_alias,
+    )
+    if test_payload.get("artifact_kind") == "test_spec":
+        canonical_spec = load_test_spec(
+            test_case_design_path,
+            mode=ContractMode.STRICT,
+        )
+        inputs: dict[str, Path] = {
+            "function_signature": function_signature_path,
+            "global_access": global_access_path,
+            "call_report": call_report_path,
+        }
+        if policy_path.exists():
+            inputs["dependency_policy"] = policy_path
+        bind_test_spec_inputs(
+            test_case_design_path.parent.parent,
+            canonical_spec,
+            inputs,
+        )
+    else:
+        report_root = function_signature_path.parent.resolve()
+        legacy_paths = [global_access_path, call_report_path, test_case_design_path]
+        if policy_path.exists():
+            legacy_paths.append(policy_path)
+        if any(path.parent.resolve() != report_root for path in legacy_paths):
+            raise ValueError(
+                "Legacy harness inputs must share the signature report directory."
+            )
     dependency_policy = _read_json(policy_path) if policy_path.exists() else None
     report = generate_harness_skeleton(
-        _read_json(Path(function_signature_path)),
-        _read_json(Path(global_access_path)),
+        _read_json(function_signature_path),
+        _read_json(global_access_path),
         _read_json(call_report_path),
-        load_test_spec_for_consumer(
-            Path(test_case_design_path),
-            function_signature_path=Path(function_signature_path),
-            allow_legacy_alias=allow_legacy_alias,
-        ),
+        consumer_spec,
         Path(out),
         overwrite=overwrite,
         dependency_policy=dependency_policy,

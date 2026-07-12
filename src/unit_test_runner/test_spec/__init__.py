@@ -20,6 +20,7 @@ from .repository import (
 from .patch import InvalidTestSpecPatchError, apply_test_spec_patch, update_test_spec
 from .identity import (
     artifact_reference,
+    bind_test_spec_inputs,
     build_current_artifact_context,
     signature_sha256,
     stable_function_id,
@@ -42,6 +43,7 @@ __all__ = [
     "create_test_spec_from_design",
     "apply_test_spec_patch",
     "artifact_reference",
+    "bind_test_spec_inputs",
     "build_current_artifact_context",
     "export_test_spec_views",
     "load_test_spec",

@@ -147,6 +147,7 @@ def write_canonical_test_spec(
     signature_function = {
         "name": function_name,
         "header_text_normalized": f"int {function_name}(void)",
+        "parameters": [],
     }
     signature_function.update(function_fields or {})
     signature_function["name"] = function_name
@@ -161,6 +162,59 @@ def write_canonical_test_spec(
         json.dumps(signature_payload, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    source_identity = {"path": source_path, "sha256": source_sha}
+    function_identity = {"name": function_name, "status": "fixture"}
+    fixture_payloads = {
+        "source_digest": {
+            "schema_version": "0.1",
+            "source": source_identity,
+            "masking": {},
+            "preprocessor": {},
+            "token_summary": {},
+            "warnings": [],
+        },
+        "function_location": {
+            "schema_version": "0.1",
+            "source": {"path": source_path},
+            "function": {**function_identity, "candidates": []},
+            "warnings": [],
+        },
+        "global_access": {
+            "schema_version": "0.1",
+            "source": source_identity,
+            "function": function_identity,
+            "global_accesses": [],
+            "warnings": [],
+        },
+        "call_report": {
+            "schema_version": "0.1",
+            "source": source_identity,
+            "function": function_identity,
+            "calls": [],
+            "warnings": [],
+        },
+        "dependency_policy": {
+            "schema_version": "0.1",
+            "source": {"path": source_path},
+            "function": function_identity,
+            "dependencies": [],
+            "warnings": [],
+        },
+        "coverage_design": {
+            "schema_version": "0.1",
+            "source": source_identity,
+            "function": function_identity,
+            "coverage_items": [],
+            "warnings": [],
+        },
+        "boundary_candidates": {
+            "schema_version": "0.1",
+            "source": source_identity,
+            "function": function_identity,
+            "input_candidates": [],
+            "warnings": [],
+        },
+    }
     function_id = stable_function_id(source_path, function_name)
     signature_hash = signature_sha256(signature_payload)
     reference = ArtifactReference(
@@ -180,13 +234,24 @@ def write_canonical_test_spec(
     ):
         artifact_path = reports / filename
         if artifact_path.is_file():
-            references.append(
-                ArtifactReference(
-                    artifact_kind=artifact_kind,
-                    path=f"reports/{filename}",
-                    sha256=hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
-                )
+            artifact_payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+            artifact_payload.setdefault("schema_version", "0.1")
+            artifact_payload.setdefault("source", copy.deepcopy(source_identity))
+            artifact_payload.setdefault("function", copy.deepcopy(function_identity))
+            artifact_payload.setdefault("warnings", [])
+        else:
+            artifact_payload = copy.deepcopy(fixture_payloads[artifact_kind])
+        artifact_path.write_text(
+            json.dumps(artifact_payload, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        references.append(
+            ArtifactReference(
+                artifact_kind=artifact_kind,
+                path=f"reports/{filename}",
+                sha256=hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
             )
+        )
     payload = copied_payload()
     payload["subject"] = {
         "function_id": function_id,
