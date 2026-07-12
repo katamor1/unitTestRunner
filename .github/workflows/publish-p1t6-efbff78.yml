@@ -35,20 +35,24 @@ jobs:
           wc -c "$RUNNER_TEMP/p1t6.bundle"
           sha256sum "$RUNNER_TEMP/p1t6.bundle"
 
-      - name: Verify and import Git bundle
-        id: import
+      - name: Verify Git bundle
         shell: bash
         run: |
           set -euo pipefail
           git bundle verify "$RUNNER_TEMP/p1t6.bundle"
-          mapfile -t heads < <(git bundle list-heads "$RUNNER_TEMP/p1t6.bundle")
-          test "${#heads[@]}" -eq 1
-          bundle_head="$(printf '%s\n' "${heads[0]}" | awk '{print $1}')"
-          bundle_ref="$(printf '%s\n' "${heads[0]}" | awk '{print $2}')"
-          test -n "$bundle_head"
+          git bundle list-heads "$RUNNER_TEMP/p1t6.bundle"
+
+      - name: Import and validate bundle head
+        id: import
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_ref="$(git bundle list-heads "$RUNNER_TEMP/p1t6.bundle" | awk 'NR==1 {print $2}')"
+          test -n "$bundle_ref"
+          git fetch "$RUNNER_TEMP/p1t6.bundle" "$bundle_ref"
+          bundle_head="$(git rev-parse FETCH_HEAD)"
           echo "bundle_head=$bundle_head"
           echo "bundle_ref=$bundle_ref"
-          git fetch "$RUNNER_TEMP/p1t6.bundle" "$bundle_head"
           git merge-base --is-ancestor \
             b66790165a2d4f82943cd199b3b499e1f1725fc3 "$bundle_head"
           echo "head=$bundle_head" >> "$GITHUB_OUTPUT"
