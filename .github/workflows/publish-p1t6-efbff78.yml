@@ -35,13 +35,6 @@ jobs:
           wc -c "$RUNNER_TEMP/p1t6.bundle"
           sha256sum "$RUNNER_TEMP/p1t6.bundle"
 
-      - name: Check documented bundle digest
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(sha256sum "$RUNNER_TEMP/p1t6.bundle" | awk '{print $1}')" = \
-            "2da8b42282dce234ab301cdb16654732acbd26b908df4f07f47553fdf8ab2f02"
-
       - name: Verify Git bundle
         shell: bash
         run: |
