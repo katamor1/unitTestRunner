@@ -156,6 +156,9 @@ class StateSetupReflectorTests(unittest.TestCase):
             }
             (workspace / "reports" / "test_case_design.json").write_text(json.dumps(design, indent=2), encoding="utf-8")
 
+            design_path = workspace / "reports" / "test_case_design.json"
+            before = design_path.read_bytes()
+
             reflect_state_setups(workspace, design, "Shared3")
 
             test_text = test_source.read_text(encoding="cp932")
@@ -166,10 +169,8 @@ class StateSetupReflectorTests(unittest.TestCase):
             self.assertIn("    static gbl_com fixture_g_com;", helper_text)
             self.assertIn("    fixture_g_com.ptr = &fixture_g_com_ptr;", helper_text)
             self.assertIn("    g_com = &fixture_g_com;", helper_text)
-            updated_design = json.loads((workspace / "reports" / "test_case_design.json").read_text(encoding="utf-8"))
-            setup = updated_design["test_cases"][0]["state_setups"][0]
-            self.assertEqual("g_com", setup["variable_name"])
-            self.assertEqual("g_com->ptr->...", setup["inferred_from"])
+            self.assertEqual(before, design_path.read_bytes())
+            self.assertEqual([], design["test_cases"][0]["state_setups"])
 
     def test_removes_stale_product_header_include_from_test_source(self):
         with tempfile.TemporaryDirectory() as temp_dir:

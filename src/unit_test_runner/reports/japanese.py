@@ -81,6 +81,7 @@ _LABELS = {
     "target_source": "対象ソース",
     "test_case_design": "テストケース設計",
     "test_case_design_generation": "テストケース設計生成",
+    "test_spec": "テスト仕様",
     "test_execution_report": "テスト実行レポート",
     "test_header": "テストヘッダ",
     "test_log": "テストログ",

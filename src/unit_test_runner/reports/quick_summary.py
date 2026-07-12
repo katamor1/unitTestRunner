@@ -137,7 +137,7 @@ def _step_summaries(dossier: dict[str, Any]) -> list[dict[str, Any]]:
         ("call_report", "呼び出し解析", {"markdown": "markdown", "json": "json"}),
         ("coverage_design", "カバレッジ設計", {"markdown": "markdown", "json": "json"}),
         ("boundary_equivalence_candidates", "境界値・同値クラス", {"markdown": "markdown", "json": "json"}),
-        ("test_case_design", "テストケース設計", {"markdown": "markdown", "json": "json", "csv": "csv"}),
+        ("test_spec", "テスト仕様", {"markdown": "markdown", "json": "json", "csv": "csv"}),
         ("harness_skeleton", "ハーネス生成", {"markdown": "markdown", "json": "json"}),
         ("build_workspace", "ビルドworkspace", {"markdown": "markdown", "json": "json"}),
         ("build_probe", "ビルドプローブ", {"markdown": "markdown", "json": "json"}),
@@ -165,7 +165,7 @@ def _report_paths(out_dir: Path, dossier: dict[str, Any]) -> dict[str, str]:
         "function_dossier_md": str(reports / "function_dossier.md"),
     }
     mapping = {
-        "test_case_design": {"test_case_design_json": "json", "test_case_design_md": "markdown", "test_case_design_csv": "csv"},
+        "test_spec": {"test_spec_json": "json", "test_spec_md": "markdown", "test_spec_csv": "csv"},
         "function_signature": {"function_signature_json": "json"},
         "global_access": {"global_access_json": "json"},
         "call_report": {"call_report_json": "json"},

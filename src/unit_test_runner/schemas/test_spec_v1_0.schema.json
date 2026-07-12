@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unit-test-runner.local/schemas/test_spec_v1_0.schema.json",
+  "title": "Canonical test specification contract v1.0",
+  "allOf": [
+    {"$ref": "common.schema.json"},
+    {
+      "type": "object",
+      "properties": {
+        "artifact_kind": {"const": "test_spec"},
+        "schema_version": {"const": "1.0.0"},
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "spec_id", "revision", "source", "function", "generated_from",
+            "generation_policy", "test_cases", "additional_case_candidates",
+            "coverage_summary", "unresolved_items", "warnings", "review_item_ids"
+          ],
+          "properties": {
+            "spec_id": {"type": "string", "minLength": 1},
+            "revision": {"type": "integer", "minimum": 1},
+            "source": {
+              "type": "object", "additionalProperties": false,
+              "required": ["path", "sha256"],
+              "properties": {
+                "path": {"type": "string", "minLength": 1},
+                "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+              }
+            },
+            "function": {
+              "type": "object", "additionalProperties": false,
+              "required": ["function_id", "name", "signature_sha256"],
+              "properties": {
+                "function_id": {"type": "string", "minLength": 1},
+                "name": {"type": "string", "minLength": 1},
+                "signature_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+              }
+            },
+            "generated_from": {
+              "type": "array",
+              "items": {"$ref": "common.schema.json#/$defs/artifact_reference"}
+            },
+            "generation_policy": {"type": "object"},
+            "test_cases": {"type": "array", "items": {"$ref": "#/$defs/test_case"}},
+            "additional_case_candidates": {"type": "array", "items": {"$ref": "#/$defs/test_case"}},
+            "coverage_summary": {"$ref": "#/$defs/coverage_summary"},
+            "unresolved_items": {"type": "array", "items": {"type": "object"}},
+            "warnings": {"type": "array", "items": {"type": "object"}},
+            "review_item_ids": {
+              "type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "test_case": {
+      "type": "object",
+      "required": ["test_case_id", "coverage_links"],
+      "properties": {
+        "test_case_id": {"type": "string", "minLength": 1},
+        "coverage_links": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["coverage_id"],
+            "properties": {"coverage_id": {"type": "string", "minLength": 1}}
+          }
+        }
+      }
+    },
+    "coverage_summary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["total_coverage_items", "covered_by_design_count", "uncovered_coverage_ids", "coverage_to_test_cases"],
+      "properties": {
+        "total_coverage_items": {"type": "integer", "minimum": 0},
+        "covered_by_design_count": {"type": "integer", "minimum": 0},
+        "uncovered_coverage_ids": {
+          "type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true
+        },
+        "coverage_to_test_cases": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true
+          }
+        }
+      }
+    }
+  }
+}

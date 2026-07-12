@@ -164,7 +164,7 @@ Step 18 で実装するもの:
    - `review_checklist.md`
    - `unresolved_items.md`
    - `next_actions.md`
-   - `test_case_design.csv`
+   - `test_spec.csv`
    - workspace folder
 
 7. UI commands

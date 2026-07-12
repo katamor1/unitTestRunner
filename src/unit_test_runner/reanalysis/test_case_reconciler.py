@@ -16,14 +16,31 @@ from .reanalysis_models import (
 
 PROTECTED_FIELDS = [
     "title",
+    "target_function",
     "purpose",
+    "priority",
+    "case_kind",
     "preconditions",
     "input_assignments",
     "state_setups",
     "stub_setups",
+    "dependency_overrides",
+    "execution_steps",
     "expected_observations",
-    "review_status",
+    "candidate_links",
+    "confidence",
+    "warnings",
+    "review_item_ids",
 ]
+
+_EMBEDDED_REVIEW_AUTHORITY_FIELDS = {
+    "approved",
+    "approval",
+    "approval_status",
+    "is_approved",
+    "review_status",
+    "review_decision",
+}
 
 
 def reconcile_test_cases(
@@ -106,6 +123,7 @@ def reconcile_test_cases(
         updated_payload = copy.deepcopy(previous_design)
         updated_payload["test_cases"] = updated_cases
         updated_payload.setdefault("reanalysis", {})["source"] = "updated_by_reanalysis"
+        updated_payload = _without_embedded_review_authority(updated_payload)
     return report, updated_payload
 
 
@@ -163,14 +181,26 @@ def _first_case_for_coverage(current_by_coverage: dict[str, list[dict[str, Any]]
 def _merge_case(previous: dict[str, Any], proposed: dict[str, Any] | None, current_coverage_ids: list[str], should_update: bool) -> dict[str, Any]:
     merged = copy.deepcopy(previous)
     if not should_update:
-        return merged
+        return _without_embedded_review_authority(merged)
     if proposed:
         for key, value in proposed.items():
             if key not in PROTECTED_FIELDS and key != "test_case_id":
                 merged[key] = copy.deepcopy(value)
     if current_coverage_ids:
         merged["coverage_links"] = [_remap_coverage_link(link, current_coverage_ids) for link in merged.get("coverage_links", [])]
-    return merged
+    return _without_embedded_review_authority(merged)
+
+
+def _without_embedded_review_authority(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _without_embedded_review_authority(child)
+            for key, child in value.items()
+            if str(key).lower() not in _EMBEDDED_REVIEW_AUTHORITY_FIELDS
+        }
+    if isinstance(value, list):
+        return [_without_embedded_review_authority(child) for child in value]
+    return copy.deepcopy(value)
 
 
 def _remap_coverage_link(link: dict[str, Any], current_coverage_ids: list[str]) -> dict[str, Any]:

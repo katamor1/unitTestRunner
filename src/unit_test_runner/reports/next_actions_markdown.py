@@ -18,7 +18,7 @@ _MD_REPORTS_BY_ARTIFACT = {
     "call_report": "reports/call_report.md",
     "coverage_design": "reports/coverage_design.md",
     "boundary_equivalence_candidates": "reports/boundary_equivalence_candidates.md",
-    "test_case_design": "reports/test_case_design.md",
+    "test_spec": "reports/test_spec.md",
     "harness_skeleton_report": "reports/harness_skeleton_report.md",
     "build_workspace_report": "reports/build_workspace_report.md",
     "build_probe_report": "reports/build_probe_report.md",
@@ -29,7 +29,7 @@ _MD_REPORTS_BY_ARTIFACT = {
 }
 
 _DEFAULT_ARTIFACT_PATHS = {
-    "test_case_design": "reports/test_case_design.json",
+    "test_spec": "reports/test_spec.json",
     "harness_skeleton_report": "reports/harness_skeleton_report.json",
     "build_workspace_report": "reports/build_workspace_report.json",
     "build_probe_report": "reports/build_probe_report.json",
@@ -90,7 +90,7 @@ def _links_for_action(
         for artifact in _list_field(item, "related_artifacts"):
             links.extend(artifact_links.get(artifact) or _fallback_artifact_links(artifact))
     if action.action_kind == "review_expected_result":
-        links.extend(artifact_links.get("test_case_design") or _fallback_artifact_links("test_case_design"))
+        links.extend(artifact_links.get("test_spec") or _fallback_artifact_links("test_spec"))
         if function_name:
             links.append(_markdown_link("生成テストソース", f"../generated/tests/test_{_safe_identifier(function_name)}.c"))
     elif action.action_kind == "review_stub_behavior":

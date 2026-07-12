@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +17,13 @@ sys.path.insert(0, str(SRC_ROOT))
 from unit_test_runner.dossier import analyze_function_workflow
 from unit_test_runner.execution.runner_output_parser import parse_runner_output
 from unit_test_runner.execution.test_execution import prepare_test_execution_evidence
+from unit_test_runner.contracts import ContractMode
+from unit_test_runner.test_spec import (
+    build_current_artifact_context,
+    load_test_spec,
+    save_test_spec,
+)
+from tests.spec_support import write_canonical_test_spec
 
 
 def run_module(*args):
@@ -125,6 +133,75 @@ UTR OK TC_Control_Update_002
             self.assertIn("test_case_id,status,review_required", csv_text)
             package = (workspace / "reports" / "evidence_package.md").read_text(encoding="utf-8")
             self.assertIn("# 関数単体テストエビデンスパッケージ", package)
+
+    def test_candidate_only_spec_is_reported_but_never_spawned(self):
+        from unit_test_runner.execution.execution_models import TestRunRequest
+        from unit_test_runner.execution.test_execution import execute_test_run
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            source = workspace / "src" / "sample.c"
+            source.parent.mkdir(parents=True)
+            source.write_text("int sample(void) { return 0; }\n", encoding="utf-8")
+            spec_path = write_canonical_test_spec(
+                workspace,
+                source_path="src/sample.c",
+                function_name="sample",
+                test_case_id="TC_sample_candidate",
+            )
+            spec = load_test_spec(spec_path, mode=ContractMode.STRICT)
+            candidate = spec.test_cases.pop()
+            candidate["expected_observations"][0]["expected_expression"] = "TBD-review"
+            candidate["review_item_ids"] = ["review-candidate-001"]
+            spec.additional_case_candidates = [candidate]
+            spec.review_item_ids = ["review-candidate-001"]
+            spec.unresolved_items = [
+                {
+                    "item_id": "review-candidate-001",
+                    "item_kind": "expected_result_unknown",
+                    "related_test_case_ids": ["TC_sample_candidate"],
+                    "description": "Candidate oracle requires review.",
+                    "suggested_action": "Resolve the oracle before execution.",
+                }
+            ]
+            save_test_spec(
+                spec_path,
+                spec,
+                expected_revision=1,
+                current_context=build_current_artifact_context(workspace, spec),
+            )
+            reports = workspace / "reports"
+            (reports / "harness_skeleton_report.json").write_text(
+                json.dumps({"unresolved_placeholders": [], "generated_files": []}),
+                encoding="utf-8",
+            )
+            (reports / "build_probe_report.json").write_text(
+                json.dumps({"function": {"name": "sample", "status": "succeeded"}}),
+                encoding="utf-8",
+            )
+            (reports / "build_workspace_report.json").write_text(
+                json.dumps({"function": {"name": "sample"}, "source": {"path": "src/sample.c"}}),
+                encoding="utf-8",
+            )
+            runner = workspace / "runner.exe"
+            runner.write_bytes(b"fixture")
+
+            with mock.patch(
+                "unit_test_runner.execution.test_execution.run_test_executable_cases",
+                side_effect=AssertionError("candidate must not be passed to the runner"),
+            ):
+                report = execute_test_run(
+                    TestRunRequest(workspace, runner, 5, True)
+                )
+
+            self.assertFalse(report.executed)
+            self.assertIn(report.status, {"blocked", "inconclusive"})
+            self.assertEqual([], report.case_results)
+            self.assertTrue(report.unresolved_review_items)
+            self.assertIn(
+                "TC_sample_candidate",
+                {item.related_test_case_id for item in report.unresolved_review_items},
+            )
 
     def test_cli_run_tests_prepare_evidence_and_analyze_function_connect_execution_evidence(self):
         with tempfile.TemporaryDirectory() as temp_dir:

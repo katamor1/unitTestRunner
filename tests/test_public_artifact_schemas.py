@@ -5,7 +5,7 @@ from importlib import resources
 from jsonschema import Draft202012Validator
 
 from unit_test_runner.contracts import ArtifactKind
-from unit_test_runner.contracts.registry import iter_contracts
+from unit_test_runner.contracts.registry import iter_contract_versions
 from unit_test_runner.contracts.validator import validate_payload
 
 
@@ -13,7 +13,12 @@ SHA256 = "7b18e68b2afcf1b0f0a1b857c5d1fcb2cf9db4d1540d778a266dbeaa3aa176a8"
 def generic_payload(kind: ArtifactKind) -> dict:
     return {
         "artifact_kind": kind.value,
-        "schema_version": "1.0.0",
+        "schema_version": next(
+            contract.current_version
+            for contract in iter_contract_versions()
+            if contract.kind is kind
+            and contract.schema_resource == f"{kind.value}.schema.json"
+        ),
         "producer": {
             "name": "unit-test-runner",
             "version": "0.1.0",
@@ -46,7 +51,7 @@ class PublicArtifactSchemaTests(unittest.TestCase):
         root = resources.files("unit_test_runner.schemas")
         actual = {item.name for item in root.iterdir() if item.name.endswith(".json")}
         expected = {"common.schema.json"} | {
-            contract.schema_resource for contract in iter_contracts()
+            contract.schema_resource for contract in iter_contract_versions()
         }
 
         self.assertEqual(expected, actual)

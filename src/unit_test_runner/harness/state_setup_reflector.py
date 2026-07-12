@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import copy
 import re
 from pathlib import Path
 from typing import Any
@@ -29,7 +30,7 @@ def reflect_state_setups(output_root: Path | str, test_case_design: Any, functio
     call those helpers before invoking the target wrapper.
     """
     output_root = Path(output_root).resolve()
-    payload = _payload(test_case_design)
+    payload = copy.deepcopy(_payload(test_case_design))
     function_name = function_name or payload.get("function", {}).get("name") or "unknown_function"
     test_source = output_root / "generated" / "tests" / f"test_{sanitize_identifier(function_name)}.c"
     if not test_source.exists():
@@ -38,7 +39,6 @@ def reflect_state_setups(output_root: Path | str, test_case_design: Any, functio
     inferred = _infer_pointer_fixture_state_setups(output_root, payload, function_name)
     if inferred:
         _append_inferred_state_setups(cases, inferred)
-        _write_back_test_case_design(output_root, payload)
     if not any(case.get("state_setups") for case in cases):
         return []
     text = test_source.read_text(encoding="cp932", errors="replace")
@@ -56,13 +56,6 @@ def _payload(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     raise TypeError(f"Unsupported test case design type: {type(value)!r}")
-
-
-def _write_back_test_case_design(output_root: Path, payload: dict[str, Any]) -> None:
-    path = output_root / "reports" / "test_case_design.json"
-    if not path.exists():
-        return
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def _append_inferred_state_setups(cases: list[dict[str, Any]], inferred: list[dict[str, Any]]) -> None:

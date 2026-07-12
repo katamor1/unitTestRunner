@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from unit_test_runner.contracts import ArtifactKind, RunOutcome
+from unit_test_runner.contracts import ArtifactKind, ContractMode, RunOutcome, load_artifact
 from unit_test_runner.harness.c90_writer import sha256_file
 
 from .execution_models import (
@@ -29,7 +29,7 @@ from .evidence_manifest import (
 )
 from .evidence_paths import EvidencePaths, create_evidence_paths
 from .executable_resolver import resolve_executable
-from .execution_runner import build_execution_command, run_test_executable, run_test_executable_cases
+from .execution_runner import build_execution_command, run_test_executable_cases
 from .precondition_validator import validate_execution_preconditions
 from .report_loader import load_execution_run
 from .run_paths import create_run_paths
@@ -45,7 +45,7 @@ def execute_test_run(request: TestRunRequest) -> TestExecutionReport:
     workspace = Path(request.workspace).resolve()
     paths = create_run_paths(workspace, request.run_id)
     reports = workspace / "reports"
-    test_case_design = _read_json(reports / "test_case_design.json")
+    test_case_design = _read_canonical_test_spec(reports)
     harness_report = _read_json(reports / "harness_skeleton_report.json")
     build_probe = _read_json(reports / "build_probe_report.json")
     build_workspace = _read_json(reports / "build_workspace_report.json")
@@ -85,7 +85,14 @@ def execute_test_run(request: TestRunRequest) -> TestExecutionReport:
     )
     warnings.extend(precondition_warnings)
     review_items.extend(precondition_review_items)
-    if review_items and not request.allow_placeholder_tests and precondition_status == "ready":
+    if not design_case_results and precondition_status == "ready":
+        warnings.append(
+            TestExecutionWarning(
+                "no_executable_test_cases",
+                "実行可能なテストケースがないため、runnerは起動しません。追加候補と未解決項目を解消してください。",
+            )
+        )
+    elif review_items and not request.allow_placeholder_tests and precondition_status == "ready":
         warnings.append(
             TestExecutionWarning(
                 "placeholder_tests_not_allowed",
@@ -97,21 +104,13 @@ def execute_test_run(request: TestRunRequest) -> TestExecutionReport:
         test_case_ids = [
             case.test_case_id for case in design_case_results if case.test_case_id
         ]
-        if test_case_ids:
-            command_result, parsed_summary, runner_case_results, raw_status = run_test_executable_cases(
-                workspace,
-                executable_info,
-                test_case_ids,
-                request.timeout_seconds,
-                run_paths=paths,
-            )
-        else:
-            command_result, parsed_summary, runner_case_results, raw_status = run_test_executable(
-                workspace,
-                executable_info,
-                request.timeout_seconds,
-                run_paths=paths,
-            )
+        command_result, parsed_summary, runner_case_results, raw_status = run_test_executable_cases(
+            workspace,
+            executable_info,
+            test_case_ids,
+            request.timeout_seconds,
+            run_paths=paths,
+        )
         status = _canonical_run_outcome(raw_status)
         if parsed_summary.total == 0 and design_case_results:
             warnings.append(
@@ -210,7 +209,7 @@ def validate_test_run_preflight(
 ) -> tuple[list[TestExecutionWarning], list[ExecutionReviewItem]]:
     workspace = Path(workspace).resolve()
     reports = workspace / "reports"
-    test_case_design = _read_json(reports / "test_case_design.json")
+    test_case_design = _read_canonical_test_spec(reports)
     harness_report = _read_json(reports / "harness_skeleton_report.json")
     build_probe = _read_json(reports / "build_probe_report.json")
     build_workspace = _read_json(reports / "build_workspace_report.json")
@@ -230,6 +229,7 @@ def validate_test_run_preflight(
         policy,
     )
     placeholder_items = _placeholder_review_items(harness_report, test_case_design)
+    review_items.extend(placeholder_items)
     if placeholder_items and not allow_placeholder_tests:
         warnings.append(
             TestExecutionWarning(
@@ -237,7 +237,6 @@ def validate_test_run_preflight(
                 "未確定の期待値を含むため、テスト実行はブロックされます。",
             )
         )
-        review_items.extend(placeholder_items)
     return warnings, review_items
 
 
@@ -389,7 +388,7 @@ def prepare_test_execution_evidence(
     logs = workspace / "logs"
     reports.mkdir(parents=True, exist_ok=True)
     logs.mkdir(parents=True, exist_ok=True)
-    test_case_design = _read_json(reports / "test_case_design.json")
+    test_case_design = _read_canonical_test_spec(reports)
     harness_report = _read_json(reports / "harness_skeleton_report.json")
     build_probe = _read_json(reports / "build_probe_report.json")
     build_workspace = _read_json(reports / "build_workspace_report.json")
@@ -419,13 +418,18 @@ def prepare_test_execution_evidence(
             status = "blocked"
             warnings.extend(precondition_warnings)
             review_items.extend(precondition_review_items)
+        elif not design_case_results:
+            status = "blocked"
+            warnings.append(
+                TestExecutionWarning(
+                    "no_executable_test_cases",
+                    "実行可能なテストケースがないため、runnerは起動しません。追加候補と未解決項目を解消してください。",
+                )
+            )
         else:
             executed = True
             test_case_ids = [case.test_case_id for case in design_case_results if case.test_case_id]
-            if test_case_ids:
-                command_result, parsed_summary, runner_case_results, status = run_test_executable_cases(workspace, executable_info, test_case_ids, timeout_seconds)
-            else:
-                command_result, parsed_summary, runner_case_results, status = run_test_executable(workspace, executable_info, timeout_seconds)
+            command_result, parsed_summary, runner_case_results, status = run_test_executable_cases(workspace, executable_info, test_case_ids, timeout_seconds)
             if parsed_summary.total == 0 and design_case_results:
                 warnings.append(
                     TestExecutionWarning(
@@ -482,7 +486,7 @@ def _case_results_from_design(test_case_design: dict[str, Any]) -> list[TestCase
     results = []
     for case in test_case_design.get("test_cases", []):
         coverage = [link.get("coverage_id", "") for link in case.get("coverage_links", []) if link.get("coverage_id")]
-        review = case.get("review_status") == "review_required"
+        review = bool(_review_references(case))
         results.append(
             TestCaseExecutionResult(
                 test_case_id=case.get("test_case_id"),
@@ -599,6 +603,7 @@ def _placeholder_review_items(harness_report: dict[str, Any], test_case_design: 
                 "warning",
             )
         )
+    items.extend(_canonical_test_spec_review_items(test_case_design))
     for case in test_case_design.get("test_cases", []):
         for observation in case.get("expected_observations", []):
             expected = observation.get("expected_expression")
@@ -614,11 +619,159 @@ def _placeholder_review_items(harness_report: dict[str, Any], test_case_design: 
                     )
                 )
                 break
+    return _unique_review_items(items)
+
+
+def _canonical_test_spec_review_items(
+    test_spec: dict[str, Any],
+) -> list[ExecutionReviewItem]:
+    items: list[ExecutionReviewItem] = []
+    represented_ids: set[str] = set()
+    represented_cases: set[str] = set()
+    for index, unresolved in enumerate(test_spec.get("unresolved_items") or [], start=1):
+        if not isinstance(unresolved, dict):
+            continue
+        item_id = str(unresolved.get("item_id") or f"REVIEW_UNRESOLVED_{index:03d}")
+        related_ids = [
+            str(value)
+            for value in unresolved.get("related_test_case_ids") or []
+            if str(value)
+        ]
+        represented_ids.add(item_id)
+        represented_cases.update(related_ids)
+        items.append(
+            ExecutionReviewItem(
+                item_id,
+                str(unresolved.get("item_kind") or "test_spec_unresolved_item"),
+                related_ids[0] if related_ids else None,
+                str(
+                    unresolved.get("description")
+                    or unresolved.get("message")
+                    or "テスト仕様に未解決項目が残っています。"
+                ),
+                str(
+                    unresolved.get("suggested_action")
+                    or "未解決項目を解消し、正本のテスト仕様を更新してください。"
+                ),
+                "warning",
+            )
+        )
+
+    all_cases = list(test_spec.get("test_cases") or []) + list(
+        test_spec.get("additional_case_candidates") or []
+    )
+    for case in test_spec.get("additional_case_candidates") or []:
+        if not isinstance(case, dict):
+            continue
+        case_id = str(case.get("test_case_id") or "") or None
+        if case_id and case_id in represented_cases:
+            continue
+        references = _review_references(case)
+        item_id = references[0] if references else f"REVIEW_CANDIDATE_{len(items) + 1:03d}"
+        represented_ids.add(item_id)
+        if case_id:
+            represented_cases.add(case_id)
+        items.append(
+            ExecutionReviewItem(
+                item_id,
+                "additional_case_candidate",
+                case_id,
+                "追加ケース候補は実行対象ではありません。",
+                "値と期待結果を確定し、検証済みの実行ケースへ移行してください。",
+                "warning",
+            )
+        )
+
+    declared_references = [
+        str(value) for value in test_spec.get("review_item_ids") or [] if str(value)
+    ]
+    for case in all_cases:
+        declared_references.extend(_review_references(case))
+    for reference in dict.fromkeys(declared_references):
+        if reference in represented_ids:
+            continue
+        related_case_id = next(
+            (
+                str(case.get("test_case_id"))
+                for case in all_cases
+                if isinstance(case, dict) and reference in _review_references(case)
+            ),
+            None,
+        )
+        represented_ids.add(reference)
+        items.append(
+            ExecutionReviewItem(
+                reference,
+                "review_decision_required",
+                related_case_id,
+                "テスト仕様が外部レビュー判断を参照しています。",
+                "review_decisions.json の対応項目を確認してください。",
+                "warning",
+            )
+        )
+
+    if not test_spec.get("test_cases") and not items:
+        items.append(
+            ExecutionReviewItem(
+                "REVIEW_NO_EXECUTABLE_CASES_001",
+                "no_executable_test_cases",
+                None,
+                "実行可能なテストケースがありません。",
+                "値と期待結果が確定したテストケースを正本へ追加してください。",
+                "warning",
+            )
+        )
     return items
+
+
+def _review_references(value: Any) -> list[str]:
+    references: list[str] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key in {"review_item_id", "review_item_ids"}:
+                values = child if isinstance(child, list) else [child]
+                references.extend(str(item) for item in values if str(item))
+            references.extend(_review_references(child))
+    elif isinstance(value, list):
+        for child in value:
+            references.extend(_review_references(child))
+    return list(dict.fromkeys(references))
+
+
+def _unique_review_items(items: list[ExecutionReviewItem]) -> list[ExecutionReviewItem]:
+    unique: list[ExecutionReviewItem] = []
+    seen: set[str] = set()
+    for item in items:
+        if item.item_id in seen:
+            continue
+        seen.add(item.item_id)
+        unique.append(item)
+    return unique
 
 
 def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _read_canonical_test_spec(reports: Path) -> dict[str, Any]:
+    from unit_test_runner.test_spec import (
+        build_current_artifact_context,
+        load_test_spec,
+        test_spec_consumer_payload,
+        validate_test_spec,
+    )
+
+    path = reports / "test_spec.json"
+    spec = load_test_spec(path, mode=ContractMode.STRICT)
+    context = build_current_artifact_context(reports.parent, spec)
+    violations = validate_test_spec(spec, current_context=context)
+    if violations:
+        detail = "; ".join(
+            f"{item.code} at {item.json_path}: {item.message}"
+            for item in violations
+        )
+        raise ValueError(f"Stale canonical test_spec: {detail}")
+    return test_spec_consumer_payload(spec)
 
 
 def _read_optional_json(path: Path) -> dict[str, Any] | None:

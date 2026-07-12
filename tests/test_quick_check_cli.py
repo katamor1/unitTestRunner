@@ -56,7 +56,7 @@ class QuickCheckCliTests(unittest.TestCase):
             self.assertEqual("passed", payload["data"]["outcome"])
             self.assertEqual("design", payload["data"]["details"]["phase"])
             self.assertTrue((out_dir / "reports" / "function_dossier.md").exists())
-            self.assertTrue((out_dir / "reports" / "test_case_design.csv").exists())
+            self.assertTrue((out_dir / "reports" / "test_spec.csv").exists())
             self.assertFalse((out_dir / "reports" / "review_checklist.md").exists())
 
 

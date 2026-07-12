@@ -11,7 +11,7 @@ def assess_readiness(artifacts: list[DossierArtifact], blocked_reasons: list[str
     return DossierReadiness(
         mvp_level=mvp_level,
         ready_for_review=not blocked,
-        ready_for_harness_generation=not blocked and {"function_signature", "global_access", "call_report", "test_case_design"}.issubset(existing),
+        ready_for_harness_generation=not blocked and {"function_signature", "global_access", "call_report", "test_spec"}.issubset(existing),
         ready_for_build_probe=not blocked and {"harness_skeleton_report", "build_workspace_report"}.issubset(existing),
         ready_for_execution=not blocked and "build_probe_report" in existing,
         evidence_ready=not blocked and {"test_execution_report", "evidence_manifest"}.issubset(existing),
@@ -26,7 +26,7 @@ def _mvp_level(existing: set[str]) -> str:
         return "mvp4_execution_evidence"
     if {"harness_skeleton_report", "build_workspace_report", "build_probe_report", "build_completion_plan"}.issubset(existing):
         return "mvp3_build_probe"
-    if {"global_access", "call_report", "coverage_design", "boundary_equivalence_candidates", "test_case_design"}.issubset(existing):
+    if {"global_access", "call_report", "coverage_design", "boundary_equivalence_candidates", "test_spec"}.issubset(existing):
         return "mvp2_test_design"
     if {"source_digest", "function_location", "function_signature"}.issubset(existing):
         return "mvp1_analysis_only"

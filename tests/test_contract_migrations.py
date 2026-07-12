@@ -407,8 +407,35 @@ def legacy_test_case_design() -> dict:
     }
 
 
+def lossless_test_spec_v01() -> dict:
+    payload = legacy_test_case_design()
+    payload.update(
+        {
+            "producer": {
+                "name": "unit-test-runner",
+                "version": "0.1.0",
+                "commit": "legacy-verified-commit",
+            },
+            "extensions": {"vendor": {"preserved": True}},
+            "spec_id": "spec-control-update",
+            "revision": 1,
+            "generated_from": [],
+            "review_item_ids": [],
+        }
+    )
+    payload["function"] = {
+        "function_id": "fn-control-update",
+        "name": "Control_Update",
+        "signature_sha256": SHA256,
+    }
+    payload["test_cases"][0]["expected_observations"] = [
+        {"observation_kind": "return_value", "expected_expression": "CONTROL_OK"}
+    ]
+    return payload
+
+
 class ContractMigrationTests(unittest.TestCase):
-    def test_compatible_load_migrates_v01_in_memory_without_rewriting_source(self):
+    def test_generic_load_rejects_genuine_v01_alias_without_fabricating_identity(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "test_case_design.json"
             path.write_text(
@@ -425,34 +452,11 @@ class ContractMigrationTests(unittest.TestCase):
 
             self.assertEqual(before, path.read_bytes())
 
-        self.assertTrue(loaded.migrated)
+        self.assertFalse(loaded.migrated)
         self.assertEqual("0.1", loaded.source_version)
-        self.assertEqual("1.0.0", loaded.current_version)
-        self.assertEqual("test_spec", loaded.payload["artifact_kind"])
-        self.assertEqual("tc-control-update-001", loaded.payload["data"]["test_cases"][0]["test_case_id"])
-        self.assertNotIn(
-            "signature_sha256",
-            loaded.payload["data"]["function"],
-        )
-        self.assertEqual(
-            {
-                (
-                    "missing_provenance",
-                    "$.producer.commit",
-                    "blocking",
-                ),
-                (
-                    "missing_provenance",
-                    "$.data.function.signature_sha256",
-                    "blocking",
-                )
-            },
-            {
-                (item.code, item.json_path, item.severity)
-                for item in loaded.violations
-                if item.code == "missing_provenance"
-            },
-        )
+        self.assertEqual("1.1.0", loaded.current_version)
+        self.assertEqual(legacy_test_case_design(), loaded.payload)
+        self.assertIn("migration_error", {item.code for item in loaded.violations})
 
     def test_strict_load_rejects_v01_without_migration(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -470,17 +474,17 @@ class ContractMigrationTests(unittest.TestCase):
         self.assertIn("unsupported_version", {item.code for item in loaded.violations})
 
     def test_migration_does_not_mutate_input_mapping(self):
-        legacy = legacy_test_case_design()
+        legacy = lossless_test_spec_v01()
         before = json.dumps(legacy, sort_keys=True)
 
         migrated = migrate_payload(
             ArtifactKind.TEST_SPEC,
             legacy,
-            target_version="1.0.0",
+            target_version="1.1.0",
         )
 
         self.assertEqual(before, json.dumps(legacy, sort_keys=True))
-        self.assertEqual("1.0.0", migrated["schema_version"])
+        self.assertEqual("1.1.0", migrated["schema_version"])
 
     def test_dossier_migration_uses_known_target_source_without_inventing_hash(self):
         legacy = {
@@ -948,7 +952,7 @@ class ContractMigrationTests(unittest.TestCase):
                     migrate_payload(
                         ArtifactKind.TEST_SPEC,
                         payload,
-                        target_version="1.0.0",
+                        target_version="1.1.0",
                     )
 
                 self.assertIs(
@@ -975,11 +979,11 @@ class ContractMigrationTests(unittest.TestCase):
         ):
             migrated = migrations_module.migrate_payload(
                 ArtifactKind.TEST_SPEC,
-                legacy_test_case_design(),
-                target_version="1.0.0",
+                lossless_test_spec_v01(),
+                target_version="1.1.0",
             )
 
-        self.assertEqual("1.0.0", migrated["schema_version"])
+        self.assertEqual("1.1.0", migrated["schema_version"])
 
     def test_real_source_digest_migration_normalizes_data_and_preserves_origin(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1099,35 +1103,20 @@ class ContractMigrationTests(unittest.TestCase):
         )
 
     def test_specialized_test_spec_migration_preserves_unverified_absolute_source(self):
-        legacy = legacy_test_case_design()
+        legacy = lossless_test_spec_v01()
         original = "C:/product/src/control.c"
         legacy["source"]["path"] = original
 
         migrated = migrate_payload(
             ArtifactKind.TEST_SPEC,
             legacy,
-            target_version="1.0.0",
+            target_version="1.1.0",
         )
 
-        self.assertNotIn("source_path", migrated["subject"])
-        self.assertNotIn("function_id", migrated["subject"])
-        self.assertNotIn("path", migrated["data"]["source"])
+        self.assertEqual(original, migrated["subject"]["source_path"])
+        self.assertEqual(original, migrated["data"]["source"]["path"])
         self.assertIn(
-            ("$.data.source.path", original, False),
-            {
-                (
-                    item["json_path"],
-                    item["original_value"],
-                    item["verified"],
-                )
-                for item in migrated["extensions"]["migration"].get(
-                    "path_migrations",
-                    [],
-                )
-            },
-        )
-        self.assertIn(
-            ("missing_provenance", "$.data.source.path", "blocking"),
+            ("invalid_relative_path", "$.data.source.path", "error"),
             {
                 (item.code, item.json_path, item.severity)
                 for item in validate_payload(ArtifactKind.TEST_SPEC, migrated)
@@ -1435,30 +1424,9 @@ class ContractMigrationTests(unittest.TestCase):
 
             self.assertEqual(before, path.read_bytes())
 
-        self.assertTrue(loaded.migrated)
-        self.assertNotIn("source_sha256", loaded.payload["subject"])
-        self.assertNotIn("sha256", loaded.payload["data"]["source"])
-        self.assertNotIn(
-            "signature_sha256",
-            loaded.payload["data"]["function"],
-        )
+        self.assertFalse(loaded.migrated)
         self.assertNotIn("0" * 64, json.dumps(loaded.payload, sort_keys=True))
-        violations = {
-            (item.code, item.json_path, item.severity)
-            for item in loaded.violations
-        }
-        self.assertTrue(
-            {
-                ("missing_provenance", "$.subject.source_sha256", "blocking"),
-                ("missing_provenance", "$.data.source.sha256", "blocking"),
-                (
-                    "missing_provenance",
-                    "$.data.function.signature_sha256",
-                    "blocking",
-                ),
-            }.issubset(violations),
-            violations,
-        )
+        self.assertIn("migration_error", {item.code for item in loaded.violations})
 
     def test_unknown_source_version_is_rejected_in_compatible_mode(self):
         payload = legacy_test_case_design()

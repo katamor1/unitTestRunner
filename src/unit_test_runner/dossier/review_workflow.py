@@ -10,7 +10,7 @@ from .dossier_models import DossierReviewItem, DossierUnresolvedItem
 def build_review_items(payloads: dict[str, dict[str, Any]]) -> tuple[list[DossierReviewItem], list[DossierUnresolvedItem]]:
     review_items: list[DossierReviewItem] = []
     unresolved: list[DossierUnresolvedItem] = []
-    _from_test_case_design(payloads.get("test_case_design", {}), review_items, unresolved)
+    _from_test_case_design(payloads.get("test_spec", {}), review_items, unresolved)
     _from_harness(payloads.get("harness_skeleton_report", {}), review_items, unresolved)
     _from_completion(payloads.get("build_completion_plan", {}), review_items, unresolved)
     _from_execution(payloads.get("test_execution_report", {}), review_items, unresolved)
@@ -42,7 +42,7 @@ def build_review_items(payloads: dict[str, dict[str, Any]]) -> tuple[list[Dossie
 def _from_test_case_design(payload: dict[str, Any], review_items: list[DossierReviewItem], unresolved: list[DossierUnresolvedItem]) -> None:
     for case in payload.get("test_cases", []):
         test_case_id = case.get("test_case_id") or case.get("id")
-        needs_review = case.get("review_status") == "review_required"
+        needs_review = bool(case.get("review_item_ids"))
         has_tbd = any(str(obs.get("expected_expression", "")).startswith("TBD") or obs.get("expected_expression") is None for obs in case.get("expected_observations", []))
         if needs_review or has_tbd:
             item_id = f"UNRESOLVED_EXPECTED_{len(unresolved) + 1:03d}"
@@ -53,7 +53,7 @@ def _from_test_case_design(payload: dict[str, Any], review_items: list[DossierRe
                     "expected_result_unknown",
                     f"テストケース {test_case_id} の期待結果を確認してください。",
                     "生成テストは、期待値レビューが完了するまで承認済みとして扱えません。",
-                    ["test_case_design"],
+                    ["test_spec"],
                     [test_case_id] if test_case_id else [],
                     "関数仕様を確認し、TBD の期待値を置き換えてください。",
                 )
@@ -65,7 +65,7 @@ def _from_test_case_design(payload: dict[str, Any], review_items: list[DossierRe
                     "expected_result_review",
                     title,
                     f"テストケース {test_case_id} の期待値・期待観測を確認してください。",
-                    ["test_case_design"],
+                    ["test_spec"],
                     [test_case_id] if test_case_id else [],
                 )
             )

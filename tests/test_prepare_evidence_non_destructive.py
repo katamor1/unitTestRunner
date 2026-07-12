@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.spec_support import write_canonical_test_spec
+
 
 class PrepareEvidenceNonDestructiveTests(unittest.TestCase):
     def _write_json(self, path: Path, payload: dict) -> None:
@@ -15,19 +17,11 @@ class PrepareEvidenceNonDestructiveTests(unittest.TestCase):
         source = workspace / "source" / "sample.c"
         source.parent.mkdir(parents=True)
         source.write_text("int sample(void) { return 0; }\n", encoding="utf-8")
-        self._write_json(
-            workspace / "reports" / "test_case_design.json",
-            {
-                "function": {"name": "sample"},
-                "test_cases": [
-                    {
-                        "test_case_id": "TC_sample_001",
-                        "coverage_links": [],
-                        "review_status": "reviewed",
-                        "expected_observations": [{"expected_expression": "0"}],
-                    }
-                ],
-            },
+        write_canonical_test_spec(
+            workspace,
+            source_path="source/sample.c",
+            function_name="sample",
+            test_case_id="TC_sample_001",
         )
         self._write_json(
             workspace / "reports" / "harness_skeleton_report.json",

@@ -37,6 +37,7 @@ from unit_test_runner.contracts import RunOutcome
 from unit_test_runner.contracts import ArtifactKind
 from unit_test_runner.execution.evidence_paths import EvidencePaths
 from unit_test_runner.execution.run_paths import RunPaths
+from tests.spec_support import write_canonical_test_spec
 
 
 class CliArtifactReferenceTests(unittest.TestCase):
@@ -73,7 +74,7 @@ class CliArtifactReferenceTests(unittest.TestCase):
             "unit_test_runner.cli.commands.prepare_test_execution_evidence",
             side_effect=AssertionError("plan must not prepare execution or evidence"),
         ), mock.patch(
-            "unit_test_runner.execution.test_execution.run_test_executable",
+            "unit_test_runner.execution.test_execution.run_test_executable_cases",
             side_effect=AssertionError("plan must not launch a process"),
         ), mock.patch(
             "unit_test_runner.execution.test_execution.write_test_execution_reports",
@@ -878,11 +879,13 @@ class CliArtifactReferenceTests(unittest.TestCase):
         executable.parent.mkdir(parents=True, exist_ok=True)
         source.write_text("int sample(void) { return 0; }\n", encoding="utf-8")
         executable.write_bytes(b"runner")
+        write_canonical_test_spec(
+            workspace,
+            source_path="src/sample.c",
+            function_name="sample",
+            test_case_id="TC_sample_001",
+        )
         payloads = {
-            "test_case_design.json": {
-                "function": {"name": "sample"},
-                "test_cases": [],
-            },
             "harness_skeleton_report.json": {
                 "function": {"name": "sample"},
                 "unresolved_placeholders": [],

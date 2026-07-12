@@ -97,23 +97,10 @@ class TestCaseDesignGenerationTests(unittest.TestCase):
         unresolved_kinds = {item["item_kind"] for item in payload["unresolved_items"]}
         self.assertIn("expected_return_unknown", unresolved_kinds)
 
-    def test_writer_outputs_json_markdown_and_csv(self):
+    def test_legacy_writer_is_disabled_in_favor_of_canonical_test_spec(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            paths = write_test_case_design_report(Path(temp_dir), self.report)
-
-            self.assertTrue(paths["json"].exists())
-            self.assertTrue(paths["markdown"].exists())
-            self.assertTrue(paths["csv"].exists())
-            json_payload = json.loads(paths["json"].read_text(encoding="utf-8"))
-            self.assertEqual("generated", json_payload["function"]["status"])
-            markdown = paths["markdown"].read_text(encoding="utf-8")
-            self.assertIn("# テストケース設計レポート", markdown)
-            with paths["csv"].open(encoding="utf-8", newline="") as handle:
-                rows = list(csv.DictReader(handle))
-            self.assertTrue(rows)
-            self.assertIn("id", rows[0])
-            self.assertIn("input_assignments", rows[0])
-            self.assertIn("coverage_ids", rows[0])
+            with self.assertRaises(ValueError):
+                write_test_case_design_report(Path(temp_dir), self.report)
 
     def test_analyze_function_generates_test_case_design_artifacts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -141,12 +128,13 @@ class TestCaseDesignGenerationTests(unittest.TestCase):
             result = json.loads(completed.stdout)
             self.assertEqual("passed", result["data"]["outcome"])
             reports = out_dir / "reports"
-            for filename in ["test_case_design.json", "test_case_design.md", "test_case_design.csv"]:
+            for filename in ["test_spec.json", "test_spec.md", "test_spec.csv"]:
                 self.assertTrue((reports / filename).exists(), filename)
-            design = json.loads((reports / "test_case_design.json").read_text(encoding="utf-8"))
-            self.assertTrue(design["test_cases"])
+            design = json.loads((reports / "test_spec.json").read_text(encoding="utf-8"))
+            self.assertEqual("1.1.0", design["schema_version"])
+            self.assertTrue(design["data"]["additional_case_candidates"])
             dossier = json.loads((reports / "function_dossier.json").read_text(encoding="utf-8"))
-            self.assertIn("test_case_design", dossier)
+            self.assertIn("test_spec", dossier)
 
     def test_generate_test_design_cli_supports_all_and_explicit_report_inputs(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -186,16 +174,16 @@ class TestCaseDesignGenerationTests(unittest.TestCase):
             self.assertEqual(0, from_dossier.returncode, from_dossier.stderr)
             payload = json.loads(from_dossier.stdout)
             self.assertEqual("passed", payload["data"]["outcome"])
-            design_details = payload["data"]["details"]["test_case_design"]
+            design_details = payload["data"]["details"]["test_spec"]
             self.assertTrue(Path(design_details["json"]).exists())
             self.assertTrue(Path(design_details["markdown"]).exists())
             self.assertTrue(Path(design_details["csv"]).exists())
             self.assertEqual(
-                {"test_case_design.json", "test_case_design.md", "test_case_design.csv"},
-                {artifact["path"] for artifact in payload["data"]["artifacts"]},
+                {"test_spec.md", "test_spec.csv"},
+                {Path(artifact["path"]).name for artifact in payload["data"]["artifacts"]},
             )
 
-            explicit_json = Path(temp_dir) / "explicit_design.json"
+            explicit_json = reports / "test_spec.json"
             explicit = run_module(
                 "--json",
                 "generate-test-design",
@@ -216,8 +204,8 @@ class TestCaseDesignGenerationTests(unittest.TestCase):
             )
             self.assertEqual(0, explicit.returncode, explicit.stderr)
             explicit_payload = json.loads(explicit.stdout)
-            self.assertEqual(str(explicit_json), explicit_payload["data"]["details"]["test_case_design"])
-            self.assertTrue(json.loads(explicit_json.read_text(encoding="utf-8"))["test_cases"])
+            self.assertEqual(str(explicit_json.resolve()), explicit_payload["data"]["details"]["test_spec"])
+            self.assertEqual("1.1.0", json.loads(explicit_json.read_text(encoding="utf-8"))["schema_version"])
 
     def test_generate_test_design_from_finalized_dossier_renders_existing_reviewed_design(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -243,10 +231,30 @@ class TestCaseDesignGenerationTests(unittest.TestCase):
             )
             self.assertEqual(0, analyze.returncode, analyze.stderr)
             reports = out_dir / "reports"
-            design_path = reports / "test_case_design.json"
+            design_path = reports / "test_spec.json"
             reviewed_design = json.loads(design_path.read_text(encoding="utf-8"))
-            reviewed_design["test_cases"][0]["expected_observations"][0]["expected_expression"] = "REVIEWED_EXPECTED_RETURN"
-            design_path.write_text(json.dumps(reviewed_design, indent=2), encoding="utf-8")
+            case = reviewed_design["data"]["additional_case_candidates"][0]
+            patch = Path(temp_dir) / "patch.json"
+            patch.write_text(
+                json.dumps(
+                    {
+                        "operations": [
+                            {
+                                "op": "replace",
+                                "case_id": case["test_case_id"],
+                                "path": "/expected_observations/0/expected_expression",
+                                "value": "REVIEWED_EXPECTED_RETURN",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            updated = run_module(
+                "--json", "update-test-spec", "--workspace", str(out_dir),
+                "--patch", str(patch), "--expected-revision", "1",
+            )
+            self.assertEqual(0, updated.returncode, updated.stderr)
 
             rendered_out = Path(temp_dir) / "rendered-design"
             rendered = run_module(
@@ -263,14 +271,14 @@ class TestCaseDesignGenerationTests(unittest.TestCase):
             self.assertEqual(0, rendered.returncode, rendered.stderr)
             payload = json.loads(rendered.stdout)
             self.assertEqual("passed", payload["data"]["outcome"])
-            with (rendered_out / "test_case_design.csv").open(encoding="utf-8", newline="") as handle:
+            with (rendered_out / "test_spec.csv").open(encoding="utf-8-sig", newline="") as handle:
                 rows = list(csv.DictReader(handle))
             self.assertTrue(rows)
-            self.assertIn("REVIEWED_EXPECTED_RETURN", rows[0]["expected_observations"])
-            rendered_json = json.loads((rendered_out / "test_case_design.json").read_text(encoding="utf-8"))
+            self.assertIn("REVIEWED_EXPECTED_RETURN", rows[0]["case_json"])
+            rendered_json = json.loads(design_path.read_text(encoding="utf-8"))
             self.assertEqual(
                 "REVIEWED_EXPECTED_RETURN",
-                rendered_json["test_cases"][0]["expected_observations"][0]["expected_expression"],
+                rendered_json["data"]["additional_case_candidates"][0]["expected_observations"][0]["expected_expression"],
             )
 
 
