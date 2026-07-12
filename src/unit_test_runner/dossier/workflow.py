@@ -39,6 +39,7 @@ from ..test_spec import (
     bind_test_spec_inputs,
     build_current_artifact_context,
     create_test_spec_from_design,
+    export_test_spec_snapshot_custom_view,
     export_test_spec_snapshot_views,
     export_test_spec_views,
     load_test_spec,
@@ -805,6 +806,21 @@ def _export_test_spec_selection_result(
         )
     if output_format not in {"md", "csv"}:
         raise ValueError(f"Unsupported test design format: {output_format}")
+    if saved_snapshot is not None and requested is not None and requested.suffix:
+        expected_fixed = canonical.parent / f"test_spec.{output_format}"
+        if Path(requested).absolute() != expected_fixed.absolute():
+            custom_export = export_test_spec_snapshot_custom_view(
+                saved_snapshot,
+                requested,
+                canonical_path=canonical,
+            )
+            return TestSpecDesignResult(
+                output=custom_export.path,
+                saved_snapshot=saved_snapshot,
+                canonical_artifact=canonical_artifact,
+                view_export=custom_export,
+                produced_view_paths=(custom_export.path,),
+            )
     target_dir = (
         requested.parent
         if requested is not None and requested.suffix

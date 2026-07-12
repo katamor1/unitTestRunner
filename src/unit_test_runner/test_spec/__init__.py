@@ -1,6 +1,9 @@
 from .exporters import (
     GENERATED_VIEW_NOTICE,
+    TestSpecCustomViewExport,
+    TestSpecViewDurabilityError,
     TestSpecViewExport,
+    export_test_spec_snapshot_custom_view,
     export_test_spec_snapshot_views,
     export_test_spec_views,
 )
@@ -51,7 +54,9 @@ __all__ = [
     "StaleRevisionError",
     "TestSpec",
     "TestSpecContractError",
+    "TestSpecCustomViewExport",
     "TestSpecSnapshot",
+    "TestSpecViewDurabilityError",
     "TestSpecViewExport",
     "canonical_json_bytes",
     "create_test_spec_from_design",
@@ -60,6 +65,7 @@ __all__ = [
     "assert_safe_legacy_alias_paths",
     "bind_test_spec_inputs",
     "build_current_artifact_context",
+    "export_test_spec_snapshot_custom_view",
     "export_test_spec_snapshot_views",
     "export_test_spec_views",
     "load_test_spec",

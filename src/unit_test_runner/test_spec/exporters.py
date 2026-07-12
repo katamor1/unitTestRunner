@@ -13,7 +13,11 @@ from uuid import uuid4
 from unit_test_runner.contracts import ContractMode
 
 from .models import TestSpec
-from .path_safety import assert_safe_canonical_test_spec_path, lexical_absolute
+from .path_safety import (
+    assert_no_reparse_components,
+    assert_safe_canonical_test_spec_path,
+    lexical_absolute,
+)
 from .repository import (
     TestSpecSnapshot,
     _exclusive_lock,
@@ -23,6 +27,10 @@ from .repository import (
 
 
 GENERATED_VIEW_NOTICE = "generated view; edits are not imported"
+
+
+class TestSpecViewDurabilityError(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -45,6 +53,14 @@ class TestSpecViewExport(Mapping[str, Path]):
 
     def __len__(self) -> int:
         return 2
+
+
+@dataclass(frozen=True)
+class TestSpecCustomViewExport:
+    path: Path
+    written: bool
+    revision: int
+    canonical_sha256: str
 
 
 def export_test_spec_views(
@@ -96,6 +112,57 @@ def export_test_spec_snapshot_views(
     )
 
 
+def export_test_spec_snapshot_custom_view(
+    snapshot: TestSpecSnapshot,
+    destination: Path,
+    *,
+    canonical_path: Path,
+) -> TestSpecCustomViewExport:
+    if hashlib.sha256(snapshot.raw_bytes).hexdigest() != snapshot.sha256:
+        raise ValueError("TestSpec snapshot bytes do not match its SHA-256 digest.")
+    canonical_path, _workspace = assert_safe_canonical_test_spec_path(
+        canonical_path
+    )
+    destination = lexical_absolute(destination)
+    _assert_no_reparse_absolute(destination)
+    if destination == canonical_path:
+        raise ValueError("A generated TestSpec view cannot replace canonical JSON.")
+    fixed_paths = {
+        canonical_path.parent / "test_spec.md",
+        canonical_path.parent / "test_spec.csv",
+    }
+    if destination in fixed_paths:
+        raise ValueError(
+            "Fixed TestSpec views must use the canonical ordered pair exporter."
+        )
+    suffix = destination.suffix.lower()
+    if suffix == ".md":
+        rendered = _render_markdown(snapshot.spec, snapshot.sha256).encode("utf-8")
+    elif suffix == ".csv":
+        rendered = _render_csv(snapshot.spec, snapshot.sha256)
+    else:
+        raise ValueError("Custom TestSpec views require a .md or .csv destination.")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    _assert_no_reparse_absolute(destination)
+    temporary = destination.with_name(
+        f".{destination.name}.{uuid4().hex}.tmp"
+    )
+    try:
+        _write_temporary(temporary, rendered)
+        os.replace(temporary, destination)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+    return TestSpecCustomViewExport(
+        path=destination,
+        written=True,
+        revision=snapshot.spec.revision,
+        canonical_sha256=snapshot.sha256,
+    )
+
+
 def _export_snapshot_views(
     snapshot: TestSpecSnapshot,
     out_dir: Path,
@@ -109,6 +176,7 @@ def _export_snapshot_views(
         canonical_path
     )
     out_dir = lexical_absolute(out_dir)
+    _assert_no_reparse_absolute(out_dir)
     paths = {
         "markdown": out_dir / "test_spec.md",
         "csv": out_dir / "test_spec.csv",
@@ -158,15 +226,42 @@ def _write_views_atomically(
     ).encode("utf-8")
     csv_bytes = _render_csv(snapshot.spec, snapshot.sha256)
     paths["markdown"].parent.mkdir(parents=True, exist_ok=True)
+    previous = {
+        kind: (path.exists(), path.read_bytes() if path.exists() else None)
+        for kind, path in paths.items()
+    }
+    _validate_existing_view_pair(previous)
     temporary_paths = {
         kind: path.with_name(f".{path.name}.{uuid4().hex}.tmp")
         for kind, path in paths.items()
     }
+    replaced: list[str] = []
     try:
         _write_temporary(temporary_paths["markdown"], markdown_bytes)
         _write_temporary(temporary_paths["csv"], csv_bytes)
         os.replace(temporary_paths["markdown"], paths["markdown"])
+        replaced.append("markdown")
         os.replace(temporary_paths["csv"], paths["csv"])
+        replaced.append("csv")
+    except BaseException as operation_error:
+        rollback_errors: list[BaseException] = []
+        for kind in reversed(replaced):
+            existed, old_bytes = previous[kind]
+            try:
+                _restore_previous_view(
+                    paths[kind],
+                    existed=existed,
+                    old_bytes=old_bytes,
+                )
+            except BaseException as rollback_error:
+                rollback_errors.append(rollback_error)
+        if rollback_errors:
+            detail = "; ".join(str(error) for error in rollback_errors)
+            raise TestSpecViewDurabilityError(
+                "TestSpec view-pair replacement failed and rollback was incomplete: "
+                f"operation={operation_error}; rollback={detail}"
+            ) from operation_error
+        raise
     finally:
         for temporary in temporary_paths.values():
             try:
@@ -175,11 +270,95 @@ def _write_views_atomically(
                 pass
 
 
+def _validate_existing_view_pair(
+    previous: dict[str, tuple[bool, bytes | None]],
+) -> None:
+    markdown_exists, markdown_bytes = previous["markdown"]
+    csv_exists, csv_bytes = previous["csv"]
+    if not (markdown_exists and csv_exists):
+        return
+    assert markdown_bytes is not None
+    assert csv_bytes is not None
+    markdown_identity = _markdown_view_identity(markdown_bytes)
+    csv_identity = _csv_view_identity(csv_bytes)
+    if markdown_identity != csv_identity:
+        raise ValueError(
+            "Existing TestSpec Markdown and CSV views do not describe one snapshot."
+        )
+
+
+def _markdown_view_identity(data: bytes) -> tuple[int, str]:
+    try:
+        lines = data.decode("utf-8").splitlines()
+        revision_line = next(
+            line for line in lines if line.startswith("- revision:")
+        )
+        sha_line = next(
+            line for line in lines if line.startswith("- canonical_sha256:")
+        )
+        return (
+            int(revision_line.split(":", 1)[1].strip()),
+            sha_line.split(":", 1)[1].strip(),
+        )
+    except (StopIteration, UnicodeError, ValueError) as error:
+        raise ValueError("Existing TestSpec Markdown view has invalid identity.") from error
+
+
+def _csv_view_identity(data: bytes) -> tuple[int, str]:
+    try:
+        rows = list(
+            csv.DictReader(
+                io.StringIO(data.decode("utf-8-sig"), newline="")
+            )
+        )
+        identities = {
+            (int(row["revision"]), row["canonical_sha256"])
+            for row in rows
+        }
+    except (KeyError, UnicodeError, ValueError) as error:
+        raise ValueError("Existing TestSpec CSV view has invalid identity.") from error
+    if len(identities) != 1:
+        raise ValueError("Existing TestSpec CSV rows do not describe one snapshot.")
+    return next(iter(identities))
+
+
+def _restore_previous_view(
+    path: Path,
+    *,
+    existed: bool,
+    old_bytes: bytes | None,
+) -> None:
+    if not existed:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        return
+    assert old_bytes is not None
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.rollback.tmp")
+    try:
+        _write_temporary(temporary, old_bytes)
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def _write_temporary(path: Path, data: bytes) -> None:
     with path.open("xb") as handle:
         handle.write(data)
         handle.flush()
         os.fsync(handle.fileno())
+
+
+def _assert_no_reparse_absolute(path: Path) -> Path:
+    absolute = lexical_absolute(path)
+    anchor = Path(absolute.anchor)
+    if not absolute.anchor:
+        raise ValueError(f"Expected absolute output path: {path}")
+    return assert_no_reparse_components(absolute, anchor)
 
 
 def _render_markdown(spec: TestSpec, canonical_sha: str) -> str:

@@ -107,7 +107,118 @@ def _view_identity(markdown: Path, csv_path: Path) -> tuple[int, str]:
     return revision, sha256
 
 
+def _single_view_identity(path: Path) -> tuple[int, str]:
+    if path.suffix.lower() == ".md":
+        lines = path.read_text(encoding="utf-8").splitlines()
+        revision = int(
+            next(line for line in lines if line.startswith("- revision:"))
+            .split(":", 1)[1]
+            .strip()
+        )
+        sha256 = (
+            next(
+                line
+                for line in lines
+                if line.startswith("- canonical_sha256:")
+            )
+            .split(":", 1)[1]
+            .strip()
+        )
+        return revision, sha256
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    if not rows:
+        raise AssertionError("Generated TestSpec CSV has no rows.")
+    identities = {
+        (int(row["revision"]), row["canonical_sha256"])
+        for row in rows
+    }
+    if len(identities) != 1:
+        raise AssertionError("Generated TestSpec CSV mixes snapshot identities.")
+    return next(iter(identities))
+
+
 class TestSpecFormalReviewWriterSnapshotTests(unittest.TestCase):
+    def test_explicit_custom_views_render_writer_a_snapshot_and_inventory(self):
+        for output_format in ("md", "csv"):
+            for location in ("reports", "separate"):
+                with self.subTest(
+                    output_format=output_format,
+                    location=location,
+                ), tempfile.TemporaryDirectory() as temp_dir:
+                    out = Path(temp_dir) / "Control_Update"
+                    dossier_workflow.analyze_function_workflow(
+                        FIXTURE,
+                        FIXTURE / "Product.dsw",
+                        "src/control.c",
+                        "Control_Update",
+                        "Win32 Debug",
+                        out,
+                        "Control",
+                        phase="design",
+                    )
+                    reports = out / "reports"
+                    canonical = reports / "test_spec.json"
+                    save_name, save_hook, state = _interleaving_save(
+                        dossier_workflow,
+                        canonical,
+                    )
+                    destination_dir = (
+                        reports if location == "reports" else out / "custom-views"
+                    )
+                    custom = destination_dir / f"writer-a.{output_format}"
+
+                    with mock_patch.object(
+                        dossier_workflow,
+                        save_name,
+                        save_hook,
+                    ):
+                        result = commands_module.handle_generate_test_design(
+                            Namespace(
+                                dossier=None,
+                                function_signature=str(
+                                    reports / "function_signature.json"
+                                ),
+                                global_access=str(reports / "global_access.json"),
+                                call_report=str(reports / "call_report.json"),
+                                coverage_design=str(
+                                    reports / "coverage_design.json"
+                                ),
+                                boundary_candidates=str(
+                                    reports
+                                    / "boundary_equivalence_candidates.json"
+                                ),
+                                format=output_format,
+                                out=str(custom),
+                                command="generate-test-design",
+                            )
+                        )
+
+                    custom_revision, custom_sha = _single_view_identity(custom)
+                    fixed_revision, fixed_sha = _view_identity(
+                        reports / "test_spec.md", reports / "test_spec.csv"
+                    )
+                    self.assertEqual(2, custom_revision)
+                    self.assertEqual(state["writer_a"].sha256, custom_sha)
+                    view_kind = f"test_spec_{'markdown' if output_format == 'md' else 'csv'}"
+                    produced_view = next(
+                        item for item in result.artifacts if item.kind == view_kind
+                    )
+                    self.assertEqual(
+                        state["writer_a"].sha256,
+                        result.data["saved_sha256"],
+                    )
+                    self.assertEqual(
+                        custom.read_bytes(),
+                        (out / produced_view.path).read_bytes(),
+                    )
+                    self.assertEqual(3, fixed_revision)
+                    self.assertEqual(state["writer_b"].sha256, fixed_sha)
+                    self.assertNotIn(
+                        state["writer_b"].sha256,
+                        {item.sha256 for item in result.artifacts},
+                    )
+
     def test_generate_design_cli_reports_writer_a_without_claiming_writer_b_views(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             out = Path(temp_dir) / "Control_Update"
