@@ -3,6 +3,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -15,6 +17,8 @@ from unit_test_runner.suite import (
     remove_entry,
     run_suite,
 )
+from unit_test_runner.cli.outcomes import classify_suite_run
+from unit_test_runner.contracts import RunOutcome
 
 
 class SuiteManagerTests(unittest.TestCase):
@@ -75,16 +79,18 @@ class SuiteManagerTests(unittest.TestCase):
                 policy=SuiteRunPolicy(run_tests=False, dry_run=True, timeout_seconds=5),
             )
 
-            self.assertEqual("completed", report.status)
+            self.assertEqual("planned", report.status)
             self.assertEqual(1, report.summary["total"])
             self.assertEqual(0, report.summary["green"])
             self.assertEqual(1, report.summary["not_green"])
             self.assertEqual("not_green", report.results[0].green_status)
-            self.assertEqual("not_run", report.results[0].execution_status)
+            self.assertEqual("planned", report.results[0].execution_status)
             for key in ("json", "markdown", "csv"):
                 self.assertTrue(paths[key].exists(), key)
             report_payload = json.loads(paths["json"].read_text(encoding="utf-8"))
-            self.assertEqual("suite_run_completed", report_payload["status"])
+            self.assertEqual("planned", report_payload["outcome"])
+            self.assertEqual("planned", report_payload["results"][0]["outcome"])
+            self.assertNotIn("suite_run_completed", json.dumps(report_payload))
             self.assertIn("Control_Update", paths["markdown"].read_text(encoding="utf-8"))
             self.assertIn("entry_id,function,status,green_status", paths["csv"].read_text(encoding="utf-8"))
 
@@ -101,8 +107,83 @@ class SuiteManagerTests(unittest.TestCase):
                 policy=SuiteRunPolicy(run_tests=False, dry_run=True, require_green=True),
             )
 
-            self.assertEqual("failed", report.status)
+            self.assertEqual("planned", report.status)
             self.assertEqual(1, report.summary["not_green"])
+
+    def test_actual_suite_persists_non_green_outcome_and_exact_originating_run_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            suite_path = root / "suites" / "default" / "suite_manifest.json"
+            workspace = self._write_function_workspace(root / "Control_Update", function_name="Control_Update")
+            register_workspace(suite_path, workspace, tags=["selected"])
+            exact_report = workspace / "runs" / "run-exact" / "test_execution_report.json"
+            execution = SimpleNamespace(
+                status="passed",
+                executed=True,
+                parsed_result=SimpleNamespace(total=1, passed=1, failed=0, inconclusive=0),
+                case_results=[],
+                unresolved_review_items=[{"code": "review_required"}],
+                run_paths=SimpleNamespace(execution_report=exact_report),
+            )
+
+            with mock.patch(
+                "unit_test_runner.suite.manager.prepare_test_execution_evidence",
+                return_value=(execution, SimpleNamespace()),
+            ):
+                report, paths = run_suite(
+                    suite_path,
+                    tag="selected",
+                    policy=SuiteRunPolicy(run_tests=True, dry_run=False),
+                )
+
+            outcome, exit_code = classify_suite_run(report, execution_requested=True)
+            persisted = json.loads(paths["json"].read_text(encoding="utf-8"))
+            self.assertIs(RunOutcome.FAILED, outcome.state)
+            self.assertEqual(32, exit_code)
+            self.assertEqual("failed", report.status)
+            self.assertEqual("failed", persisted["outcome"])
+            self.assertEqual(exact_report, report.results[0].report_path)
+            self.assertEqual(exact_report.as_posix(), persisted["results"][0]["report_path"])
+
+    def test_suite_never_falls_back_to_registered_or_flat_report_paths(self):
+        for case in ("missing_run_paths", "execution_error"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                suite_path = root / "suites" / "default" / "suite_manifest.json"
+                workspace = self._write_function_workspace(
+                    root / "Control_Update",
+                    function_name="Control_Update",
+                )
+                manifest = register_workspace(suite_path, workspace, tags=["selected"])
+                registered_path = manifest.entries[0].test_execution_report.as_posix()
+                execution = SimpleNamespace(
+                    status="blocked",
+                    executed=False,
+                    parsed_result=SimpleNamespace(total=0, passed=0, failed=0, inconclusive=0),
+                    case_results=[],
+                    unresolved_review_items=[],
+                    run_paths=None,
+                )
+                effect = RuntimeError("runner failed before publishing") if case == "execution_error" else None
+
+                with mock.patch(
+                    "unit_test_runner.suite.manager.prepare_test_execution_evidence",
+                    return_value=(execution, SimpleNamespace()) if effect is None else mock.DEFAULT,
+                    side_effect=effect,
+                ):
+                    report, paths = run_suite(
+                        suite_path,
+                        tag="selected",
+                        policy=SuiteRunPolicy(run_tests=True, dry_run=False),
+                    )
+
+                result = report.results[0]
+                persisted = json.loads(paths["json"].read_text(encoding="utf-8"))
+                self.assertIsNone(result.report_path)
+                self.assertNotIn("report_path", result.to_dict())
+                self.assertNotIn("report_path", persisted["results"][0])
+                self.assertNotIn(registered_path, paths["markdown"].read_text(encoding="utf-8"))
+                self.assertNotIn(registered_path, paths["csv"].read_text(encoding="utf-8"))
 
     def _write_function_workspace(self, workspace: Path, function_name: str) -> Path:
         reports = workspace / "reports"

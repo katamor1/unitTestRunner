@@ -249,11 +249,17 @@ def _common_semantic_violations(
                     "source_path must be a normalized relative path without '..'.",
                 )
             )
-    violations.extend(_duplicate_id_violations(builtin_payload))
+    semantic_payload = builtin_payload
+    if kind is ArtifactKind.CLI_RESULT:
+        cli_data = builtin_payload.get("data")
+        if isinstance(cli_data, Mapping):
+            cli_data = {key: value for key, value in cli_data.items() if key != "details"}
+            semantic_payload = {**builtin_payload, "data": cli_data}
+    violations.extend(_duplicate_id_violations(semantic_payload))
     violations.extend(_provenance_violations(kind, payload))
-    violations.extend(_nested_path_violations(kind, builtin_payload))
-    violations.extend(_nested_hash_violations(builtin_payload))
-    violations.extend(_subject_consistency_violations(payload))
+    violations.extend(_nested_path_violations(kind, semantic_payload))
+    violations.extend(_nested_hash_violations(semantic_payload))
+    violations.extend(_subject_consistency_violations(semantic_payload))
     return violations
 
 
@@ -274,7 +280,7 @@ def _provenance_violations(
             )
         )
     subject = payload.get("subject")
-    if isinstance(subject, Mapping):
+    if kind is not ArtifactKind.CLI_RESULT and isinstance(subject, Mapping):
         if not subject.get("source_path"):
             violations.append(
                 ContractViolation(
@@ -551,6 +557,59 @@ def _no_artifact_semantic_violations(
     _payload: Mapping[str, Any],
 ) -> list[ContractViolation]:
     return []
+
+
+def _cli_result_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    subject = payload.get("subject")
+    if not isinstance(data, Mapping):
+        return []
+    violations: list[ContractViolation] = []
+    invocation_id = data.get("invocation_id")
+    subject_invocation = (
+        subject.get("invocation_id") if isinstance(subject, Mapping) else None
+    )
+    if invocation_id != subject_invocation:
+        violations.append(
+            ContractViolation(
+                "inconsistent_identity",
+                "$.data.invocation_id",
+                "CLI invocation_id must match the envelope subject invocation_id.",
+            )
+        )
+
+    if data.get("outcome_kind") in {"test_run", "suite_run"}:
+        outcome = data.get("outcome")
+        expected_exit = {
+            RunOutcome.PLANNED.value: 0,
+            RunOutcome.PASSED.value: 0,
+            RunOutcome.FAILED.value: 32,
+            RunOutcome.INCONCLUSIVE.value: 33,
+            RunOutcome.TIMED_OUT.value: 34,
+            RunOutcome.BLOCKED.value: 35,
+            RunOutcome.CANCELLED.value: 36,
+            RunOutcome.ERROR.value: 10,
+        }.get(outcome)
+        if expected_exit is not None and data.get("exit_code") != expected_exit:
+            violations.append(
+                ContractViolation(
+                    "inconsistent_exit_code",
+                    "$.data.exit_code",
+                    f"Test outcome {outcome!r} requires exit code {expected_exit}.",
+                )
+            )
+        expected_green = None if outcome == RunOutcome.PLANNED.value else outcome == RunOutcome.PASSED.value
+        if data.get("green") is not expected_green:
+            violations.append(
+                ContractViolation(
+                    "inconsistent_green_status",
+                    "$.data.green",
+                    f"Test outcome {outcome!r} requires green={expected_green!r}.",
+                )
+            )
+    return violations
 
 
 def _call_report_semantic_violations(
@@ -1503,7 +1562,7 @@ _ARTIFACT_SEMANTIC_VALIDATORS: dict[
     str,
     Callable[[Mapping[str, Any]], list[ContractViolation]],
 ] = {
-    ArtifactKind.CLI_RESULT.value: _no_artifact_semantic_violations,
+    ArtifactKind.CLI_RESULT.value: _cli_result_semantic_violations,
     ArtifactKind.INPUT_REQUEST.value: _no_artifact_semantic_violations,
     ArtifactKind.DSW_DISCOVERY.value: _dsw_semantic_violations,
     ArtifactKind.SOURCE_MEMBERSHIP.value: _no_artifact_semantic_violations,

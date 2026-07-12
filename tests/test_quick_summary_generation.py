@@ -61,8 +61,17 @@ class QuickSummaryGenerationTests(unittest.TestCase):
             self.assertEqual("Control_Update", summary["target"]["function"])
             self.assertEqual("design", summary["phase"])
             self.assertEqual(str(quick_json), summary["reports"]["quick_summary_json"])
-            self.assertEqual(str(quick_json), stdout_payload["reports"]["quick_summary_json"])
-            self.assertEqual(str(quick_md), stdout_payload["reports"]["quick_summary_md"])
+            quick_details = stdout_payload["data"]["details"]["quick_summary"]
+            self.assertEqual(str(quick_json), quick_details["json"])
+            self.assertEqual(str(quick_md), quick_details["markdown"])
+            self.assertTrue(
+                {"reports/quick_summary.json", "reports/quick_summary.md"}.issubset(
+                    {
+                        artifact["path"]
+                        for artifact in stdout_payload["data"]["artifacts"]
+                    }
+                )
+            )
             self.assertIn("# Quick Check Summary", quick_md.read_text(encoding="utf-8"))
 
 

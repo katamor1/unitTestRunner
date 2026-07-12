@@ -83,8 +83,8 @@ class ReanalysisCliTests(unittest.TestCase):
             )
 
             payload = json.loads(completed.stdout)
-            self.assertEqual("reanalysis_completed", payload["status"])
-            reports = payload["data"]["reports"]
+            self.assertEqual("passed", payload["data"]["outcome"])
+            reports = payload["data"]["details"]["reports"]
             for key in (
                 "change_impact_report_json",
                 "change_impact_report_md",
@@ -315,7 +315,7 @@ class ReanalysisCliTests(unittest.TestCase):
             )
 
             payload = json.loads(completed.stdout)
-            updated_path = Path(payload["data"]["reports"]["updated_test_case_design_json"])
+            updated_path = Path(payload["data"]["details"]["reports"]["updated_test_case_design_json"])
             self.assertTrue(out.exists())
             self.assertTrue(updated_path.exists())
 

@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 
-from unit_test_runner.execution.run_paths import create_run_paths
+from unit_test_runner.execution.run_paths import create_run_paths, validate_run_paths_available
 
 
 class ExecutionRunHistoryTests(unittest.TestCase):
@@ -68,20 +68,25 @@ class ExecutionRunHistoryTests(unittest.TestCase):
             runner.chmod(0o755)
         return runner
 
-    def _tree_snapshot(self, root: Path) -> tuple[tuple[str, ...], dict[str, bytes]]:
-        directories = tuple(
-            sorted(
-                path.relative_to(root).as_posix()
-                for path in root.rglob("*")
-                if path.is_dir()
-            )
-        )
-        files = {
-            path.relative_to(root).as_posix(): path.read_bytes()
-            for path in root.rglob("*")
-            if path.is_file()
-        }
-        return directories, files
+    def _tree_snapshot(self, root: Path) -> dict[str, tuple[str, ...]]:
+        entries: dict[str, tuple[str, ...]] = {}
+        for current, directory_names, file_names in os.walk(root, followlinks=False):
+            parent = Path(current)
+            for name in sorted([*directory_names, *file_names]):
+                path = parent / name
+                relative = path.relative_to(root).as_posix()
+                if path.is_symlink():
+                    entries[relative] = ("symlink", os.readlink(path))
+                elif path.is_dir():
+                    entries[relative] = ("directory",)
+                elif path.is_file():
+                    entries[relative] = (
+                        "file",
+                        hashlib.sha256(path.read_bytes()).hexdigest(),
+                    )
+                else:
+                    entries[relative] = ("other",)
+        return entries
 
     def test_create_run_paths_rejects_an_existing_run_directory(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -94,6 +99,40 @@ class ExecutionRunHistoryTests(unittest.TestCase):
                 create_run_paths(workspace, run_id="run-fixed")
 
             self.assertEqual("original\n", marker.read_text(encoding="utf-8"))
+
+    def test_create_run_paths_rejects_valid_and_broken_symlinked_runs_parent(self):
+        for parent_kind in ("valid_outside", "broken_inside"):
+            with self.subTest(parent_kind=parent_kind), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir).resolve()
+                workspace = root / "workspace"
+                workspace.mkdir()
+                runs = workspace / "runs"
+                if parent_kind == "valid_outside":
+                    target = root / "outside-runs"
+                    target.mkdir()
+                else:
+                    target = workspace / "missing-runs-target"
+                runs.symlink_to(target, target_is_directory=True)
+                before = self._tree_snapshot(root)
+
+                with self.assertRaisesRegex(ValueError, "symlink"):
+                    create_run_paths(workspace, run_id="run-fixed")
+
+                self.assertEqual(before, self._tree_snapshot(root))
+
+    def test_available_run_paths_use_the_resolved_workspace_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            workspace = root / "workspace"
+            workspace.mkdir()
+            workspace_alias = root / "workspace-alias"
+            workspace_alias.symlink_to(workspace, target_is_directory=True)
+
+            paths = validate_run_paths_available(workspace_alias, "run-fixed")
+
+            self.assertEqual(workspace / "runs" / "run-fixed", paths.root)
+            self.assertEqual(workspace / "runs" / "run-fixed" / "logs", paths.stdout_log.parent)
+            self.assertFalse(paths.root.exists())
 
     def test_two_executions_preserve_both_runs_and_only_advance_latest_pointer(self):
         from unit_test_runner.execution.execution_models import TestRunRequest
@@ -454,7 +493,7 @@ class ExecutionRunHistoryTests(unittest.TestCase):
                 )
             )
 
-            self.assertEqual("tests_passed", result.status)
+            self.assertEqual("passed", result.status)
             latest_run = json.loads(
                 (workspace / "reports" / "latest_run.json").read_text(encoding="utf-8")
             )

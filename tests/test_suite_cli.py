@@ -49,24 +49,41 @@ class SuiteCliTests(unittest.TestCase):
                 "Control",
                 "--out",
                 str(out_dir),
+                "--phase",
+                "execution",
             )
 
             registered = run_cli("--json", "suite-register", "--suite", str(suite_path), "--workspace", str(out_dir), "--tags", "regression,selected")
             registered_payload = json.loads(registered.stdout)
-            entry_id = registered_payload["data"]["entry"]["entry_id"]
+            entry_id = registered_payload["data"]["details"]["entry"]["entry_id"]
 
             listed = run_cli("--json", "suite-list", "--suite", str(suite_path), "--tag", "selected")
             listed_payload = json.loads(listed.stdout)
-            self.assertEqual([entry_id], [entry["entry_id"] for entry in listed_payload["data"]["entries"]])
+            self.assertEqual(
+                [entry_id],
+                [entry["entry_id"] for entry in listed_payload["data"]["details"]["entries"]],
+            )
+            before = {
+                path.relative_to(root).as_posix(): path.read_bytes()
+                for path in root.rglob("*")
+                if path.is_file()
+            }
 
             completed = run_cli("--json", "suite-run", "--suite", str(suite_path), "--tag", "selected", "--dry-run")
             payload = json.loads(completed.stdout)
 
-            self.assertEqual("suite_run_completed", payload["status"])
-            self.assertEqual(1, payload["data"]["summary"]["total"])
-            self.assertTrue(Path(payload["data"]["reports"]["suite_run_report_json"]).exists())
-            self.assertTrue(Path(payload["data"]["reports"]["suite_run_report_md"]).exists())
-            self.assertTrue(Path(payload["data"]["reports"]["suite_run_report_csv"]).exists())
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            self.assertEqual("planned", payload["data"]["outcome"])
+            self.assertEqual("plan", payload["data"]["details"]["mode"])
+            self.assertEqual([], payload["data"]["artifacts"])
+            self.assertEqual(3, len(payload["data"]["expected_artifacts"]))
+            after = {
+                path.relative_to(root).as_posix(): path.read_bytes()
+                for path in root.rglob("*")
+                if path.is_file()
+            }
+            self.assertEqual(before, after)
+            self.assertFalse((suite_path.parent / "reports" / "suite_run_report.json").exists())
 
     def test_suite_run_require_green_returns_test_failure_exit_for_dry_run(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -90,15 +107,18 @@ class SuiteCliTests(unittest.TestCase):
                 "Control",
                 "--out",
                 str(out_dir),
+                "--phase",
+                "execution",
             )
             run_cli("--json", "suite-register", "--suite", str(suite_path), "--workspace", str(out_dir), "--tags", "selected")
 
             completed = run_cli("--json", "suite-run", "--suite", str(suite_path), "--tag", "selected", "--dry-run", "--require-green", check=False)
 
             payload = json.loads(completed.stdout)
-            self.assertEqual(32, completed.returncode)
-            self.assertEqual("suite_run_failed", payload["status"])
-            self.assertEqual(1, payload["data"]["summary"]["not_green"])
+            self.assertEqual(0, completed.returncode)
+            self.assertEqual("planned", payload["data"]["outcome"])
+            self.assertEqual([], payload["data"]["artifacts"])
+            self.assertEqual(3, len(payload["data"]["expected_artifacts"]))
 
 
 if __name__ == "__main__":

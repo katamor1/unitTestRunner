@@ -31,8 +31,9 @@ class FixtureCliSmokeTests(unittest.TestCase):
         discover = run_cli("discover-projects", "--workspace", str(FIXTURE_ROOT))
         self.assertEqual(0, discover.returncode, discover.stderr)
         discover_payload = json.loads(discover.stdout)
-        self.assertEqual("ok", discover_payload["status"])
-        self.assertTrue(discover_payload["data"]["workspaces"])
+        self.assertEqual("cli_result", discover_payload["artifact_kind"])
+        self.assertEqual("passed", discover_payload["data"]["outcome"])
+        self.assertTrue(discover_payload["data"]["details"]["workspaces"])
 
         mapped = run_cli(
             "map-source",
@@ -45,8 +46,8 @@ class FixtureCliSmokeTests(unittest.TestCase):
         )
         self.assertEqual(0, mapped.returncode, mapped.stderr)
         mapped_payload = json.loads(mapped.stdout)
-        self.assertEqual("ok", mapped_payload["status"])
-        self.assertTrue(mapped_payload["data"]["matches"])
+        self.assertEqual("passed", mapped_payload["data"]["outcome"])
+        self.assertTrue(mapped_payload["data"]["details"]["matches"])
 
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "design-smoke"
@@ -71,7 +72,8 @@ class FixtureCliSmokeTests(unittest.TestCase):
             )
             self.assertEqual(0, analyzed.returncode, analyzed.stderr)
             analyzed_payload = json.loads(analyzed.stdout)
-            self.assertEqual("analysis_completed", analyzed_payload["status"])
+            self.assertEqual("passed", analyzed_payload["data"]["outcome"])
+            self.assertEqual("design", analyzed_payload["data"]["details"]["phase"])
             self.assertTrue((output / "reports" / "function_signature.json").is_file())
             self.assertTrue((output / "reports" / "test_case_design.json").is_file())
 

@@ -174,9 +174,9 @@ class HarnessSkeletonGenerationTests(unittest.TestCase):
 
             self.assertEqual(0, analyze.returncode, analyze.stderr)
             analyze_payload = json.loads(analyze.stdout)
-            self.assertEqual("evidence_prepared", analyze_payload["status"])
-            self.assertIn("dossier review", analyze_payload["message"])
-            self.assertIn("harness_skeleton", analyze_payload["data"])
+            self.assertEqual("passed", analyze_payload["data"]["outcome"])
+            self.assertIn("dossier review", analyze_payload["data"]["message"])
+            self.assertIn("harness_skeleton", analyze_payload["data"]["details"])
             self.assertTrue((out_dir / "reports" / "harness_skeleton_report.json").exists())
 
             reports = out_dir / "reports"
@@ -198,8 +198,8 @@ class HarnessSkeletonGenerationTests(unittest.TestCase):
 
             self.assertEqual(0, generated.returncode, generated.stderr)
             payload = json.loads(generated.stdout)
-            self.assertEqual("harness_skeleton_generated", payload["status"])
-            self.assertTrue(Path(payload["data"]["harness_skeleton"]["json"]).exists())
+            self.assertEqual("passed", payload["data"]["outcome"])
+            self.assertTrue(Path(payload["data"]["details"]["harness_skeleton"]["json"]).exists())
             self.assertTrue((explicit_out / "generated" / "tests" / "test_Control_Update.c").exists())
 
 

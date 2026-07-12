@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from unit_test_runner import __version__
+from unit_test_runner.contracts import ArtifactKind, RunOutcome
 from unit_test_runner.build_probe import build_probe
 from unit_test_runner.build_completion import analyze_build_errors, analyze_build_errors_from_workspace
 from unit_test_runner.build_completion.completion_applier import apply_safe_completions
@@ -19,6 +20,8 @@ from unit_test_runner.dsw_parser import discover_dsw_workspaces, parse_dsw as pa
 from unit_test_runner.execution import (
     prepare_evidence_from_existing_run,
     prepare_test_execution_evidence,
+    validate_run_paths_available,
+    validate_test_run_preflight,
 )
 from unit_test_runner.path_utils import normalize_relative
 from unit_test_runner.reanalysis import (
@@ -26,7 +29,14 @@ from unit_test_runner.reanalysis import (
     reanalyze_function_workflow,
     select_regression_from_reports,
 )
-from unit_test_runner.suite import SuiteRunPolicy, list_entries, register_workspace, remove_entry, run_suite
+from unit_test_runner.suite import (
+    SuiteRunPolicy,
+    list_entries,
+    register_workspace,
+    remove_entry,
+    run_suite,
+    validate_suite_plan,
+)
 from unit_test_runner.reanalysis.reanalysis_models import ReanalysisPolicy
 from unit_test_runner.dossier import (
     analyze_function_workflow,
@@ -45,6 +55,13 @@ from unit_test_runner.vc6.dsp_parser import parse_dsp as parse_dsp_project
 from unit_test_runner.vc6.source_membership import map_source_membership
 
 from .errors import CLIError
+from .artifacts import (
+    ExpectedArtifact,
+    ProducedArtifact,
+    UnclaimableUntypedJsonError,
+    build_expected_artifact,
+    build_produced_artifact,
+)
 from .exit_codes import (
     EXIT_BUILD_PROBE_FAILED,
     EXIT_ENVIRONMENT_WARNING,
@@ -53,9 +70,17 @@ from .exit_codes import (
     EXIT_NOT_FOUND,
     EXIT_OK,
     EXIT_OUTPUT_ERROR,
+    EXIT_TESTS_BLOCKED,
     EXIT_TESTS_CANCELLED,
     EXIT_TESTS_FAILED,
+    EXIT_TESTS_INCONCLUSIVE,
     EXIT_TESTS_TIMED_OUT,
+)
+from .outcomes import (
+    DomainOutcome,
+    classify_domain_state,
+    classify_suite_run,
+    classify_test_run,
 )
 from .result import CLIResult
 
@@ -130,6 +155,7 @@ def handle_doctor(args: argparse.Namespace) -> CLIResult:
             "checks": checks,
         },
         warnings=warnings,
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -148,6 +174,8 @@ def handle_discover_projects(args: argparse.Namespace) -> CLIResult:
                 message="Projects discovered.",
                 data=result,
                 human_output=_render_discovery_summary(result, Path(args.out) if args.out else None),
+                artifacts=_optional_output_artifacts(args.out, ArtifactKind.DSW_DISCOVERY.value),
+                outcome=DomainOutcome("command", RunOutcome.PASSED, None),
             )
         result = discover_workspace(workspace, dsw)
         if args.out:
@@ -168,6 +196,8 @@ def handle_discover_projects(args: argparse.Namespace) -> CLIResult:
                 discover_dsw_workspaces(dsw).to_dict(),
                 Path(args.out) if args.out else None,
             ),
+            artifacts=_optional_output_artifacts(args.out, ArtifactKind.DSW_DISCOVERY.value),
+            outcome=DomainOutcome("command", RunOutcome.PASSED, None),
         )
 
     workspace_arg = _existing_path(args.workspace, "workspace", args.command)
@@ -187,6 +217,8 @@ def handle_discover_projects(args: argparse.Namespace) -> CLIResult:
         message="Projects discovered.",
         data=result,
         human_output=_render_discovery_summary(result, Path(args.out) if args.out else None),
+        artifacts=_optional_output_artifacts(args.out, ArtifactKind.DSW_DISCOVERY.value),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -207,6 +239,8 @@ def handle_map_source(args: argparse.Namespace) -> CLIResult:
             message="Source mapping completed.",
             data=payload,
             legacy_payload=payload,
+            artifacts=_optional_output_artifacts(args.out, ArtifactKind.SOURCE_MEMBERSHIP.value),
+            outcome=DomainOutcome("command", RunOutcome.PASSED, None),
         )
 
     membership = map_source_membership(dsw, args.source, args.project, args.configuration)
@@ -220,6 +254,8 @@ def handle_map_source(args: argparse.Namespace) -> CLIResult:
         message="Source mapping completed.",
         data=payload,
         human_output=_render_source_membership_summary(payload, Path(args.out) if args.out else None),
+        artifacts=_optional_output_artifacts(args.out, ArtifactKind.SOURCE_MEMBERSHIP.value),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -233,6 +269,7 @@ def handle_list_functions(args: argparse.Namespace) -> CLIResult:
         message="Functions listed.",
         data=payload,
         legacy_payload=payload,
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -287,27 +324,50 @@ def handle_analyze_function(args: argparse.Namespace) -> CLIResult:
         "build_completion",
         "test_execution",
         "evidence",
+        "quick_summary",
     ):
         if key in dossier:
             payload[key] = dossier[key]
+    execution_outcome = DomainOutcome("command", RunOutcome.PASSED, None)
+    execution_exit = EXIT_OK
+    if args.run_tests and isinstance(payload.get("test_execution"), dict):
+        execution = payload["test_execution"]
+        try:
+            state = RunOutcome(str(execution.get("status") or "error"))
+        except ValueError:
+            state = RunOutcome.ERROR
+        execution_outcome, execution_exit = classify_domain_state(
+            "test_run",
+            state,
+            green=(bool(execution.get("green")) if state is RunOutcome.PASSED else False),
+        )
+        execution["status"] = execution_outcome.state.value
+        if isinstance(payload.get("evidence"), dict):
+            payload["evidence"]["status"] = execution_outcome.state.value
     if args.finalize_dossier:
         final_dossier = finalize_function_dossier(Path(args.out), function_name=args.function)
         payload["review"] = _dossier_payload(Path(args.out), final_dossier)
+        artifacts = _analysis_artifacts(Path(args.out), payload)
         return CLIResult(
             status="dossier_finalized",
-            exit_code=EXIT_OK,
+            exit_code=execution_exit,
             command=args.command,
             message="Function analysis generated and finalized for dossier review.",
             data=payload,
             legacy_payload=payload,
+            outcome=execution_outcome,
+            artifacts=artifacts,
         )
+    artifacts = _analysis_artifacts(Path(args.out), payload)
     return CLIResult(
         status=_analyze_status_for_phase(args.phase),
-        exit_code=EXIT_OK,
+        exit_code=execution_exit,
         command=args.command,
         message="Function analysis generated. Use --finalize-dossier or finalize-dossier for dossier review packaging. Use --phase harness, build, or execution to run downstream steps.",
         data=payload,
         legacy_payload=payload,
+        outcome=execution_outcome,
+        artifacts=artifacts,
     )
 
 
@@ -323,6 +383,193 @@ def _analyze_status_for_phase(phase: str) -> str:
     if phase == "harness":
         return "harness_skeleton_generated"
     return "analysis_completed"
+
+
+def _artifacts_from_explicit_outputs(
+    root: Path,
+    outputs: list[tuple[Path, str | None]],
+) -> list[ProducedArtifact]:
+    resolved_root = root.resolve()
+    artifacts: list[ProducedArtifact] = []
+    seen: set[Path] = set()
+    for raw_path, kind in outputs:
+        candidate = (
+            raw_path
+            if raw_path.is_absolute()
+            else raw_path.resolve()
+            if raw_path.exists()
+            else resolved_root / raw_path
+        )
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        try:
+            artifact = build_produced_artifact(
+                resolved_root,
+                resolved,
+                kind=kind,
+            )
+        except UnclaimableUntypedJsonError:
+            continue
+        artifacts.append(artifact)
+    return artifacts
+
+
+def _existing_explicit_outputs(
+    outputs: list[tuple[Path, str | None]],
+) -> list[tuple[Path, str | None]]:
+    return [(path, kind) for path, kind in outputs if path.is_file()]
+
+
+def _optional_output_artifacts(
+    output: str | Path | None,
+    kind: str,
+) -> list[ProducedArtifact]:
+    if output is None:
+        return []
+    path = Path(output)
+    return _artifacts_from_explicit_outputs(
+        path.resolve().parent,
+        [(path, None if path.suffix.lower() == ".json" else kind)],
+    )
+
+
+def _analysis_artifacts(root: Path, payload: dict[str, Any]) -> list[ProducedArtifact]:
+    root = root.resolve()
+    reports = root / "reports"
+    outputs: list[tuple[Path, str | None]] = [
+        (root / "input" / "request.json", None),
+        (reports / "source_digest.json", None),
+        (reports / "source_digest.md", ArtifactKind.SOURCE_DIGEST.value),
+        (reports / "function_location.json", None),
+        (reports / "function_location.md", ArtifactKind.FUNCTION_LOCATION.value),
+        (reports / "function_signature.json", None),
+        (reports / "function_signature.md", ArtifactKind.FUNCTION_SIGNATURE.value),
+        (reports / "global_access.json", None),
+        (reports / "global_access.md", ArtifactKind.GLOBAL_ACCESS.value),
+        (reports / "call_report.json", None),
+        (reports / "call_report.md", ArtifactKind.CALL_REPORT.value),
+        (reports / "dependency_policy.json", None),
+        (reports / "dependency_policy.md", ArtifactKind.DEPENDENCY_POLICY.value),
+        (reports / "coverage_design.json", None),
+        (reports / "coverage_design.md", ArtifactKind.COVERAGE_DESIGN.value),
+        (
+            reports / "boundary_equivalence_candidates.json",
+            None,
+        ),
+        (
+            reports / "boundary_equivalence_candidates.md",
+            ArtifactKind.BOUNDARY_CANDIDATES.value,
+        ),
+        (reports / "build_context.json", None),
+        (reports / "function_dossier.json", None),
+        (reports / "function_dossier.md", ArtifactKind.FUNCTION_DOSSIER.value),
+        (reports / "quick_summary.json", None),
+        (reports / "quick_summary.md", ArtifactKind.QUICK_SUMMARY.value),
+        (root / "generated" / "prompt_pack.json", None),
+    ]
+    outputs.extend(_analysis_phase_outputs(payload))
+    review = payload.get("review")
+    if isinstance(review, dict):
+        review_reports = review.get("reports")
+        if isinstance(review_reports, dict):
+            outputs.extend(_review_outputs(review_reports))
+    return _artifacts_from_explicit_outputs(
+        root,
+        _existing_explicit_outputs(outputs),
+    )
+
+
+def _analysis_phase_outputs(payload: dict[str, Any]) -> list[tuple[Path, str | None]]:
+    outputs: list[tuple[Path, str | None]] = []
+    section_specs: dict[str, dict[str, str | None]] = {
+        "test_case_design": {
+            "json": None,
+            "markdown": ArtifactKind.TEST_SPEC.value,
+            "csv": ArtifactKind.TEST_SPEC.value,
+        },
+        "harness_skeleton": {
+            "json": None,
+            "markdown": ArtifactKind.HARNESS_SKELETON_REPORT.value,
+        },
+        "build_workspace": {
+            "json": None,
+            "markdown": ArtifactKind.BUILD_WORKSPACE_REPORT.value,
+        },
+        "build_probe": {
+            "json": None,
+            "markdown": ArtifactKind.BUILD_PROBE_REPORT.value,
+        },
+        "build_completion": {
+            "plan_json": None,
+            "plan_markdown": ArtifactKind.BUILD_COMPLETION_PLAN.value,
+            "iteration_json": None,
+            "iteration_markdown": ArtifactKind.BUILD_COMPLETION_ITERATION.value,
+        },
+        "test_execution": {
+            "json": ArtifactKind.TEST_EXECUTION_REPORT.value,
+            "result_json": ArtifactKind.TEST_RESULT.value,
+            "result_csv": ArtifactKind.TEST_RESULT.value,
+            "stdout_log": "test_execution_log",
+            "stderr_log": "test_execution_log",
+            "combined_log": "test_execution_log",
+        },
+        "evidence": {
+            "manifest_json": ArtifactKind.EVIDENCE_MANIFEST.value,
+            "package_markdown": "evidence_package",
+            "source_run_json": ArtifactKind.EVIDENCE_SOURCE_RUN.value,
+        },
+    }
+    for section_name, fields in section_specs.items():
+        section = payload.get(section_name)
+        if not isinstance(section, dict):
+            continue
+        for field, kind in fields.items():
+            value = section.get(field)
+            if isinstance(value, str) and value:
+                if (
+                    section_name == "test_execution"
+                    and not section.get("run_id")
+                    and field in {"json", "result_json"}
+                ):
+                    kind = None
+                if (
+                    section_name == "evidence"
+                    and not section.get("evidence_id")
+                    and field in {"manifest_json", "source_run_json"}
+                ):
+                    kind = None
+                outputs.append((Path(value), kind))
+    return outputs
+
+
+def _review_outputs(reports: dict[str, Any]) -> list[tuple[Path, str | None]]:
+    field_kinds = {
+        "function_dossier_json": None,
+        "function_dossier_md": ArtifactKind.FUNCTION_DOSSIER.value,
+        "dossier_manifest": None,
+        "traceability_matrix": "review_artifact",
+        "review_checklist": "review_artifact",
+        "unresolved_items": "review_artifact",
+        "next_actions": "review_artifact",
+    }
+    return [
+        (Path(reports[field]), kind)
+        for field, kind in field_kinds.items()
+        if isinstance(reports.get(field), str) and reports[field]
+    ]
+
+
+def _named_outputs(
+    values: dict[str, Any],
+    field_kinds: dict[str, str | None],
+) -> list[tuple[Path, str | None]]:
+    return [
+        (Path(values[field]), kind)
+        for field, kind in field_kinds.items()
+        if isinstance(values.get(field), str) and values[field]
+    ]
 
 
 def handle_reanalyze_function(args: argparse.Namespace) -> CLIResult:
@@ -368,6 +615,22 @@ def _run_reanalysis(args: argparse.Namespace) -> CLIResult:
         message="Function reanalysis completed.",
         data=payload,
         legacy_payload=payload,
+        artifacts=_artifacts_from_explicit_outputs(
+            Path(args.out).resolve(),
+            _named_outputs(
+                reports,
+                {
+                    "change_impact_report_json": None,
+                    "change_impact_report_md": ArtifactKind.CHANGE_IMPACT.value,
+                    "test_case_reconciliation_report_json": None,
+                    "test_case_reconciliation_report_md": ArtifactKind.TEST_CASE_RECONCILIATION.value,
+                    "regression_selection_json": None,
+                    "regression_selection_csv": ArtifactKind.REGRESSION_SELECTION.value,
+                    "updated_test_case_design_json": None,
+                },
+            ),
+        ),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -389,6 +652,17 @@ def handle_generate_harness_skeleton(args: argparse.Namespace) -> CLIResult:
         },
         "generated_file_count": len(report.generated_files),
     }
+    output_root = Path(args.out).resolve()
+    harness_outputs = [
+        (
+            output_root / "reports" / "harness_skeleton_report.json",
+            None,
+        ),
+        (
+            output_root / "reports" / "harness_skeleton_report.md",
+            ArtifactKind.HARNESS_SKELETON_REPORT.value,
+        ),
+    ]
     return CLIResult(
         status="harness_skeleton_generated",
         exit_code=EXIT_OK,
@@ -396,6 +670,8 @@ def handle_generate_harness_skeleton(args: argparse.Namespace) -> CLIResult:
         message="Harness skeleton generated.",
         data=payload,
         legacy_payload=payload,
+        artifacts=_artifacts_from_explicit_outputs(output_root, harness_outputs),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -452,6 +728,17 @@ def handle_build_probe(args: argparse.Namespace) -> CLIResult:
             message="Build probe completed.",
             data=payload,
             legacy_payload=payload,
+            artifacts=_optional_output_artifacts(
+                args.out,
+                ArtifactKind.BUILD_PROBE_REPORT.value,
+            ),
+            outcome=DomainOutcome(
+                "command",
+                RunOutcome.FAILED
+                if payload.get("returncode", 0) not in {0, None}
+                else RunOutcome.PASSED,
+                None,
+            ),
         )
 
     raise CLIError("build-probe requires --workspace, --dossier, or explicit report inputs.", EXIT_INPUT_ERROR, args.command)
@@ -519,6 +806,26 @@ def _build_probe_result(command: str, workspace: Path, workspace_report, probe_r
         data=payload,
         errors=errors,
         legacy_payload=payload,
+        artifacts=_artifacts_from_explicit_outputs(
+            workspace,
+            _existing_explicit_outputs(
+                [
+                    (build_workspace_json, None),
+                    (build_workspace_md, ArtifactKind.BUILD_WORKSPACE_REPORT.value),
+                    (build_probe_json, None),
+                    (build_probe_md, ArtifactKind.BUILD_PROBE_REPORT.value),
+                ]
+            ),
+        ),
+        outcome=DomainOutcome(
+            "command",
+            RunOutcome.PASSED
+            if exit_code == EXIT_OK
+            else RunOutcome.BLOCKED
+            if exit_code == EXIT_ENVIRONMENT_WARNING
+            else RunOutcome.FAILED,
+            None,
+        ),
     )
 
 
@@ -559,6 +866,8 @@ def handle_analyze_build_errors(args: argparse.Namespace) -> CLIResult:
         message="Build completion plan generated.",
         data=payload,
         legacy_payload=payload,
+        artifacts=_completion_artifacts(workspace),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -595,6 +904,8 @@ def handle_complete_build(args: argparse.Namespace) -> CLIResult:
         message="Build completion processed.",
         data=payload,
         legacy_payload=payload,
+        artifacts=_completion_artifacts(workspace),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -612,6 +923,22 @@ def _completion_payload(workspace: Path, plan, iteration) -> dict[str, Any]:
             "final_build_probe_status": iteration.final_build_probe_status,
         },
     }
+
+
+def _completion_artifacts(workspace: Path) -> list[ProducedArtifact]:
+    reports = workspace / "reports"
+    return _artifacts_from_explicit_outputs(
+        workspace,
+        [
+            (reports / "build_completion_plan.json", None),
+            (reports / "build_completion_plan.md", ArtifactKind.BUILD_COMPLETION_PLAN.value),
+            (reports / "build_completion_iteration_report.json", None),
+            (
+                reports / "build_completion_iteration_report.md",
+                ArtifactKind.BUILD_COMPLETION_ITERATION.value,
+            ),
+        ],
+    )
 
 
 def handle_generate_test_design(args: argparse.Namespace) -> CLIResult:
@@ -644,8 +971,23 @@ def handle_generate_test_design(args: argparse.Namespace) -> CLIResult:
         )
     if isinstance(result, dict):
         design_value: str | dict[str, str] = {key: str(value) for key, value in result.items()}
+        artifact_root = Path(args.out).resolve() if args.out else next(iter(result.values())).parent.resolve()
+        design_outputs = [
+            (
+                Path(value),
+                None if Path(value).suffix.lower() == ".json" else ArtifactKind.TEST_SPEC.value,
+            )
+            for value in result.values()
+        ]
     else:
         design_value = str(result)
+        artifact_root = Path(result).resolve().parent
+        design_outputs = [
+            (
+                Path(result),
+                None if Path(result).suffix.lower() == ".json" else ArtifactKind.TEST_SPEC.value,
+            )
+        ]
     payload = {"test_case_design": design_value}
     return CLIResult(
         status="test_case_design_generated",
@@ -654,6 +996,8 @@ def handle_generate_test_design(args: argparse.Namespace) -> CLIResult:
         message="Test design generated.",
         data=payload,
         legacy_payload=payload,
+        artifacts=_artifacts_from_explicit_outputs(artifact_root, design_outputs),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -685,6 +1029,17 @@ def handle_reconcile_test_cases(args: argparse.Namespace) -> CLIResult:
         message="Test case reconciliation completed.",
         data=payload,
         legacy_payload=payload,
+        artifacts=_artifacts_from_explicit_outputs(
+            Path(args.out).resolve().parent,
+            _named_outputs(
+                reports,
+                {
+                    "test_case_reconciliation_report_json": None,
+                    "updated_test_case_design_json": None,
+                },
+            ),
+        ),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -706,6 +1061,8 @@ def handle_select_regression_tests(args: argparse.Namespace) -> CLIResult:
         message="Regression selection completed.",
         data=payload,
         legacy_payload=payload,
+        artifacts=_optional_output_artifacts(args.out, ArtifactKind.REGRESSION_SELECTION.value),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -733,6 +1090,8 @@ def handle_suite_register(args: argparse.Namespace) -> CLIResult:
         message="Suite entry registered.",
         data=payload,
         legacy_payload=payload,
+        artifacts=_optional_output_artifacts(args.suite, ArtifactKind.SUITE_MANIFEST.value),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -753,6 +1112,7 @@ def handle_suite_list(args: argparse.Namespace) -> CLIResult:
         message="Suite entries listed.",
         data=payload,
         legacy_payload=payload,
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -773,20 +1133,34 @@ def handle_suite_remove(args: argparse.Namespace) -> CLIResult:
         message="Suite entry removed.",
         data=payload,
         legacy_payload=payload,
+        artifacts=_optional_output_artifacts(args.suite, ArtifactKind.SUITE_MANIFEST.value),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
 def handle_suite_run(args: argparse.Namespace) -> CLIResult:
+    suite_path = _existing_file(args.suite, "suite", args.command)
+    if not getattr(args, "run", False):
+        try:
+            _, plan_diagnostics = validate_suite_plan(
+                suite_path,
+                entry_ids=args.entry_ids,
+                tag=args.tag,
+                all_entries=args.all,
+            )
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise CLIError(str(exc), EXIT_INPUT_ERROR, args.command) from exc
+        return _plan_suite_run(args, suite_path, plan_diagnostics)
     policy = SuiteRunPolicy(
-        run_tests=args.run,
-        dry_run=args.dry_run or not args.run,
+        run_tests=True,
+        dry_run=False,
         timeout_seconds=args.timeout,
         fail_fast=args.fail_fast,
         require_green=args.require_green,
     )
     try:
         report, paths = run_suite(
-            Path(args.suite),
+            suite_path,
             entry_ids=args.entry_ids,
             tag=args.tag,
             all_entries=args.all,
@@ -800,24 +1174,123 @@ def handle_suite_run(args: argparse.Namespace) -> CLIResult:
         "suite_run_report_md": str(paths["markdown"]),
         "suite_run_report_csv": str(paths["csv"]),
     }
-    failed = report.status == "failed"
+    outcome, exit_code = classify_suite_run(report, execution_requested=True)
+    payload["outcome"] = outcome.state.value
+    artifacts = _suite_artifacts(suite_path.parent, paths)
     return CLIResult(
-        status="suite_run_failed" if failed else "suite_run_completed",
-        exit_code=EXIT_TESTS_FAILED if failed else EXIT_OK,
+        status=outcome.state.value,
+        exit_code=exit_code,
         command=args.command,
         message="Suite run completed.",
         data=payload,
         legacy_payload=payload,
+        outcome=outcome,
+        artifacts=artifacts,
     )
+
+
+def _plan_suite_run(
+    args: argparse.Namespace,
+    suite_path: Path,
+    blocker_diagnostics: list[dict[str, str]] | None = None,
+) -> CLIResult:
+    root = suite_path.parent
+    expected = [
+        build_expected_artifact(
+            root,
+            root / "reports" / "suite_run_report.json",
+            kind=ArtifactKind.SUITE_RUN_REPORT.value,
+        ),
+        build_expected_artifact(
+            root,
+            root / "reports" / "suite_run_report.md",
+            kind=ArtifactKind.SUITE_RUN_REPORT.value,
+        ),
+        build_expected_artifact(
+            root,
+            root / "reports" / "suite_run_report.csv",
+            kind=ArtifactKind.SUITE_RUN_REPORT.value,
+        ),
+    ]
+    diagnostics = list(blocker_diagnostics or [])
+    if getattr(args, "dry_run", False):
+        diagnostics.append(
+            {
+                "code": "deprecated_dry_run_alias",
+                "severity": "warning",
+                "message": "--dry-run is deprecated; use --plan. No suite entries were executed and no reports were written.",
+            }
+        )
+    return CLIResult(
+        status=RunOutcome.PLANNED.value,
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Suite execution plan validated; no entries were executed and no artifacts were written.",
+        data={
+            "mode": "plan",
+            "suite": str(suite_path),
+            "selector": _suite_selector_details(args),
+            "execution_requested": False,
+        },
+        outcome=DomainOutcome("suite_run", RunOutcome.PLANNED, None),
+        expected_artifacts=expected,
+        diagnostics=diagnostics,
+    )
+
+
+def _suite_artifacts(root: Path, paths: dict[str, Path]) -> list[ProducedArtifact]:
+    candidates = [
+        (paths["json"], None),
+        (paths["markdown"], ArtifactKind.SUITE_RUN_REPORT.value),
+        (paths["csv"], ArtifactKind.SUITE_RUN_REPORT.value),
+    ]
+    return [
+        build_produced_artifact(root, path, kind=kind)
+        for path, kind in candidates
+    ]
+
+
+def _suite_selector_details(args: argparse.Namespace) -> dict[str, Any]:
+    if args.all:
+        return {"kind": "all"}
+    if args.tag:
+        return {"kind": "tag", "tag": args.tag}
+    return {"kind": "entry_id", "entry_ids": list(args.entry_ids or [])}
 
 
 def handle_run_tests(args: argparse.Namespace) -> CLIResult:
     workspace = _existing_dir(args.workspace, "workspace", args.command)
+    if not getattr(args, "run", False):
+        try:
+            warnings, review_items = validate_test_run_preflight(
+                workspace,
+                Path(args.executable) if args.executable else None,
+                allow_placeholder_tests=args.allow_placeholder_tests,
+            )
+        except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError) as exc:
+            raise CLIError(str(exc), EXIT_INPUT_ERROR, args.command) from exc
+        blocker_diagnostics = [
+            {
+                "code": warning.code,
+                "severity": "warning",
+                "message": warning.message,
+            }
+            for warning in warnings
+        ]
+        blocker_diagnostics.extend(
+            {
+                "code": item.item_kind,
+                "severity": item.severity if item.severity in {"info", "warning", "error"} else "warning",
+                "message": item.description,
+            }
+            for item in review_items
+        )
+        return _plan_test_run(args, workspace, blocker_diagnostics)
     report, manifest = prepare_test_execution_evidence(
         workspace,
         executable=Path(args.executable) if args.executable else None,
-        run_tests=args.run,
-        dry_run=args.dry_run or not args.run,
+        run_tests=True,
+        dry_run=False,
         timeout_seconds=args.timeout,
         allow_placeholder_tests=args.allow_placeholder_tests,
         treat_placeholder_as_inconclusive=args.treat_placeholder_as_inconclusive,
@@ -829,15 +1302,104 @@ def handle_run_tests(args: argparse.Namespace) -> CLIResult:
         manifest,
         evidence_paths=getattr(manifest, "evidence_paths", None),
     )
-    status, exit_code = legacy_execution_exit(report.status, report.executed)
+    outcome, exit_code = classify_test_run(report, execution_requested=True)
+    payload["test_execution"]["status"] = outcome.state.value
+    payload["evidence"]["status"] = outcome.state.value
     return CLIResult(
-        status=status,
+        status=outcome.state.value,
         exit_code=exit_code,
         command=args.command,
         message="Test execution evidence prepared with the reported terminal outcome.",
         data=payload,
         legacy_payload=payload,
+        outcome=outcome,
+        artifacts=_run_artifacts(workspace, report, manifest),
     )
+
+
+def _plan_test_run(
+    args: argparse.Namespace,
+    workspace: Path,
+    blocker_diagnostics: list[dict[str, str]] | None = None,
+) -> CLIResult:
+    expected: list[ExpectedArtifact] = []
+    run_id = getattr(args, "run_id", None)
+    if run_id:
+        try:
+            run_paths = validate_run_paths_available(workspace, run_id)
+            expected = [
+                build_expected_artifact(
+                    workspace,
+                    run_paths.execution_report,
+                    kind=ArtifactKind.TEST_EXECUTION_REPORT.value,
+                ),
+                build_expected_artifact(
+                    workspace,
+                    run_paths.result_json,
+                    kind=ArtifactKind.TEST_RESULT.value,
+                ),
+                build_expected_artifact(
+                    workspace,
+                    run_paths.result_csv,
+                    kind=ArtifactKind.TEST_RESULT.value,
+                ),
+            ]
+        except (OSError, ValueError) as error:
+            raise CLIError(str(error), EXIT_INPUT_ERROR, args.command) from error
+    diagnostics = list(blocker_diagnostics or [])
+    if getattr(args, "dry_run", False):
+        diagnostics.append(
+            {
+                "code": "deprecated_dry_run_alias",
+                "severity": "warning",
+                "message": "--dry-run is deprecated; use --plan. No execution or evidence artifacts were written.",
+            }
+        )
+    return CLIResult(
+        status=RunOutcome.PLANNED.value,
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Test execution plan validated; no tests were executed and no artifacts were written.",
+        data={
+            "mode": "plan",
+            "workspace": str(workspace),
+            "execution_requested": False,
+            "requested_run_id": run_id,
+        },
+        outcome=DomainOutcome("test_run", RunOutcome.PLANNED, None),
+        expected_artifacts=expected,
+        diagnostics=diagnostics,
+    )
+
+
+def _run_artifacts(workspace: Path, report, manifest) -> list[ProducedArtifact]:
+    run_paths = getattr(report, "run_paths", None)
+    evidence_paths = getattr(manifest, "evidence_paths", None)
+    candidates: list[tuple[Path, str]] = []
+    if run_paths is not None:
+        candidates.extend(
+            [
+                (run_paths.execution_report, ArtifactKind.TEST_EXECUTION_REPORT.value),
+                (run_paths.result_json, ArtifactKind.TEST_RESULT.value),
+                (run_paths.result_csv, ArtifactKind.TEST_RESULT.value),
+                (run_paths.stdout_log, "test_execution_log"),
+                (run_paths.stderr_log, "test_execution_log"),
+                (run_paths.combined_log, "test_execution_log"),
+            ]
+        )
+    if evidence_paths is not None:
+        candidates.extend(
+            [
+                (evidence_paths.source_run, ArtifactKind.EVIDENCE_SOURCE_RUN.value),
+                (evidence_paths.evidence_manifest, ArtifactKind.EVIDENCE_MANIFEST.value),
+                (evidence_paths.evidence_package, "evidence_package"),
+            ]
+        )
+    return [
+        build_produced_artifact(workspace, path, kind=kind)
+        for path, kind in candidates
+        if path.is_file()
+    ]
 
 
 def legacy_execution_exit(
@@ -863,7 +1425,9 @@ def legacy_execution_exit(
     if normalized == "timed_out":
         return "tests_timed_out", EXIT_TESTS_TIMED_OUT
     if normalized in {"blocked", "inconclusive"}:
-        return "tests_blocked", EXIT_ENVIRONMENT_WARNING
+        if normalized == "blocked":
+            return "tests_blocked", EXIT_TESTS_BLOCKED
+        return "tests_blocked", EXIT_TESTS_INCONCLUSIVE
     if normalized == "cancelled":
         return "tests_cancelled", EXIT_TESTS_CANCELLED
     if normalized in {"planned", "not_run"} and not executed:
@@ -887,14 +1451,32 @@ def handle_prepare_evidence(args: argparse.Namespace) -> CLIResult:
     except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError) as exc:
         raise CLIError(str(exc), EXIT_INPUT_ERROR, args.command) from exc
     payload = _evidence_payload(workspace, report, manifest, evidence_paths=paths)
+    outcome, exit_code = classify_test_run(report, execution_requested=True)
+    payload["test_execution"]["status"] = outcome.state.value
+    payload["evidence"]["status"] = outcome.state.value
     return CLIResult(
-        status="evidence_prepared",
-        exit_code=EXIT_OK,
+        status=outcome.state.value,
+        exit_code=exit_code,
         command=args.command,
         message="Evidence package prepared.",
         data=payload,
         legacy_payload=payload,
+        outcome=outcome,
+        artifacts=_evidence_artifacts(workspace, paths),
     )
+
+
+def _evidence_artifacts(workspace: Path, paths) -> list[ProducedArtifact]:
+    candidates = [
+        (paths.source_run, ArtifactKind.EVIDENCE_SOURCE_RUN.value),
+        (paths.evidence_manifest, ArtifactKind.EVIDENCE_MANIFEST.value),
+        (paths.evidence_package, "evidence_package"),
+    ]
+    return [
+        build_produced_artifact(workspace, path, kind=kind)
+        for path, kind in candidates
+        if path.is_file()
+    ]
 
 
 def handle_finalize_dossier(args: argparse.Namespace) -> CLIResult:
@@ -907,6 +1489,7 @@ def handle_finalize_dossier(args: argparse.Namespace) -> CLIResult:
         strict_schema_version=args.strict_schema_version,
     )
     payload = _dossier_payload(workspace, dossier, Path(args.out) if args.out else None)
+    artifact_root = Path(args.out).resolve() if args.out else workspace
     return CLIResult(
         status="dossier_finalized",
         exit_code=EXIT_OK,
@@ -914,6 +1497,11 @@ def handle_finalize_dossier(args: argparse.Namespace) -> CLIResult:
         message="Function dossier finalized.",
         data=payload,
         legacy_payload=payload,
+        artifacts=_artifacts_from_explicit_outputs(
+            artifact_root,
+            _review_outputs(payload["reports"]),
+        ),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
@@ -921,6 +1509,7 @@ def handle_prepare_review(args: argparse.Namespace) -> CLIResult:
     dossier = _existing_file(args.dossier, "dossier", args.command)
     paths = prepare_review_from_dossier(dossier, Path(args.out) if args.out else None)
     payload = {"reports": {key: str(value) for key, value in paths.items()}}
+    artifact_root = Path(args.out).resolve() if args.out else dossier.parent.parent.resolve()
     return CLIResult(
         status="review_prepared",
         exit_code=EXIT_OK,
@@ -928,6 +1517,14 @@ def handle_prepare_review(args: argparse.Namespace) -> CLIResult:
         message="Review workflow artifacts prepared.",
         data=payload,
         legacy_payload=payload,
+        artifacts=_artifacts_from_explicit_outputs(
+            artifact_root,
+            [
+                (Path(path), None if Path(path).suffix.lower() == ".json" else "review_artifact")
+                for path in paths.values()
+            ],
+        ),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 

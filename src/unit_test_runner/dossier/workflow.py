@@ -27,7 +27,7 @@ from ..c_analyzer.signature_writer import write_function_signature
 from ..c_analyzer.source_digest import build_source_digest, write_source_digest
 from ..harness import generate_harness_skeleton
 from ..dependency_policy import analyze_dependency_policy, write_dependency_policy
-from ..execution import prepare_test_execution_evidence
+from ..execution import classify_test_execution, prepare_test_execution_evidence
 from ..path_utils import normalize_relative
 from ..test_design import generate_test_design
 from ..test_design.test_case_design_generator import generate_test_case_design, generate_test_case_design_from_payloads
@@ -409,18 +409,55 @@ def analyze_function_workflow(
             "iteration_status": build_completion_iteration.status,
         }
     if test_execution is not None and evidence_manifest is not None:
+        execution_state, green = classify_test_execution(
+            test_execution,
+            execution_requested=run_tests,
+        )
+        execution_paths = test_execution.run_paths
+        evidence_paths = evidence_manifest.evidence_paths
+        execution_json = (
+            execution_paths.execution_report
+            if execution_paths is not None
+            else out_dir / "reports" / "test_execution_report.json"
+        )
+        result_json = (
+            execution_paths.result_json
+            if execution_paths is not None
+            else out_dir / "reports" / "test_result.json"
+        )
+        result_csv = (
+            execution_paths.result_csv
+            if execution_paths is not None
+            else out_dir / "reports" / "test_result.csv"
+        )
         dossier["test_execution"] = {
-            "json": str(out_dir / "reports" / "test_execution_report.json"),
-            "markdown": str(out_dir / "reports" / "test_execution_report.md"),
-            "result_json": str(out_dir / "reports" / "test_result.json"),
-            "result_csv": str(out_dir / "reports" / "test_result.csv"),
-            "status": test_execution.status,
+            "run_id": execution_paths.run_id if execution_paths is not None else None,
+            "json": str(execution_json),
+            "result_json": str(result_json),
+            "result_csv": str(result_csv),
+            "stdout_log": str(execution_paths.stdout_log) if execution_paths is not None else None,
+            "stderr_log": str(execution_paths.stderr_log) if execution_paths is not None else None,
+            "combined_log": str(execution_paths.combined_log) if execution_paths is not None else None,
+            "latest_run_pointer": str(out_dir / "reports" / "latest_run.json"),
+            "status": execution_state.value,
             "executed": test_execution.executed,
+            "green": green,
         }
         dossier["evidence"] = {
-            "manifest_json": str(out_dir / "reports" / "evidence_manifest.json"),
-            "package_markdown": str(out_dir / "reports" / "evidence_package.md"),
-            "status": evidence_manifest.summary.test_execution_status,
+            "evidence_id": evidence_paths.evidence_id if evidence_paths is not None else None,
+            "manifest_json": str(
+                evidence_paths.evidence_manifest
+                if evidence_paths is not None
+                else out_dir / "reports" / "evidence_manifest.json"
+            ),
+            "source_run_json": str(evidence_paths.source_run) if evidence_paths is not None else None,
+            "package_markdown": str(
+                evidence_paths.evidence_package
+                if evidence_paths is not None
+                else out_dir / "reports" / "evidence_package.md"
+            ),
+            "latest_evidence_pointer": str(out_dir / "reports" / "latest_evidence.json"),
+            "status": execution_state.value,
         }
     _write_json(out_dir / "reports" / "function_dossier.json", dossier)
     _write_markdown_reports(out_dir, dossier, copied_files)

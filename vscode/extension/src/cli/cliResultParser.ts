@@ -1,5 +1,6 @@
 import { resolveReportPaths, ReportPaths } from '../reports/reportPathResolver';
 import { resolveReportedPath } from '../platform/pathDialect';
+import { parseCliEnvelopeValue } from './cliEnvelope';
 
 export interface ParsedCliResult {
   status?: string;
@@ -20,6 +21,16 @@ export function formatCliFailureMessage(stdout: string, stderr: string, exitCode
     const detail = stderr.trim();
     return detail ? `${exitText} ${detail}` : exitText;
   }
+  let version: '1.0.0' | '0.1';
+  try {
+    version = parseCliEnvelopeValue(parsed).version;
+  } catch {
+    const detail = stderr.trim();
+    return detail ? `${exitText} ${detail}` : exitText;
+  }
+  if (version === '1.0.0') {
+    return formatV1Failure(parsed, exitCode, exitText);
+  }
   const suiteMessage = formatSuiteRunFailure(parsed, exitCode);
   if (suiteMessage) {
     return `${exitText} ${suiteMessage}`;
@@ -33,6 +44,32 @@ export function formatCliFailureMessage(stdout: string, stderr: string, exitCode
     detailParts.push(message);
   }
   const context = [command, status].filter(Boolean).join(' / ');
+  const suffix = [context, ...detailParts].filter(Boolean).join(': ');
+  return suffix ? `${exitText} ${suffix}` : exitText;
+}
+
+function formatV1Failure(parsed: Record<string, unknown>, exitCode: number | null, exitText: string): string {
+  const data = objectValue(parsed.data);
+  const normalized = {
+    command: data.command,
+    status: data.outcome,
+    data: data.details,
+  };
+  const suiteMessage = formatSuiteRunFailure(normalized, exitCode);
+  const command = stringValue(data.command);
+  const outcome = stringValue(data.outcome);
+  const details = messageArrayValue(data.errors);
+  for (const diagnostic of Array.isArray(data.diagnostics) ? data.diagnostics : []) {
+    if (isMessageRecord(diagnostic)) {
+      details.push(diagnostic.message);
+    }
+  }
+  const message = stringValue(data.message);
+  const detailParts = suiteMessage ? [suiteMessage, ...details] : [...details];
+  if (message && !detailParts.includes(message)) {
+    detailParts.push(message);
+  }
+  const context = [command, outcome].filter(Boolean).join(' / ');
   const suffix = [context, ...detailParts].filter(Boolean).join(': ');
   return suffix ? `${exitText} ${suffix}` : exitText;
 }
@@ -61,77 +98,63 @@ function formatSuiteRunFailure(parsed: Record<string, unknown>, exitCode: number
 }
 
 export function parseCliResult(stdout: string, stderr: string, workspace: string): ParsedCliResult {
-  const warnings: string[] = [];
-  const fallback = resolveReportPaths(workspace);
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(stdout) as Record<string, unknown>;
-    const reports = reportsFromParsed(parsed, fallback, warnings);
-    return {
-      status: typeof parsed.status === 'string' ? parsed.status : undefined,
-      parsedJson: parsed,
-      reports,
-      warnings,
-    };
+    parsed = JSON.parse(stdout) as unknown;
   } catch {
+    const warnings = ['CLI output is not a JSON envelope; produced report paths are unavailable.'];
     if (stderr.trim()) {
       warnings.push(stderr.trim());
     }
-    return { parsedJson: undefined, reports: fallback, warnings };
+    return { parsedJson: undefined, reports: reportsFromSource({}, workspace), warnings };
   }
+  const envelope = parseCliEnvelopeValue(parsed);
+  const reports = reportsFromSource(envelope.reportedPaths, workspace);
+  const warnings = [...envelope.warnings];
+  if (stderr.trim()) {
+    warnings.push(stderr.trim());
+  }
+  const legacyStatus = stringValue(envelope.raw.status);
+  return {
+    status: envelope.outcome ?? legacyStatus,
+    parsedJson: envelope.raw,
+    reports,
+    warnings,
+  };
 }
 
-function reportsFromParsed(parsed: Record<string, unknown>, fallback: ReportPaths, warnings: string[]): ReportPaths {
-  const data = objectValue(parsed.data);
-  const review = objectValue(data.review);
-  const reportSource = optionalObjectValue(parsed.reports) ?? optionalObjectValue(data.reports) ?? optionalObjectValue(review.reports);
-  if (!reportSource) {
-    warnings.push('CLI JSONにレポートパスが含まれていません。既定のパスを使います。');
-    return fallback;
-  }
-  const missing = [
-    ['function_dossier_md', 'functionDossierMd'],
-    ['review_checklist', 'reviewChecklistMd'],
-    ['unresolved_items', 'unresolvedItemsMd'],
-    ['next_actions', 'nextActionsMd'],
-  ].filter(([jsonKey]) => stringValue(reportSource[jsonKey]) === undefined);
-  if (missing.length > 0) {
-    warnings.push(`CLI JSONにレポートパスが含まれていません: ${missing.map(([jsonKey]) => jsonKey).join(', ')}。既定のパスを使います。`);
-  }
-  const reportPath = (value: unknown, fallbackValue?: string): string | undefined => {
+function reportsFromSource(reportSource: Record<string, string>, workspace: string): ReportPaths {
+  const reportPath = (value: unknown): string | undefined => {
     const reported = stringValue(value);
-    return reported ? resolveReportedPath(reported, fallback.workspace) : fallbackValue;
+    return reported ? resolveReportedPath(reported, workspace) : undefined;
   };
   return {
-    workspace: fallback.workspace,
-    functionDossierMd: reportPath(reportSource.function_dossier_md, fallback.functionDossierMd),
-    reviewChecklistMd: reportPath(reportSource.review_checklist, fallback.reviewChecklistMd),
-    unresolvedItemsMd: reportPath(reportSource.unresolved_items, fallback.unresolvedItemsMd),
-    nextActionsMd: reportPath(reportSource.next_actions, fallback.nextActionsMd),
-    quickSummaryJson: reportPath(reportSource.quick_summary_json, fallback.quickSummaryJson),
-    quickSummaryMd: reportPath(reportSource.quick_summary_md, fallback.quickSummaryMd),
-    testCaseDesignMd: reportPath(reportSource.test_case_design_md, fallback.testCaseDesignMd),
-    testCaseDesignJson: reportPath(reportSource.test_case_design_json, fallback.testCaseDesignJson),
-    testCaseDesignCsv: reportPath(reportSource.test_case_design_csv, fallback.testCaseDesignCsv),
-    functionSignatureJson: reportPath(reportSource.function_signature_json, fallback.functionSignatureJson),
-    globalAccessJson: reportPath(reportSource.global_access_json, fallback.globalAccessJson),
-    callReportJson: reportPath(reportSource.call_report_json, fallback.callReportJson),
-    harnessSkeletonReportJson: reportPath(reportSource.harness_skeleton_report_json ?? objectValue(data.harness_skeleton).json, fallback.harnessSkeletonReportJson),
-    harnessSkeletonReportMd: reportPath(reportSource.harness_skeleton_report_md ?? objectValue(data.harness_skeleton).markdown, fallback.harnessSkeletonReportMd),
-    buildProbeReportMd: reportPath(reportSource.build_probe_report_md, fallback.buildProbeReportMd),
-    testExecutionReportMd: reportPath(reportSource.test_execution_report_md, fallback.testExecutionReportMd),
-    evidencePackageMd: reportPath(reportSource.evidence_package_md, fallback.evidencePackageMd),
-    changeImpactReportMd: reportPath(reportSource.change_impact_report_md, fallback.changeImpactReportMd),
-    testCaseReconciliationReportMd: reportPath(reportSource.test_case_reconciliation_report_md, fallback.testCaseReconciliationReportMd),
-    regressionSelectionCsv: reportPath(reportSource.regression_selection_csv, fallback.regressionSelectionCsv),
+    workspace,
+    functionDossierMd: reportPath(reportSource.function_dossier_md),
+    reviewChecklistMd: reportPath(reportSource.review_checklist),
+    unresolvedItemsMd: reportPath(reportSource.unresolved_items),
+    nextActionsMd: reportPath(reportSource.next_actions),
+    quickSummaryJson: reportPath(reportSource.quick_summary_json),
+    quickSummaryMd: reportPath(reportSource.quick_summary_md),
+    testCaseDesignMd: reportPath(reportSource.test_case_design_md),
+    testCaseDesignJson: reportPath(reportSource.test_case_design_json),
+    testCaseDesignCsv: reportPath(reportSource.test_case_design_csv),
+    functionSignatureJson: reportPath(reportSource.function_signature_json),
+    globalAccessJson: reportPath(reportSource.global_access_json),
+    callReportJson: reportPath(reportSource.call_report_json),
+    harnessSkeletonReportJson: reportPath(reportSource.harness_skeleton_report_json),
+    harnessSkeletonReportMd: reportPath(reportSource.harness_skeleton_report_md),
+    buildProbeReportMd: reportPath(reportSource.build_probe_report_md),
+    testExecutionReportMd: reportPath(reportSource.test_execution_report_md),
+    evidencePackageMd: reportPath(reportSource.evidence_package_md),
+    changeImpactReportMd: reportPath(reportSource.change_impact_report_md),
+    testCaseReconciliationReportMd: reportPath(reportSource.test_case_reconciliation_report_md),
+    regressionSelectionCsv: reportPath(reportSource.regression_selection_csv),
   };
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-function optionalObjectValue(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
 function stringValue(value: unknown): string | undefined {
@@ -143,6 +166,25 @@ function stringArrayValue(value: unknown): string[] {
     return [];
   }
   return value.filter((item): item is string => typeof item === 'string');
+}
+
+function messageArrayValue(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((item) => {
+    if (typeof item === 'string') {
+      return [item];
+    }
+    return isMessageRecord(item) ? [item.message] : [];
+  });
+}
+
+function isMessageRecord(value: unknown): value is { message: string } {
+  return Boolean(value)
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && typeof (value as Record<string, unknown>).message === 'string';
 }
 
 function numberValue(value: unknown): number {

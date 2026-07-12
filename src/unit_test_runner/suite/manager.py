@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from unit_test_runner.execution import prepare_test_execution_evidence
+from unit_test_runner.contracts import RunOutcome
+from unit_test_runner.execution import prepare_test_execution_evidence, validate_test_run_preflight
 from unit_test_runner.vc6.debug_workspace_writer import write_vc6_debug_suite
 
 from .models import SuiteEntry, SuiteManifest, SuiteRunEntryResult, SuiteRunPolicy, SuiteRunReport
@@ -82,6 +83,77 @@ def list_entries(suite_path: Path | str, tag: str | None = None) -> list[SuiteEn
     return entries
 
 
+def validate_suite_selection(
+    suite_path: Path | str,
+    *,
+    entry_ids: list[str] | None = None,
+    tag: str | None = None,
+    all_entries: bool = False,
+) -> list[SuiteEntry]:
+    manifest = load_suite_manifest(suite_path)
+    selected = _select_entries(
+        manifest.entries,
+        entry_ids=entry_ids,
+        tag=tag,
+        all_entries=all_entries,
+    )
+    if entry_ids:
+        selected_ids = {entry.entry_id for entry in selected}
+        missing = [entry_id for entry_id in entry_ids if entry_id not in selected_ids]
+        if missing:
+            raise ValueError("Unknown or disabled suite entries: " + ", ".join(missing))
+    if tag and not selected:
+        raise ValueError(f"No enabled suite entries match tag: {tag}")
+    return selected
+
+
+def validate_suite_plan(
+    suite_path: Path | str,
+    *,
+    entry_ids: list[str] | None = None,
+    tag: str | None = None,
+    all_entries: bool = False,
+) -> tuple[list[SuiteEntry], list[dict[str, str]]]:
+    selected = validate_suite_selection(
+        suite_path,
+        entry_ids=entry_ids,
+        tag=tag,
+        all_entries=all_entries,
+    )
+    diagnostics: list[dict[str, str]] = []
+    for entry in selected:
+        warnings, review_items = _validate_entry_preconditions(entry)
+        diagnostics.extend(
+            {
+                "code": f"suite_entry_{warning.code}",
+                "severity": "warning",
+                "message": f"[{entry.entry_id}] {warning.message}",
+            }
+            for warning in warnings
+        )
+        diagnostics.extend(
+            {
+                "code": f"suite_entry_{item.item_kind}",
+                "severity": item.severity if item.severity in {"info", "warning", "error"} else "warning",
+                "message": f"[{entry.entry_id}] {item.description}",
+            }
+            for item in review_items
+        )
+    return selected, diagnostics
+
+
+def _validate_entry_preconditions(
+    entry: SuiteEntry,
+) -> tuple[list[Any], list[Any]]:
+    workspace = _existing_dir(entry.workspace, f"suite entry {entry.entry_id} workspace")
+    dossier_path = _existing_file(entry.dossier, f"suite entry {entry.entry_id} dossier")
+    dossier = _read_json(dossier_path)
+    target = _target_from_dossier(dossier)
+    if entry.function.get("name") != target["name"] or entry.function.get("source") != target["source"]:
+        raise ValueError(f"Suite entry {entry.entry_id} does not match its dossier target.")
+    return validate_test_run_preflight(workspace)
+
+
 def run_suite(
     suite_path: Path | str,
     *,
@@ -102,7 +174,7 @@ def run_suite(
         if policy.fail_fast and result.green_status != "green":
             break
     summary = _summary(results)
-    status = "failed" if (policy.require_green and summary["not_green"] > 0) else "completed"
+    status = _suite_outcome(results, policy).value
     report = SuiteRunReport(
         suite_id=manifest.suite_id,
         status=status,
@@ -129,11 +201,17 @@ def _run_entry(entry: SuiteEntry, policy: SuiteRunPolicy) -> SuiteRunEntryResult
         inconclusive = parsed.inconclusive if parsed else 0
         unresolved = len(report.unresolved_review_items)
         green = _is_green(report.status, report.executed, total, failed, inconclusive, unresolved)
+        run_paths = getattr(report, "run_paths", None)
+        report_path = (
+            run_paths.execution_report
+            if run_paths is not None
+            else None
+        )
         return SuiteRunEntryResult(
             entry_id=entry.entry_id,
             function_name=entry.function.get("name", ""),
             workspace=entry.workspace,
-            execution_status=report.status,
+            execution_status=_canonical_entry_outcome(report.status, policy).value,
             green_status="green" if green else "not_green",
             executed=report.executed,
             total_tests=total,
@@ -141,7 +219,7 @@ def _run_entry(entry: SuiteEntry, policy: SuiteRunPolicy) -> SuiteRunEntryResult
             failed_tests=failed,
             inconclusive_tests=inconclusive,
             unresolved_review_count=unresolved,
-            report_path=entry.workspace / "reports" / "test_execution_report.json",
+            report_path=report_path,
         )
     except Exception as exc:
         return SuiteRunEntryResult(
@@ -156,13 +234,55 @@ def _run_entry(entry: SuiteEntry, policy: SuiteRunPolicy) -> SuiteRunEntryResult
             failed_tests=0,
             inconclusive_tests=0,
             unresolved_review_count=0,
-            report_path=entry.workspace / "reports" / "test_execution_report.json",
+            report_path=None,
             error=str(exc),
         )
 
 
 def _is_green(status: str, executed: bool, total: int, failed: int, inconclusive: int, unresolved: int) -> bool:
     return executed and status == "passed" and total > 0 and failed == 0 and inconclusive == 0 and unresolved == 0
+
+
+def _suite_outcome(
+    results: list[SuiteRunEntryResult],
+    policy: SuiteRunPolicy,
+) -> RunOutcome:
+    if not policy.run_tests or policy.dry_run:
+        return RunOutcome.PLANNED
+    states = {
+        _canonical_entry_outcome(result.execution_status, policy)
+        for result in results
+    }
+    for state in (
+        RunOutcome.ERROR,
+        RunOutcome.CANCELLED,
+        RunOutcome.TIMED_OUT,
+        RunOutcome.BLOCKED,
+        RunOutcome.FAILED,
+        RunOutcome.INCONCLUSIVE,
+    ):
+        if state in states:
+            return state
+    if any(result.green_status != "green" for result in results):
+        return RunOutcome.FAILED
+    if states == {RunOutcome.PASSED} and results:
+        return RunOutcome.PASSED
+    return RunOutcome.INCONCLUSIVE
+
+
+def _canonical_entry_outcome(value: str, policy: SuiteRunPolicy) -> RunOutcome:
+    if not policy.run_tests or policy.dry_run:
+        return RunOutcome.PLANNED
+    aliases = {
+        "not_run": RunOutcome.INCONCLUSIVE,
+        "timeout": RunOutcome.TIMED_OUT,
+    }
+    if value in aliases:
+        return aliases[value]
+    try:
+        return RunOutcome(value)
+    except ValueError:
+        return RunOutcome.ERROR
 
 
 def _select_entries(
@@ -190,7 +310,7 @@ def _summary(results: list[SuiteRunEntryResult]) -> dict[str, int]:
         "green": green,
         "not_green": len(results) - green,
         "executed": len([result for result in results if result.executed]),
-        "failed": len([result for result in results if result.execution_status in {"failed", "error", "blocked", "timeout"}]),
+        "failed": len([result for result in results if result.execution_status in {"failed", "error", "blocked", "timed_out", "cancelled"}]),
     }
 
 

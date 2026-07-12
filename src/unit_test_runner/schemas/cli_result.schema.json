@@ -9,47 +9,114 @@
       "properties": {
         "artifact_kind": {"const": "cli_result"},
         "schema_version": {"const": "1.0.0"},
+        "subject": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["invocation_id"],
+          "properties": {
+            "invocation_id": {"$ref": "common.schema.json#/$defs/identifier"}
+          }
+        },
         "data": {
           "type": "object",
           "additionalProperties": false,
           "required": [
+            "invocation_id",
             "command",
             "lifecycle",
+            "outcome_kind",
             "outcome",
+            "green",
             "exit_code",
             "message",
+            "diagnostics",
             "artifacts",
-            "errors"
+            "expected_artifacts",
+            "errors",
+            "details"
           ],
           "properties": {
+            "invocation_id": {"$ref": "common.schema.json#/$defs/identifier"},
             "command": {"type": "string", "minLength": 1},
-            "lifecycle": {
-              "enum": ["queued", "running", "finished"]
-            },
-            "outcome": {
-              "enum": [
-                "planned",
-                "passed",
-                "failed",
-                "blocked",
-                "inconclusive",
-                "cancelled",
-                "timed_out",
-                "error"
-              ]
-            },
+            "lifecycle": {"$ref": "common.schema.json#/$defs/runLifecycle"},
+            "outcome_kind": {"type": "string", "minLength": 1},
+            "outcome": {"$ref": "common.schema.json#/$defs/runOutcome"},
+            "green": {"type": ["boolean", "null"]},
             "exit_code": {"type": "integer", "minimum": 0},
             "message": {"type": "string"},
+            "diagnostics": {
+              "type": "array",
+              "items": {"$ref": "#/$defs/diagnostic"}
+            },
             "artifacts": {
               "type": "array",
-              "items": {
-                "$ref": "common.schema.json#/$defs/artifact_reference"
-              }
+              "items": {"$ref": "#/$defs/producedArtifact"}
             },
-            "errors": {"type": "array", "items": {"type": "object"}}
+            "expected_artifacts": {
+              "type": "array",
+              "items": {"$ref": "#/$defs/expectedArtifact"}
+            },
+            "errors": {
+              "type": "array",
+              "items": {"$ref": "#/$defs/error"}
+            },
+            "details": {"type": "object"}
           }
         }
       }
     }
-  ]
+  ],
+  "$defs": {
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "message"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "severity": {"enum": ["info", "warning", "error"]},
+        "message": {"type": "string"}
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "message": {"type": "string"}
+      }
+    },
+    "producedArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_kind",
+        "path",
+        "exists",
+        "sha256",
+        "schema_version"
+      ],
+      "properties": {
+        "artifact_kind": {"type": "string", "minLength": 1},
+        "path": {"$ref": "common.schema.json#/$defs/relativePath"},
+        "exists": {"const": true},
+        "sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "schema_version": {
+          "anyOf": [
+            {"type": "string", "pattern": "^[0-9]+\\.[0-9]+(?:\\.[0-9]+)?$"},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "expectedArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_kind", "path"],
+      "properties": {
+        "artifact_kind": {"type": "string", "minLength": 1},
+        "path": {"$ref": "common.schema.json#/$defs/relativePath"}
+      }
+    }
+  }
 }

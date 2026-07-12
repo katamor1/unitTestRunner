@@ -139,7 +139,7 @@ class TestCaseDesignGenerationTests(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             result = json.loads(completed.stdout)
-            self.assertEqual("analysis_completed", result["status"])
+            self.assertEqual("passed", result["data"]["outcome"])
             reports = out_dir / "reports"
             for filename in ["test_case_design.json", "test_case_design.md", "test_case_design.csv"]:
                 self.assertTrue((reports / filename).exists(), filename)
@@ -185,10 +185,15 @@ class TestCaseDesignGenerationTests(unittest.TestCase):
             )
             self.assertEqual(0, from_dossier.returncode, from_dossier.stderr)
             payload = json.loads(from_dossier.stdout)
-            self.assertEqual("test_case_design_generated", payload["status"])
-            self.assertTrue(Path(payload["data"]["test_case_design"]["json"]).exists())
-            self.assertTrue(Path(payload["data"]["test_case_design"]["markdown"]).exists())
-            self.assertTrue(Path(payload["data"]["test_case_design"]["csv"]).exists())
+            self.assertEqual("passed", payload["data"]["outcome"])
+            design_details = payload["data"]["details"]["test_case_design"]
+            self.assertTrue(Path(design_details["json"]).exists())
+            self.assertTrue(Path(design_details["markdown"]).exists())
+            self.assertTrue(Path(design_details["csv"]).exists())
+            self.assertEqual(
+                {"test_case_design.json", "test_case_design.md", "test_case_design.csv"},
+                {artifact["path"] for artifact in payload["data"]["artifacts"]},
+            )
 
             explicit_json = Path(temp_dir) / "explicit_design.json"
             explicit = run_module(
@@ -211,7 +216,7 @@ class TestCaseDesignGenerationTests(unittest.TestCase):
             )
             self.assertEqual(0, explicit.returncode, explicit.stderr)
             explicit_payload = json.loads(explicit.stdout)
-            self.assertEqual(str(explicit_json), explicit_payload["data"]["test_case_design"])
+            self.assertEqual(str(explicit_json), explicit_payload["data"]["details"]["test_case_design"])
             self.assertTrue(json.loads(explicit_json.read_text(encoding="utf-8"))["test_cases"])
 
     def test_generate_test_design_from_finalized_dossier_renders_existing_reviewed_design(self):
@@ -257,7 +262,7 @@ class TestCaseDesignGenerationTests(unittest.TestCase):
 
             self.assertEqual(0, rendered.returncode, rendered.stderr)
             payload = json.loads(rendered.stdout)
-            self.assertEqual("test_case_design_generated", payload["status"])
+            self.assertEqual("passed", payload["data"]["outcome"])
             with (rendered_out / "test_case_design.csv").open(encoding="utf-8", newline="") as handle:
                 rows = list(csv.DictReader(handle))
             self.assertTrue(rows)

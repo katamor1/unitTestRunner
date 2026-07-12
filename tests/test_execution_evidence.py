@@ -139,9 +139,9 @@ UTR OK TC_Control_Update_002
                 "--allow-placeholder-tests",
             )
             run_payload = json.loads(run_tests.stdout)
-            self.assertEqual(run_tests.returncode, run_payload["exit_code"])
-            self.assertEqual("tests_blocked", run_payload["status"])
-            run_report_path = Path(run_payload["data"]["test_execution"]["json"])
+            self.assertEqual(run_tests.returncode, run_payload["data"]["exit_code"])
+            self.assertEqual("blocked", run_payload["data"]["outcome"])
+            run_report_path = Path(run_payload["data"]["details"]["test_execution"]["json"])
             self.assertTrue(run_report_path.exists())
             self.assertEqual("runs", run_report_path.relative_to(workspace).parts[0])
             run_report = json.loads(run_report_path.read_text(encoding="utf-8"))
@@ -152,10 +152,12 @@ UTR OK TC_Control_Update_002
             )
 
             prepare = run_module("--json", "prepare-evidence", "--workspace", str(workspace))
-            self.assertEqual(0, prepare.returncode, prepare.stderr)
+            self.assertEqual(35, prepare.returncode, prepare.stderr)
             prepare_payload = json.loads(prepare.stdout)
-            self.assertEqual("evidence_prepared", prepare_payload["status"])
-            self.assertTrue(Path(prepare_payload["data"]["evidence"]["manifest_json"]).exists())
+            self.assertEqual("blocked", prepare_payload["data"]["outcome"])
+            self.assertFalse(prepare_payload["data"]["green"])
+            self.assertTrue(Path(prepare_payload["data"]["details"]["evidence"]["manifest_json"]).exists())
+            self.assertTrue(prepare_payload["data"]["artifacts"])
             second_evidence_pointer = json.loads(
                 (workspace / "reports" / "latest_evidence.json").read_text(encoding="utf-8")
             )
@@ -187,10 +189,10 @@ UTR OK TC_Control_Update_002
             )
             self.assertEqual(0, full.returncode, full.stderr)
             full_payload = json.loads(full.stdout)
-            self.assertEqual("evidence_prepared", full_payload["status"])
-            self.assertIn("dossier review", full_payload["message"])
-            self.assertIn("test_execution", full_payload["data"])
-            self.assertIn("evidence", full_payload["data"])
+            self.assertEqual("passed", full_payload["data"]["outcome"])
+            self.assertIn("dossier review", full_payload["data"]["message"])
+            self.assertIn("test_execution", full_payload["data"]["details"])
+            self.assertIn("evidence", full_payload["data"]["details"])
             self.assertTrue((out_dir / "reports" / "evidence_manifest.json").exists())
 
             run_out_dir = Path(temp_dir) / "AnalyzeFunctionRunTests"
@@ -215,9 +217,10 @@ UTR OK TC_Control_Update_002
                 str(run_out_dir),
                 "--run-tests",
             )
-            self.assertEqual(0, run_full.returncode, run_full.stderr)
+            self.assertEqual(35, run_full.returncode, run_full.stderr)
             run_payload = json.loads(run_full.stdout)
-            self.assertEqual("blocked", run_payload["data"]["test_execution"]["status"])
+            self.assertEqual("blocked", run_payload["data"]["outcome"])
+            self.assertEqual("blocked", run_payload["data"]["details"]["test_execution"]["status"])
             latest_run = json.loads(
                 (run_out_dir / "reports" / "latest_run.json").read_text(encoding="utf-8")
             )

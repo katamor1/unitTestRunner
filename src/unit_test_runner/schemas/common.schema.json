@@ -125,24 +125,40 @@
       }
     },
     "subject": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "function_id",
-        "source_path",
-        "source_sha256"
-      ],
-      "properties": {
-        "function_id": {
-          "$ref": "#/$defs/identifier"
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "function_id",
+            "source_path",
+            "source_sha256"
+          ],
+          "properties": {
+            "function_id": {
+              "$ref": "#/$defs/identifier"
+            },
+            "source_path": {
+              "$ref": "#/$defs/relativePath"
+            },
+            "source_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
         },
-        "source_path": {
-          "$ref": "#/$defs/relativePath"
-        },
-        "source_sha256": {
-          "$ref": "#/$defs/sha256"
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "invocation_id"
+          ],
+          "properties": {
+            "invocation_id": {
+              "$ref": "#/$defs/identifier"
+            }
+          }
         }
-      }
+      ]
     },
     "artifact_reference": {
       "type": "object",
@@ -1182,8 +1198,7 @@
         "failed_tests",
         "inconclusive_tests",
         "not_run_tests",
-        "unresolved_review_count",
-        "report_path"
+        "unresolved_review_count"
       ],
       "properties": {
         "entry_id": {

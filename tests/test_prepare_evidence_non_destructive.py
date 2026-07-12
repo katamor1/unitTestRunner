@@ -370,7 +370,7 @@ class PrepareEvidenceNonDestructiveTests(unittest.TestCase):
                 latest_evidence["data"]["source_run_id"],
             )
 
-    def test_legacy_dry_run_payload_does_not_reuse_latest_real_run_alias(self):
+    def test_legacy_dry_run_is_a_nonwriting_plan_and_does_not_reuse_latest_alias(self):
         from argparse import Namespace
 
         from unit_test_runner.cli.commands import handle_run_tests
@@ -383,6 +383,7 @@ class PrepareEvidenceNonDestructiveTests(unittest.TestCase):
             execute_test_run(
                 TestRunRequest(workspace, runner, 5, True, run_id="run-real")
             )
+            before = self._tree_hashes(workspace)
 
             result = handle_run_tests(
                 Namespace(
@@ -390,6 +391,7 @@ class PrepareEvidenceNonDestructiveTests(unittest.TestCase):
                     workspace=str(workspace),
                     executable=None,
                     run=False,
+                    plan=False,
                     dry_run=True,
                     timeout=5,
                     run_id=None,
@@ -398,12 +400,23 @@ class PrepareEvidenceNonDestructiveTests(unittest.TestCase):
                 )
             )
 
-            execution = result.data["test_execution"]
-            self.assertNotIn("run_id", execution)
-            self.assertEqual(
-                workspace / "reports" / "test_execution_report.json",
-                Path(execution["json"]),
+            self.assertEqual(before, self._tree_hashes(workspace))
+            self.assertEqual("planned", result.outcome.state.value)
+            self.assertEqual(0, result.exit_code)
+            self.assertEqual([], result.artifacts)
+            self.assertEqual([], result.expected_artifacts)
+            self.assertEqual("plan", result.data["mode"])
+            self.assertTrue(
+                any(
+                    item["code"] == "deprecated_dry_run_alias"
+                    for item in result.diagnostics
+                )
             )
+            latest_run = json.loads(
+                (workspace / "reports" / "latest_run.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual("run-real", latest_run["data"]["run_id"])
+            self.assertFalse((workspace / "reports" / "test_execution_report.json").exists())
 
 
 if __name__ == "__main__":

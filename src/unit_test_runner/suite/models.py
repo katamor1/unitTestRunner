@@ -107,7 +107,7 @@ class SuiteRunEntryResult:
     failed_tests: int
     inconclusive_tests: int
     unresolved_review_count: int
-    report_path: Path
+    report_path: Path | None
     error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -115,7 +115,7 @@ class SuiteRunEntryResult:
             "entry_id": self.entry_id,
             "function": self.function_name,
             "workspace": _path_text(self.workspace),
-            "execution_status": self.execution_status,
+            "outcome": self.execution_status,
             "green_status": self.green_status,
             "executed": self.executed,
             "total_tests": self.total_tests,
@@ -123,8 +123,9 @@ class SuiteRunEntryResult:
             "failed_tests": self.failed_tests,
             "inconclusive_tests": self.inconclusive_tests,
             "unresolved_review_count": self.unresolved_review_count,
-            "report_path": _path_text(self.report_path),
         }
+        if self.report_path is not None:
+            payload["report_path"] = _path_text(self.report_path)
         if self.error:
             payload["error"] = self.error
         return payload
@@ -143,7 +144,7 @@ class SuiteRunReport:
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
-            "status": "suite_run_completed" if self.status == "completed" else "suite_run_failed",
+            "outcome": self.status,
             "suite_id": self.suite_id,
             "selector": self.selector,
             "policy": self.policy.to_dict(),

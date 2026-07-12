@@ -41,8 +41,8 @@ class CliExecutionOutcomeTests(unittest.TestCase):
             ("failed", True, "tests_failed", exit_codes.EXIT_TESTS_FAILED),
             ("timed_out", True, "tests_timed_out", exit_codes.EXIT_TESTS_TIMED_OUT),
             ("timeout", True, "tests_timed_out", exit_codes.EXIT_TESTS_TIMED_OUT),
-            ("blocked", False, "tests_blocked", exit_codes.EXIT_ENVIRONMENT_WARNING),
-            ("inconclusive", True, "tests_blocked", exit_codes.EXIT_ENVIRONMENT_WARNING),
+            ("blocked", False, "tests_blocked", exit_codes.EXIT_TESTS_BLOCKED),
+            ("inconclusive", True, "tests_blocked", exit_codes.EXIT_TESTS_INCONCLUSIVE),
             ("cancelled", True, "tests_cancelled", exit_codes.EXIT_TESTS_CANCELLED),
             ("planned", False, "evidence_prepared", exit_codes.EXIT_OK),
             ("not_run", False, "evidence_prepared", exit_codes.EXIT_OK),
@@ -70,16 +70,30 @@ class CliExecutionOutcomeTests(unittest.TestCase):
                 treat_placeholder_as_inconclusive=True,
             )
             for report_status, executed, expected_status, expected_exit in [
-                ("passed", True, "tests_passed", exit_codes.EXIT_OK),
-                ("failed", True, "tests_failed", exit_codes.EXIT_TESTS_FAILED),
-                ("timeout", True, "tests_timed_out", exit_codes.EXIT_TESTS_TIMED_OUT),
-                ("blocked", False, "tests_blocked", exit_codes.EXIT_ENVIRONMENT_WARNING),
-                ("inconclusive", True, "tests_blocked", exit_codes.EXIT_ENVIRONMENT_WARNING),
-                ("not_run", False, "evidence_prepared", exit_codes.EXIT_OK),
+                ("passed", True, "passed", exit_codes.EXIT_OK),
+                ("failed", True, "failed", exit_codes.EXIT_TESTS_FAILED),
+                ("timeout", True, "timed_out", exit_codes.EXIT_TESTS_TIMED_OUT),
+                ("blocked", False, "blocked", exit_codes.EXIT_TESTS_BLOCKED),
+                ("inconclusive", True, "inconclusive", exit_codes.EXIT_TESTS_INCONCLUSIVE),
+                ("not_run", False, "inconclusive", exit_codes.EXIT_TESTS_INCONCLUSIVE),
             ]:
-                report = SimpleNamespace(status=report_status, executed=executed)
+                total = 1 if executed else 0
+                report = SimpleNamespace(
+                    status=report_status,
+                    executed=executed,
+                    parsed_result=SimpleNamespace(
+                        total=total,
+                        passed=total if report_status == "passed" else 0,
+                        failed=total if report_status == "failed" else 0,
+                        inconclusive=total if report_status in {"inconclusive", "not_run"} else 0,
+                        crashed=0,
+                        not_run=total if report_status == "not_run" else 0,
+                    ),
+                    run_paths=None,
+                )
                 manifest = SimpleNamespace(
-                    summary=SimpleNamespace(test_execution_status=report_status)
+                    summary=SimpleNamespace(test_execution_status=report_status),
+                    evidence_paths=None,
                 )
                 with self.subTest(report_status=report_status):
                     with mock.patch(
@@ -89,7 +103,7 @@ class CliExecutionOutcomeTests(unittest.TestCase):
                         result = handle_run_tests(args)
                     self.assertEqual(expected_status, result.status)
                     self.assertEqual(expected_exit, result.exit_code)
-                    self.assertEqual(report_status, result.data["test_execution"]["status"])
+                    self.assertEqual(expected_status, result.data["test_execution"]["status"])
 
     @unittest.skipUnless(
         any(shutil.which(name) for name in ("gcc", "clang", "cc")),
@@ -138,9 +152,9 @@ class CliExecutionOutcomeTests(unittest.TestCase):
             payload = json.loads(executed.stdout)
 
             self.assertNotEqual(0, executed.returncode)
-            self.assertEqual(executed.returncode, payload["exit_code"])
-            self.assertIn(payload["status"], {"tests_failed", "tests_blocked"})
-            self.assertNotEqual("passed", payload["data"]["test_execution"]["status"])
+            self.assertEqual(executed.returncode, payload["data"]["exit_code"])
+            self.assertIn(payload["data"]["outcome"], {"failed", "blocked", "inconclusive"})
+            self.assertNotEqual("passed", payload["data"]["details"]["test_execution"]["status"])
 
 
 if __name__ == "__main__":

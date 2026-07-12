@@ -64,14 +64,21 @@ def valid_test_spec() -> dict:
 def valid_cli_result() -> dict:
     payload = valid_test_spec()
     payload["artifact_kind"] = "cli_result"
+    payload["subject"] = {"invocation_id": "inv-contract-001"}
     payload["data"] = {
+        "invocation_id": "inv-contract-001",
         "command": "run-tests",
         "lifecycle": "finished",
+        "outcome_kind": "test_run",
         "outcome": "passed",
+        "green": True,
         "exit_code": 0,
         "message": "Tests passed.",
+        "diagnostics": [],
         "artifacts": [],
+        "expected_artifacts": [],
         "errors": [],
+        "details": {},
     }
     return payload
 
@@ -958,6 +965,12 @@ class ContractValidationTests(unittest.TestCase):
             ("invalid_reference", "$.data.results[0].entry_id"),
             {(item.code, item.json_path) for item in violations},
         )
+
+    def test_suite_contract_allows_missing_report_path_when_no_run_was_published(self):
+        payload = valid_suite_run_report()
+        payload["data"]["results"][0].pop("report_path")
+
+        self.assertEqual((), validate_payload(ArtifactKind.SUITE_RUN_REPORT, payload))
 
     def test_suite_manifest_allows_provenance_roots_to_be_absolute(self):
         payload = artifact_payload(

@@ -10,7 +10,9 @@ SRC_ROOT = REPO_ROOT / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
 from unit_test_runner.cli.main import _write_stream
+from unit_test_runner.cli.outcomes import DomainOutcome
 from unit_test_runner.cli.result import CLIResult
+from unit_test_runner.contracts import RunOutcome
 
 
 class CliOutputEncodingTests(unittest.TestCase):
@@ -21,13 +23,17 @@ class CliOutputEncodingTests(unittest.TestCase):
             command="build-probe",
             message="compiler output contained replacement character",
             data={"log_excerpt": "invalid byte was decoded as \ufffd"},
+            outcome=DomainOutcome("command", RunOutcome.ERROR, None),
         )
 
         text = result.to_json()
 
         text.encode("cp932")
         self.assertIn("\\ufffd", text)
-        self.assertEqual("invalid byte was decoded as \ufffd", json.loads(text)["data"]["log_excerpt"])
+        self.assertEqual(
+            "invalid byte was decoded as \ufffd",
+            json.loads(text)["data"]["details"]["log_excerpt"],
+        )
 
     def test_stream_writer_falls_back_when_console_encoding_rejects_text(self):
         buffer = io.BytesIO()
