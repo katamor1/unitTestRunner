@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,7 +23,11 @@ def create_run_paths(workspace: Path, run_id: str | None = None) -> RunPaths:
     selected_id = run_id or _new_run_id()
     paths = validate_run_paths_available(workspace, selected_id)
     paths.root.parent.mkdir(parents=True, exist_ok=True)
-    paths.root.mkdir(exist_ok=False)
+    paths = validate_run_paths_available(workspace, selected_id)
+    try:
+        paths.root.mkdir(exist_ok=False)
+    except FileExistsError as error:
+        raise FileExistsError(f"Run ID already exists: {selected_id!r}") from error
     logs = paths.root / "logs"
     logs.mkdir()
     return paths
@@ -31,8 +36,19 @@ def create_run_paths(workspace: Path, run_id: str | None = None) -> RunPaths:
 def validate_run_paths_available(workspace: Path, run_id: str) -> RunPaths:
     workspace = Path(workspace).resolve()
     _validate_id(run_id)
-    root = workspace / "runs" / run_id
-    if root.exists():
+    runs_root = workspace / "runs"
+    if os.path.lexists(runs_root):
+        if _is_link(runs_root):
+            raise ValueError(f"Run paths parent must not be a symlink: {runs_root}")
+        if not runs_root.is_dir():
+            raise NotADirectoryError(f"Run paths parent is not a directory: {runs_root}")
+    resolved_runs_root = runs_root.resolve(strict=False)
+    try:
+        resolved_runs_root.relative_to(workspace)
+    except ValueError as error:
+        raise ValueError(f"Run paths parent escapes workspace: {resolved_runs_root}") from error
+    root = resolved_runs_root / run_id
+    if os.path.lexists(root):
         raise FileExistsError(f"Run ID already exists: {run_id!r}")
     logs = root / "logs"
     return RunPaths(
@@ -45,6 +61,11 @@ def validate_run_paths_available(workspace: Path, run_id: str) -> RunPaths:
         stderr_log=logs / "stderr.log",
         combined_log=logs / "test_execution.log",
     )
+
+
+def _is_link(path: Path) -> bool:
+    is_junction = getattr(os.path, "isjunction", lambda _path: False)
+    return path.is_symlink() or bool(is_junction(path))
 
 
 def _new_run_id() -> str:
