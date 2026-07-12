@@ -9,7 +9,7 @@ from unit_test_runner.cli.artifacts import ProducedArtifact
 from unit_test_runner.contracts import ContractMode
 
 from .models import CurrentArtifactContext, TestSpec
-from .repository import load_test_spec, save_test_spec_snapshot
+from .repository import TestSpecSnapshot, load_test_spec, save_test_spec_snapshot
 
 
 class InvalidTestSpecPatchError(ValueError):
@@ -107,6 +107,22 @@ def update_test_spec(
     expected_revision: int,
     current_context: CurrentArtifactContext,
 ) -> tuple[TestSpec, ProducedArtifact]:
+    saved, artifact = update_test_spec_snapshot(
+        path,
+        patch,
+        expected_revision=expected_revision,
+        current_context=current_context,
+    )
+    return saved.spec, artifact
+
+
+def update_test_spec_snapshot(
+    path: Path,
+    patch: Mapping[str, Any],
+    *,
+    expected_revision: int,
+    current_context: CurrentArtifactContext,
+) -> tuple[TestSpecSnapshot, ProducedArtifact]:
     current = load_test_spec(path, mode=ContractMode.STRICT)
     candidate = apply_test_spec_patch(current, patch)
     saved, artifact = save_test_spec_snapshot(
@@ -115,7 +131,7 @@ def update_test_spec(
         expected_revision=expected_revision,
         current_context=current_context,
     )
-    return saved.spec, artifact
+    return saved, artifact
 
 
 def _parse_pointer(value: str) -> tuple[str, ...]:

@@ -44,28 +44,72 @@ def create_workspace(root: Path) -> Path:
     source.write_text("int Control_Update(int mode) { return mode; }\n", encoding="utf-8")
     reports = root / "reports"
     reports.mkdir()
+    source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
+    source_identity = {"path": "src/control.c", "sha256": source_sha256}
+    function_identity = {"name": "Control_Update", "status": "fixture"}
+    position = {"line": 1, "column": 1, "offset": 0}
+    source_range = {"start": dict(position), "end": dict(position)}
+    type_info = {
+        "raw": "int",
+        "normalized": "int",
+        "base_type": "int",
+        "qualifiers": [],
+        "storage_class": None,
+        "pointer_level": 0,
+        "is_const_pointer": None,
+        "is_struct": False,
+        "is_union": False,
+        "is_enum": False,
+        "is_typedef_like": False,
+        "is_function_pointer": False,
+        "is_array": False,
+        "array_dimensions": [],
+        "confidence": "high",
+    }
     signature_payload = {
         "schema_version": "0.1",
-        "source": {"path": "src/control.c", "sha256": hashlib.sha256(source.read_bytes()).hexdigest()},
+        "source": source_identity,
         "function": {
             "name": "Control_Update",
+            "status": "parsed",
+            "style": "ansi",
+            "confidence": "high",
+            "signature_range": source_range,
+            "header_text_raw": "int Control_Update(int mode)",
             "header_text_normalized": "int Control_Update(int mode)",
+            "storage_class": None,
+            "calling_convention": None,
+            "return_type": type_info,
             "parameters": [],
+            "takes_no_parameters": True,
         },
         "warnings": [],
     }
-    source_identity = dict(signature_payload["source"])
-    function_identity = {"name": "Control_Update", "status": "fixture"}
     provenance_payloads = {
         "source_digest": (
             "source_digest.json",
             {
                 "schema_version": "0.1",
-                "source": source_identity,
-                "masking": {},
-                "preprocessor": {},
+                "source": {
+                    "path": "src/control.c",
+                    "encoding": "utf-8",
+                    "newline": "LF",
+                    "sha256": source_sha256,
+                    "line_count": 1,
+                    "warnings": [],
+                },
+                "masking": {
+                    "masked_source_path": None,
+                    "masked_ranges": [],
+                },
+                "preprocessor": {
+                    "includes": [],
+                    "macros": [],
+                    "directives": [],
+                },
                 "token_summary": {},
                 "warnings": [],
+                "tokens": [],
             },
         ),
         "function_location": (
@@ -73,30 +117,86 @@ def create_workspace(root: Path) -> Path:
             {
                 "schema_version": "0.1",
                 "source": {"path": "src/control.c"},
-                "function": {**function_identity, "candidates": []},
+                "function": {
+                    "name": "Control_Update",
+                    "status": "not_found",
+                    "selected_candidate": None,
+                    "candidates": [],
+                    "candidate_count": 0,
+                },
                 "warnings": [],
             },
         ),
         "function_signature": ("function_signature.json", signature_payload),
         "global_access": (
             "global_access.json",
-            {"schema_version": "0.1", "source": source_identity, "function": function_identity, "global_accesses": [], "warnings": []},
+            {
+                "schema_version": "0.1",
+                "source": source_identity,
+                "function": function_identity,
+                "file_scope_declarations": [],
+                "local_declarations": [],
+                "parameter_accesses": [],
+                "global_accesses": [],
+                "unresolved_identifiers": [],
+                "side_effect_candidates": [],
+                "warnings": [],
+            },
         ),
         "call_report": (
             "call_report.json",
-            {"schema_version": "0.1", "source": source_identity, "function": function_identity, "calls": [], "warnings": []},
+            {
+                "schema_version": "0.1",
+                "source": source_identity,
+                "function": function_identity,
+                "calls": [],
+                "stub_candidates": [],
+                "side_effect_candidates": [],
+                "unresolved_calls": [],
+                "warnings": [],
+            },
         ),
         "dependency_policy": (
             "dependency_policy.json",
-            {"schema_version": "0.1", "source": {"path": "src/control.c"}, "function": function_identity, "dependencies": [], "warnings": []},
+            {
+                "schema_version": "0.1",
+                "source": {"path": "src/control.c"},
+                "function": function_identity,
+                "dependencies": [],
+                "external_objects": [],
+                "warnings": [],
+            },
         ),
         "coverage_design": (
             "coverage_design.json",
-            {"schema_version": "0.1", "source": source_identity, "function": function_identity, "coverage_items": [], "warnings": []},
+            {
+                "schema_version": "0.1",
+                "source": source_identity,
+                "function": function_identity,
+                "branches": [],
+                "switches": [],
+                "loops": [],
+                "ternaries": [],
+                "return_paths": [],
+                "condition_expressions": [],
+                "coverage_items": [],
+                "warnings": [],
+            },
         ),
         "boundary_candidates": (
             "boundary_equivalence_candidates.json",
-            {"schema_version": "0.1", "source": source_identity, "function": function_identity, "input_candidates": [], "warnings": []},
+            {
+                "schema_version": "0.1",
+                "source": source_identity,
+                "function": function_identity,
+                "input_candidates": [],
+                "state_candidates": [],
+                "stub_return_candidates": [],
+                "equivalence_classes": [],
+                "boundary_groups": [],
+                "coverage_links": [],
+                "warnings": [],
+            },
         ),
     }
     references = []
@@ -166,10 +266,27 @@ class TestSpecCliTests(unittest.TestCase):
             update_payload = json.loads(update_result.stdout)
             self.assertEqual("passed", update_payload["data"]["outcome"])
             self.assertEqual(2, update_payload["data"]["details"]["revision"])
-            artifact = update_payload["data"]["artifacts"][0]
+            self.assertTrue(
+                update_payload["data"]["details"]["views_written_by_operation"]
+            )
+            artifacts = update_payload["data"]["artifacts"]
+            self.assertEqual(
+                {"test_spec", "test_spec_markdown", "test_spec_csv"},
+                {item["artifact_kind"] for item in artifacts},
+            )
+            artifact = next(
+                item for item in artifacts if item["artifact_kind"] == "test_spec"
+            )
             self.assertEqual("test_spec", artifact["artifact_kind"])
             self.assertEqual("reports/test_spec.json", artifact["path"])
             self.assertEqual(hashlib.sha256((workspace / artifact["path"]).read_bytes()).hexdigest(), artifact["sha256"])
+            for view_artifact in artifacts:
+                self.assertEqual(
+                    hashlib.sha256(
+                        (workspace / view_artifact["path"]).read_bytes()
+                    ).hexdigest(),
+                    view_artifact["sha256"],
+                )
 
     def test_stale_revision_and_malformed_patch_are_explicit_nonzero_errors_without_partial_write(self):
         with tempfile.TemporaryDirectory() as temp_dir:

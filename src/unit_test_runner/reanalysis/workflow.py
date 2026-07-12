@@ -11,10 +11,10 @@ from unit_test_runner.test_spec import (
     artifact_reference,
     build_current_artifact_context,
     create_test_spec_from_design,
-    export_test_spec_views,
+    export_test_spec_snapshot_views,
     load_test_spec,
     load_legacy_test_case_design_view,
-    save_test_spec,
+    save_test_spec_snapshot,
     TestSpecContractError,
     test_spec_consumer_payload,
     validate_test_spec,
@@ -147,6 +147,8 @@ def reanalyze_function_workflow(
     )
     canonical_path = out_dir / "reports" / "test_spec.json"
     persisted_spec = load_test_spec(canonical_path, mode=ContractMode.STRICT) if canonical_path.exists() else previous_spec
+    saved_result_snapshot = None
+    saved_view_export = None
     if policy.overwrite_test_case_design:
         if not policy.generate_updated_test_case_design or updated_design is None:
             raise ValueError("--overwrite-test-case-design requires --generate-updated-test-case-design")
@@ -166,15 +168,16 @@ def reanalyze_function_workflow(
         violations = validate_test_spec(candidate, current_context=context)
         if violations:
             raise TestSpecContractError(violations)
-        save_test_spec(
+        saved_snapshot, _test_spec_artifact = save_test_spec_snapshot(
             canonical_path,
             candidate,
             expected_revision=(persisted_spec.revision if canonical_path.exists() else None),
             current_context=context,
         )
-        persisted_spec = load_test_spec(canonical_path, mode=ContractMode.STRICT)
-        export_test_spec_views(
-            persisted_spec,
+        saved_result_snapshot = saved_snapshot
+        persisted_spec = saved_snapshot.spec
+        saved_view_export = export_test_spec_snapshot_views(
+            saved_snapshot,
             canonical_path.parent,
             canonical_path=canonical_path,
         )
@@ -192,6 +195,16 @@ def reanalyze_function_workflow(
         "previous_test_case_design": previous_test_case_design_path,
         "test_spec_path": canonical_path,
         "test_spec_revision": result_spec.revision,
+        "test_spec_sha256": (
+            saved_result_snapshot.sha256
+            if saved_result_snapshot is not None
+            else None
+        ),
+        "test_spec_views_written_by_operation": (
+            saved_view_export.written
+            if saved_view_export is not None
+            else False
+        ),
     }
 
 

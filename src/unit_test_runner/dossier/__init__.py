@@ -11,7 +11,9 @@ from .workflow import (
     generate_build_workspace_from_workspace,
     generate_harness_skeleton_from_reports,
     generate_test_design_from_dossier,
+    generate_test_design_from_dossier_result,
     generate_test_design_from_reports,
+    generate_test_design_from_reports_result,
     write_test_case_design,
 )
 
@@ -22,7 +24,9 @@ __all__ = [
     "generate_build_workspace_from_workspace",
     "generate_harness_skeleton_from_reports",
     "generate_test_design_from_dossier",
+    "generate_test_design_from_dossier_result",
     "generate_test_design_from_reports",
+    "generate_test_design_from_reports_result",
     "prepare_review_from_dossier",
     "write_test_case_design",
 ]

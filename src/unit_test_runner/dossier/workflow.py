@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -38,15 +39,25 @@ from ..test_spec import (
     bind_test_spec_inputs,
     build_current_artifact_context,
     create_test_spec_from_design,
+    export_test_spec_snapshot_views,
     export_test_spec_views,
     load_test_spec,
     load_legacy_test_case_design_view,
-    save_test_spec,
+    save_test_spec_snapshot,
     test_spec_consumer_payload,
     validate_test_spec,
 )
 from ..vc6 import select_project_context
 from ..test_spec.path_safety import assert_safe_canonical_test_spec_path
+
+
+@dataclass(frozen=True)
+class TestSpecDesignResult:
+    output: Path | dict[str, Path]
+    saved_snapshot: Any | None = None
+    canonical_artifact: Any | None = None
+    view_export: Any | None = None
+    produced_view_paths: tuple[Path, ...] = ()
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -301,15 +312,15 @@ def analyze_function_workflow(
             revision=existing_spec.revision if existing_spec is not None else 1,
         )
         context = build_current_artifact_context(out_dir, test_spec)
-        save_test_spec(
+        saved_snapshot, _test_spec_artifact = save_test_spec_snapshot(
             canonical_test_spec_path,
             test_spec,
             expected_revision=existing_spec.revision if existing_spec is not None else None,
             current_context=context,
         )
-        test_spec = load_test_spec(canonical_test_spec_path, mode=ContractMode.STRICT)
-        view_paths = export_test_spec_views(
-            test_spec,
+        test_spec = saved_snapshot.spec
+        view_paths = export_test_spec_snapshot_views(
+            saved_snapshot,
             canonical_test_spec_path.parent,
             canonical_path=canonical_test_spec_path,
         )
@@ -398,6 +409,9 @@ def analyze_function_workflow(
             "markdown": str(test_case_design_paths["markdown"]),
             "csv": str(test_case_design_paths["csv"]),
             "status": test_case_design.status,
+            "saved_revision": test_spec.revision,
+            "saved_sha256": saved_snapshot.sha256,
+            "views_written_by_operation": view_paths.written,
         }
     if harness_skeleton is not None:
         dossier["harness_skeleton"] = {
@@ -639,6 +653,18 @@ def generate_build_workspace_from_workspace(
 
 
 def generate_test_design_from_dossier(dossier_path: Path | str, output_format: str = "csv", out: Path | str | None = None) -> Path | dict[str, Path]:
+    return generate_test_design_from_dossier_result(
+        dossier_path,
+        output_format,
+        out,
+    ).output
+
+
+def generate_test_design_from_dossier_result(
+    dossier_path: Path | str,
+    output_format: str = "csv",
+    out: Path | str | None = None,
+) -> TestSpecDesignResult:
     dossier_path = Path(dossier_path)
     dossier = json.loads(dossier_path.read_text(encoding="utf-8"))
     canonical = _dossier_artifact_path(dossier, dossier_path, "test_spec")
@@ -646,7 +672,12 @@ def generate_test_design_from_dossier(dossier_path: Path | str, output_format: s
         raise ValueError("Dossier has no canonical reports/test_spec.json; regenerate the design phase first.")
     load_test_spec_for_consumer(canonical)
     spec = load_test_spec(canonical, mode=ContractMode.STRICT)
-    return _export_test_spec_selection(spec, canonical, output_format, out)
+    return _export_test_spec_selection_result(
+        spec,
+        canonical,
+        output_format,
+        out,
+    )
 
 
 def generate_test_design_from_reports(
@@ -658,6 +689,26 @@ def generate_test_design_from_reports(
     output_format: str = "csv",
     out: Path | str | None = None,
 ) -> Path | dict[str, Path]:
+    return generate_test_design_from_reports_result(
+        function_signature_path,
+        global_access_path,
+        call_report_path,
+        coverage_design_path,
+        boundary_candidates_path,
+        output_format,
+        out,
+    ).output
+
+
+def generate_test_design_from_reports_result(
+    function_signature_path: Path | str,
+    global_access_path: Path | str,
+    call_report_path: Path | str,
+    coverage_design_path: Path | str,
+    boundary_candidates_path: Path | str,
+    output_format: str = "csv",
+    out: Path | str | None = None,
+) -> TestSpecDesignResult:
     paths = [Path(item) for item in (function_signature_path, global_access_path, call_report_path, coverage_design_path, boundary_candidates_path)]
     report = generate_test_case_design_from_payloads(*[_read_json(path) for path in paths])
     reports = paths[0].parent.resolve()
@@ -695,32 +746,63 @@ def generate_test_design_from_reports(
         revision=existing.revision if existing is not None else 1,
     )
     context = build_current_artifact_context(workspace, spec)
-    save_test_spec(
+    saved_snapshot, test_spec_artifact = save_test_spec_snapshot(
         canonical,
         spec,
         expected_revision=existing.revision if existing is not None else None,
         current_context=context,
     )
-    saved = load_test_spec(canonical, mode=ContractMode.STRICT)
-    return _export_test_spec_selection(saved, canonical, output_format, out)
+    return _export_test_spec_selection_result(
+        saved_snapshot.spec,
+        canonical,
+        output_format,
+        out,
+        saved_snapshot=saved_snapshot,
+        canonical_artifact=test_spec_artifact,
+    )
 
 
-def _export_test_spec_selection(
+def _export_test_spec_selection_result(
     spec,
     canonical: Path,
     output_format: str,
     out: Path | str | None,
-) -> Path | dict[str, Path]:
+    *,
+    saved_snapshot=None,
+    canonical_artifact=None,
+) -> TestSpecDesignResult:
     canonical = canonical.resolve()
     if output_format == "json":
         if out is not None and Path(out).resolve() != canonical:
             raise ValueError("JSON output is fixed at the sole editable reports/test_spec.json contract.")
-        return canonical
+        return TestSpecDesignResult(
+            output=canonical,
+            saved_snapshot=saved_snapshot,
+            canonical_artifact=canonical_artifact,
+        )
     requested = Path(out) if out is not None else None
     if output_format == "all":
         target_dir = requested or canonical.parent
-        views = export_test_spec_views(spec, target_dir, canonical_path=canonical)
-        return {"json": canonical, **views}
+        views = (
+            export_test_spec_snapshot_views(
+                saved_snapshot,
+                target_dir,
+                canonical_path=canonical,
+            )
+            if saved_snapshot is not None
+            else export_test_spec_views(spec, target_dir, canonical_path=canonical)
+        )
+        return TestSpecDesignResult(
+            output={"json": canonical, **views},
+            saved_snapshot=saved_snapshot,
+            canonical_artifact=canonical_artifact,
+            view_export=views,
+            produced_view_paths=(
+                (views["markdown"], views["csv"])
+                if views.written
+                else ()
+            ),
+        )
     if output_format not in {"md", "csv"}:
         raise ValueError(f"Unsupported test design format: {output_format}")
     target_dir = (
@@ -728,13 +810,33 @@ def _export_test_spec_selection(
         if requested is not None and requested.suffix
         else requested or canonical.parent
     )
-    views = export_test_spec_views(spec, target_dir, canonical_path=canonical)
+    views = (
+        export_test_spec_snapshot_views(
+            saved_snapshot,
+            target_dir,
+            canonical_path=canonical,
+        )
+        if saved_snapshot is not None
+        else export_test_spec_views(spec, target_dir, canonical_path=canonical)
+    )
     source_view = views["markdown" if output_format == "md" else "csv"]
     if requested is not None and requested.suffix and requested.resolve() != source_view.resolve():
         requested.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_view, requested)
-        return requested
-    return source_view
+        return TestSpecDesignResult(
+            output=requested,
+            saved_snapshot=saved_snapshot,
+            canonical_artifact=canonical_artifact,
+            view_export=views,
+            produced_view_paths=(requested,) if views.written else (),
+        )
+    return TestSpecDesignResult(
+        output=source_view,
+        saved_snapshot=saved_snapshot,
+        canonical_artifact=canonical_artifact,
+        view_export=views,
+        produced_view_paths=(source_view,) if views.written else (),
+    )
 
 
 def _dossier_artifact_path(dossier: dict[str, Any], dossier_path: Path, artifact_kind: str) -> Path | None:

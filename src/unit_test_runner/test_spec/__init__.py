@@ -1,4 +1,9 @@
-from .exporters import GENERATED_VIEW_NOTICE, export_test_spec_views
+from .exporters import (
+    GENERATED_VIEW_NOTICE,
+    TestSpecViewExport,
+    export_test_spec_snapshot_views,
+    export_test_spec_views,
+)
 from .models import (
     ArtifactReference,
     CurrentArtifactContext,
@@ -17,7 +22,12 @@ from .repository import (
     save_test_spec,
     save_test_spec_snapshot,
 )
-from .patch import InvalidTestSpecPatchError, apply_test_spec_patch, update_test_spec
+from .patch import (
+    InvalidTestSpecPatchError,
+    apply_test_spec_patch,
+    update_test_spec,
+    update_test_spec_snapshot,
+)
 from .identity import (
     artifact_reference,
     bind_test_spec_inputs,
@@ -42,6 +52,7 @@ __all__ = [
     "TestSpec",
     "TestSpecContractError",
     "TestSpecSnapshot",
+    "TestSpecViewExport",
     "canonical_json_bytes",
     "create_test_spec_from_design",
     "apply_test_spec_patch",
@@ -49,6 +60,7 @@ __all__ = [
     "assert_safe_legacy_alias_paths",
     "bind_test_spec_inputs",
     "build_current_artifact_context",
+    "export_test_spec_snapshot_views",
     "export_test_spec_views",
     "load_test_spec",
     "load_test_spec_snapshot",
@@ -59,5 +71,6 @@ __all__ = [
     "stable_function_id",
     "test_spec_consumer_payload",
     "update_test_spec",
+    "update_test_spec_snapshot",
     "validate_test_spec",
 ]

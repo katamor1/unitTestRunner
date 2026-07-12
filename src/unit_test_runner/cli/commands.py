@@ -45,8 +45,8 @@ from unit_test_runner.dossier import (
     generate_build_workspace_from_reports,
     generate_build_workspace_from_workspace,
     generate_harness_skeleton_from_reports,
-    generate_test_design_from_dossier,
-    generate_test_design_from_reports,
+    generate_test_design_from_dossier_result,
+    generate_test_design_from_reports_result,
     prepare_review_from_dossier,
 )
 from unit_test_runner.reports.dsw_markdown import render_dsw_discovery_markdown
@@ -57,9 +57,10 @@ from unit_test_runner.vc6.source_membership import map_source_membership
 from unit_test_runner.test_spec import (
     TestSpecContractError,
     build_current_artifact_context,
+    export_test_spec_snapshot_views,
     load_test_spec,
     load_test_spec_snapshot,
-    update_test_spec,
+    update_test_spec_snapshot,
     validate_test_spec,
 )
 from unit_test_runner.contracts import ContractMode
@@ -960,7 +961,11 @@ def handle_generate_test_design(args: argparse.Namespace) -> CLIResult:
     out = Path(args.out) if args.out else None
     if args.dossier:
         dossier = _existing_file(args.dossier, "dossier", args.command)
-        result = generate_test_design_from_dossier(dossier, args.format, out)
+        design_result = generate_test_design_from_dossier_result(
+            dossier,
+            args.format,
+            out,
+        )
     else:
         missing = [
             label
@@ -975,7 +980,7 @@ def handle_generate_test_design(args: argparse.Namespace) -> CLIResult:
         ]
         if missing:
             raise CLIError("generate-test-design requires --dossier or all explicit report inputs: " + ", ".join(missing), EXIT_INPUT_ERROR, args.command)
-        result = generate_test_design_from_reports(
+        design_result = generate_test_design_from_reports_result(
             _existing_file(args.function_signature, "function-signature", args.command),
             _existing_file(args.global_access, "global-access", args.command),
             _existing_file(args.call_report, "call-report", args.command),
@@ -984,30 +989,47 @@ def handle_generate_test_design(args: argparse.Namespace) -> CLIResult:
             args.format,
             out,
         )
+    result = design_result.output
     if isinstance(result, dict):
         design_value: str | dict[str, str] = {key: str(value) for key, value in result.items()}
         resolved_outputs = [Path(value).resolve() for value in result.values()]
         artifact_root = Path(os.path.commonpath([str(path) for path in resolved_outputs])).resolve()
         if artifact_root.is_file() or artifact_root.suffix:
             artifact_root = artifact_root.parent
-        design_outputs = [
-            (
-                Path(value),
-                None if Path(value).suffix.lower() == ".json" else ArtifactKind.TEST_SPEC.value,
-            )
-            for key, value in result.items()
-            if not (args.dossier and key == "json")
-        ]
     else:
         design_value = str(result)
         artifact_root = Path(result).resolve().parent
-        design_outputs = [
-            (
-                Path(result),
-                None if Path(result).suffix.lower() == ".json" else ArtifactKind.TEST_SPEC.value,
-            )
-        ]
+    if design_result.canonical_artifact is not None:
+        artifact_root = Path(args.function_signature).resolve().parent.parent
+    artifacts = (
+        [design_result.canonical_artifact]
+        if design_result.canonical_artifact is not None
+        else []
+    )
+    artifacts.extend(
+        build_produced_artifact(
+            artifact_root,
+            path,
+            kind=(
+                "test_spec_markdown"
+                if path.suffix.lower() == ".md"
+                else "test_spec_csv"
+            ),
+        )
+        for path in design_result.produced_view_paths
+    )
     payload = {"test_spec": design_value}
+    if design_result.saved_snapshot is not None:
+        payload.update(
+            {
+                "saved_revision": design_result.saved_snapshot.spec.revision,
+                "saved_sha256": design_result.saved_snapshot.sha256,
+                "views_written_by_operation": bool(
+                    design_result.view_export is not None
+                    and design_result.view_export.written
+                ),
+            }
+        )
     return CLIResult(
         status="test_spec_generated",
         exit_code=EXIT_OK,
@@ -1015,7 +1037,7 @@ def handle_generate_test_design(args: argparse.Namespace) -> CLIResult:
         message="Test design generated.",
         data=payload,
         legacy_payload=payload,
-        artifacts=_artifacts_from_explicit_outputs(artifact_root, design_outputs),
+        artifacts=artifacts,
         outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
@@ -1058,11 +1080,17 @@ def handle_update_test_spec(args: argparse.Namespace) -> CLIResult:
         current = load_test_spec(path, mode=ContractMode.STRICT)
         context = build_current_artifact_context(workspace, current)
         patch = _read_json(patch_path)
-        updated, artifact = update_test_spec(
+        updated_snapshot, artifact = update_test_spec_snapshot(
             path,
             patch,
             expected_revision=args.expected_revision,
             current_context=context,
+        )
+        updated = updated_snapshot.spec
+        view_export = export_test_spec_snapshot_views(
+            updated_snapshot,
+            path.parent,
+            canonical_path=path,
         )
     except (OSError, ValueError, json.JSONDecodeError) as error:
         raise CLIError(str(error), EXIT_INPUT_ERROR, args.command) from error
@@ -1077,9 +1105,26 @@ def handle_update_test_spec(args: argparse.Namespace) -> CLIResult:
             "spec_id": updated.spec_id,
             "revision": updated.revision,
             "sha256": artifact.sha256,
+            "views_written_by_operation": view_export.written,
         },
         outcome=DomainOutcome("command", RunOutcome.PASSED, None),
-        artifacts=[artifact],
+        artifacts=[artifact]
+        + (
+            [
+                build_produced_artifact(
+                    workspace,
+                    view_export["markdown"],
+                    kind="test_spec_markdown",
+                ),
+                build_produced_artifact(
+                    workspace,
+                    view_export["csv"],
+                    kind="test_spec_csv",
+                ),
+            ]
+            if view_export.written
+            else []
+        ),
     )
 
 
