@@ -19,17 +19,24 @@ class RunPaths:
 
 
 def create_run_paths(workspace: Path, run_id: str | None = None) -> RunPaths:
-    workspace = Path(workspace).resolve()
     selected_id = run_id or _new_run_id()
-    _validate_id(selected_id)
-    runs_root = workspace / "runs"
-    runs_root.mkdir(parents=True, exist_ok=True)
-    root = runs_root / selected_id
-    root.mkdir(exist_ok=False)
-    logs = root / "logs"
+    paths = validate_run_paths_available(workspace, selected_id)
+    paths.root.parent.mkdir(parents=True, exist_ok=True)
+    paths.root.mkdir(exist_ok=False)
+    logs = paths.root / "logs"
     logs.mkdir()
+    return paths
+
+
+def validate_run_paths_available(workspace: Path, run_id: str) -> RunPaths:
+    workspace = Path(workspace).resolve()
+    _validate_id(run_id)
+    root = workspace / "runs" / run_id
+    if root.exists():
+        raise FileExistsError(f"Run ID already exists: {run_id!r}")
+    logs = root / "logs"
     return RunPaths(
-        run_id=selected_id,
+        run_id=run_id,
         root=root,
         execution_report=root / "test_execution_report.json",
         result_json=root / "test_result.json",

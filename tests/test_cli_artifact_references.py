@@ -1,9 +1,11 @@
 import hashlib
+import io
 import json
 import sys
 import tempfile
 import unittest
 from argparse import Namespace
+from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -25,6 +27,8 @@ from unit_test_runner.cli.commands import (
     handle_suite_run,
 )
 from unit_test_runner.cli.errors import CLIError
+from unit_test_runner.cli.exit_codes import EXIT_INPUT_ERROR
+from unit_test_runner.cli.main import main
 from unit_test_runner.cli.outcomes import DomainOutcome
 from unit_test_runner.cli.parser import ArgumentParseError, build_parser
 from unit_test_runner.cli.result import CLIResult
@@ -41,6 +45,16 @@ class CliArtifactReferenceTests(unittest.TestCase):
             for path in root.rglob("*")
             if path.is_file()
         }
+
+    def _tree_snapshot(self, root: Path) -> tuple[tuple[str, ...], dict[str, str]]:
+        directories = tuple(
+            sorted(
+                path.relative_to(root).as_posix()
+                for path in root.rglob("*")
+                if path.is_dir()
+            )
+        )
+        return directories, self._tree_hashes(root)
 
     def test_produced_file_uses_final_bytes_and_actual_json_contract_identity(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -484,6 +498,47 @@ class CliArtifactReferenceTests(unittest.TestCase):
                     handle_run_tests(args)
 
                 self.assertEqual(before, self._tree_hashes(workspace))
+
+    def test_run_plan_rejects_existing_run_id_as_input_without_any_mutation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir).resolve()
+            self._write_plan_workspace(workspace)
+            collision = workspace / "runs" / "run-collision"
+            collision.mkdir(parents=True)
+            (collision / "published.txt").write_text("keep\n", encoding="utf-8")
+            before = self._tree_snapshot(workspace)
+            stdout = io.StringIO()
+
+            with mock.patch(
+                "unit_test_runner.cli.commands.prepare_test_execution_evidence",
+                side_effect=AssertionError("plan must not prepare execution or evidence"),
+            ), mock.patch(
+                "unit_test_runner.execution.test_execution.run_test_executable",
+                side_effect=AssertionError("plan must not launch a process"),
+            ), mock.patch(
+                "unit_test_runner.execution.test_execution.write_test_execution_reports",
+                side_effect=AssertionError("plan must not write reports"),
+            ), redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "--json",
+                        "run-tests",
+                        "--workspace",
+                        str(workspace),
+                        "--plan",
+                        "--run-id",
+                        "run-collision",
+                        "--allow-placeholder-tests",
+                    ]
+                )
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(EXIT_INPUT_ERROR, exit_code)
+            self.assertEqual("command", payload["data"]["outcome_kind"])
+            self.assertEqual("error", payload["data"]["outcome"])
+            self.assertEqual(EXIT_INPUT_ERROR, payload["data"]["exit_code"])
+            self.assertIn("already exists", payload["data"]["errors"][0]["message"])
+            self.assertEqual(before, self._tree_snapshot(workspace))
 
     def test_run_plan_reports_valid_blockers_without_writes(self):
         for case, expected_code in (

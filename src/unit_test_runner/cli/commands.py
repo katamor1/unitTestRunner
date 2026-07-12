@@ -20,6 +20,7 @@ from unit_test_runner.dsw_parser import discover_dsw_workspaces, parse_dsw as pa
 from unit_test_runner.execution import (
     prepare_evidence_from_existing_run,
     prepare_test_execution_evidence,
+    validate_run_paths_available,
     validate_test_run_preflight,
 )
 from unit_test_runner.path_utils import normalize_relative
@@ -1324,26 +1325,26 @@ def _plan_test_run(
     expected: list[ExpectedArtifact] = []
     run_id = getattr(args, "run_id", None)
     if run_id:
-        run_root = workspace / "runs" / run_id
         try:
+            run_paths = validate_run_paths_available(workspace, run_id)
             expected = [
                 build_expected_artifact(
                     workspace,
-                    run_root / "test_execution_report.json",
+                    run_paths.execution_report,
                     kind=ArtifactKind.TEST_EXECUTION_REPORT.value,
                 ),
                 build_expected_artifact(
                     workspace,
-                    run_root / "test_result.json",
+                    run_paths.result_json,
                     kind=ArtifactKind.TEST_RESULT.value,
                 ),
                 build_expected_artifact(
                     workspace,
-                    run_root / "test_result.csv",
+                    run_paths.result_csv,
                     kind=ArtifactKind.TEST_RESULT.value,
                 ),
             ]
-        except ValueError as error:
+        except (OSError, ValueError) as error:
             raise CLIError(str(error), EXIT_INPUT_ERROR, args.command) from error
     diagnostics = list(blocker_diagnostics or [])
     if getattr(args, "dry_run", False):
