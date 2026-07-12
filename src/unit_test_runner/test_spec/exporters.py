@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 from pathlib import Path
 
+from unit_test_runner.contracts import ContractMode
+
 from .models import TestSpec
+from .repository import canonical_json_bytes, load_test_spec_snapshot
 
 
 GENERATED_VIEW_NOTICE = "generated view; edits are not imported"
@@ -18,21 +20,30 @@ def export_test_spec_views(
     canonical_path: Path | None = None,
 ) -> dict[str, Path]:
     out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
     canonical_path = canonical_path or out_dir / "test_spec.json"
     if not canonical_path.is_file():
         raise FileNotFoundError(
             "Canonical test_spec.json must be saved before generated views are exported."
         )
-    canonical_sha = hashlib.sha256(canonical_path.read_bytes()).hexdigest()
+    snapshot = load_test_spec_snapshot(
+        canonical_path,
+        mode=ContractMode.STRICT,
+    )
+    if canonical_json_bytes(spec) != canonical_json_bytes(snapshot.spec):
+        raise ValueError(
+            "Caller-supplied test spec does not match the canonical saved snapshot."
+        )
+    render_spec = snapshot.spec
+    canonical_sha = snapshot.sha256
+    out_dir.mkdir(parents=True, exist_ok=True)
     markdown = out_dir / "test_spec.md"
     csv_path = out_dir / "test_spec.csv"
     markdown.write_text(
-        _render_markdown(spec, canonical_sha),
+        _render_markdown(render_spec, canonical_sha),
         encoding="utf-8",
         newline="",
     )
-    _write_csv(csv_path, spec, canonical_sha)
+    _write_csv(csv_path, render_spec, canonical_sha)
     return {"markdown": markdown, "csv": csv_path}
 
 

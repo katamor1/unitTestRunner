@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-from unit_test_runner.cli.artifacts import ProducedArtifact, build_produced_artifact
-from unit_test_runner.contracts import ArtifactKind, ContractMode, ContractViolation, load_artifact
+from unit_test_runner.cli.artifacts import ProducedArtifact
+from unit_test_runner.contracts import (
+    ArtifactKind,
+    ContractMode,
+    ContractViolation,
+    migrate_payload,
+    validate_payload,
+)
+from unit_test_runner.contracts.registry import get_contract
 
 from .migration import migrate_legacy_test_case_design
 from .models import (
@@ -23,15 +32,54 @@ class StaleRevisionError(ValueError):
     pass
 
 
+@dataclass(frozen=True)
+class TestSpecSnapshot:
+    spec: TestSpec
+    raw_bytes: bytes
+    sha256: str
+
+
 def load_test_spec(
     path: Path,
     *,
     mode: ContractMode,
     current_context: CurrentArtifactContext | None = None,
 ) -> TestSpec:
+    return load_test_spec_snapshot(
+        path,
+        mode=mode,
+        current_context=current_context,
+    ).spec
+
+
+def load_test_spec_snapshot(
+    path: Path,
+    *,
+    mode: ContractMode,
+    current_context: CurrentArtifactContext | None = None,
+) -> TestSpecSnapshot:
     path = Path(path)
     try:
-        decoded = json.loads(path.read_text(encoding="utf-8-sig"))
+        raw_bytes = path.read_bytes()
+    except OSError as error:
+        raise TestSpecContractError(
+            (ContractViolation("parse_error", "$", str(error)),)
+        ) from error
+    return _snapshot_from_bytes(
+        raw_bytes,
+        mode=mode,
+        current_context=current_context,
+    )
+
+
+def _snapshot_from_bytes(
+    raw_bytes: bytes,
+    *,
+    mode: ContractMode,
+    current_context: CurrentArtifactContext | None = None,
+) -> TestSpecSnapshot:
+    try:
+        decoded = json.loads(raw_bytes.decode("utf-8-sig"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise TestSpecContractError(
             (ContractViolation("parse_error", "$", str(error)),)
@@ -40,15 +88,51 @@ def load_test_spec(
         raise TestSpecContractError(
             (ContractViolation("schema_error", "$", "Artifact root must be an object."),)
         )
-    if decoded.get("artifact_kind") == ArtifactKind.TEST_SPEC.value:
-        loaded = load_artifact(
-            path,
-            expected_kind=ArtifactKind.TEST_SPEC,
-            mode=mode,
+    declared_kind = decoded.get("artifact_kind")
+    if declared_kind == ArtifactKind.TEST_SPEC.value:
+        contract = get_contract(ArtifactKind.TEST_SPEC)
+        source_version = str(decoded.get("schema_version") or "")
+        if source_version == contract.current_version:
+            payload = decoded
+        elif (
+            mode is ContractMode.COMPATIBLE
+            and source_version in contract.compatible_source_versions
+        ):
+            try:
+                payload = migrate_payload(
+                    ArtifactKind.TEST_SPEC,
+                    decoded,
+                    target_version=contract.current_version,
+                )
+            except (TypeError, ValueError) as error:
+                raise TestSpecContractError(
+                    (ContractViolation("migration_error", "$", str(error)),)
+                ) from error
+        else:
+            raise TestSpecContractError(
+                (
+                    ContractViolation(
+                        "unsupported_version",
+                        "$.schema_version",
+                        "test_spec requires schema version "
+                        f"{contract.current_version}; received "
+                        f"{source_version or '<missing>'}.",
+                    ),
+                )
+            )
+        contract_violations = validate_payload(ArtifactKind.TEST_SPEC, payload)
+        if contract_violations:
+            raise TestSpecContractError(contract_violations)
+    elif declared_kind is not None:
+        raise TestSpecContractError(
+            (
+                ContractViolation(
+                    "artifact_kind_mismatch",
+                    "$.artifact_kind",
+                    "Expected test_spec; received " + repr(declared_kind) + ".",
+                ),
+            )
         )
-        if loaded.violations:
-            raise TestSpecContractError(loaded.violations)
-        payload = loaded.payload
     else:
         if mode is ContractMode.STRICT:
             raise TestSpecContractError(
@@ -65,7 +149,11 @@ def load_test_spec(
     violations = validate_test_spec(spec, current_context=current_context)
     if violations:
         raise TestSpecContractError(violations)
-    return spec
+    return TestSpecSnapshot(
+        spec=spec,
+        raw_bytes=raw_bytes,
+        sha256=hashlib.sha256(raw_bytes).hexdigest(),
+    )
 
 
 def save_test_spec(
@@ -75,6 +163,22 @@ def save_test_spec(
     expected_revision: int | None,
     current_context: CurrentArtifactContext | None = None,
 ) -> ProducedArtifact:
+    _snapshot, artifact = save_test_spec_snapshot(
+        path,
+        spec,
+        expected_revision=expected_revision,
+        current_context=current_context,
+    )
+    return artifact
+
+
+def save_test_spec_snapshot(
+    path: Path,
+    spec: TestSpec,
+    *,
+    expected_revision: int | None,
+    current_context: CurrentArtifactContext | None = None,
+) -> tuple[TestSpecSnapshot, ProducedArtifact]:
     path = Path(path)
     if current_context is None:
         raise TestSpecContractError(
@@ -141,11 +245,19 @@ def save_test_spec(
                 temporary.unlink()
             except FileNotFoundError:
                 pass
-    return build_produced_artifact(
-        root,
-        path,
-        kind=ArtifactKind.TEST_SPEC.value,
-    )
+        snapshot = _snapshot_from_bytes(
+            final_bytes,
+            mode=ContractMode.STRICT,
+            current_context=current_context,
+        )
+        artifact = ProducedArtifact(
+            kind=ArtifactKind.TEST_SPEC.value,
+            path=path.resolve().relative_to(root).as_posix(),
+            exists=True,
+            sha256=snapshot.sha256,
+            schema_version=snapshot.spec.schema_version,
+        )
+    return snapshot, artifact
 
 
 def canonical_json_bytes(spec: TestSpec) -> bytes:

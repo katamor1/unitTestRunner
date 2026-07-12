@@ -9,7 +9,7 @@ from unit_test_runner.cli.artifacts import ProducedArtifact
 from unit_test_runner.contracts import ContractMode
 
 from .models import CurrentArtifactContext, TestSpec
-from .repository import load_test_spec, save_test_spec
+from .repository import load_test_spec, save_test_spec_snapshot
 
 
 class InvalidTestSpecPatchError(ValueError):
@@ -18,7 +18,6 @@ class InvalidTestSpecPatchError(ValueError):
 
 _EDITABLE_CASE_FIELDS = {
     "title",
-    "target_function",
     "purpose",
     "priority",
     "case_kind",
@@ -51,6 +50,7 @@ _FORBIDDEN_SEGMENTS = {
     "function",
 }
 _FIELD_SEGMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_ARRAY_INDEX_SEGMENT = re.compile(r"^[0-9]+$")
 
 
 def apply_test_spec_patch(
@@ -62,6 +62,7 @@ def apply_test_spec_patch(
     operations = patch["operations"]
     if not operations:
         raise InvalidTestSpecPatchError("Patch operations must not be empty.")
+    payload = spec.to_payload()
     normalized: list[tuple[str, tuple[str, ...], Any]] = []
     keys: list[tuple[str, tuple[str, ...]]] = []
     for index, operation in enumerate(operations):
@@ -81,6 +82,8 @@ def apply_test_spec_patch(
             raise InvalidTestSpecPatchError(
                 "Patch paths cannot edit identity, provenance, revision, version, or review authority."
             )
+        case = _find_case(payload["data"], case_id)
+        segments = _canonicalize_pointer(case, segments)
         key = (case_id, segments)
         if any(
             existing_case == case_id
@@ -91,7 +94,6 @@ def apply_test_spec_patch(
         keys.append(key)
         normalized.append((case_id, segments, copy.deepcopy(operation["value"])))
 
-    payload = spec.to_payload()
     for case_id, segments, value in normalized:
         case = _find_case(payload["data"], case_id)
         _replace_existing(case, segments, value)
@@ -107,13 +109,13 @@ def update_test_spec(
 ) -> tuple[TestSpec, ProducedArtifact]:
     current = load_test_spec(path, mode=ContractMode.STRICT)
     candidate = apply_test_spec_patch(current, patch)
-    artifact = save_test_spec(
+    saved, artifact = save_test_spec_snapshot(
         path,
         candidate,
         expected_revision=expected_revision,
         current_context=current_context,
     )
-    return load_test_spec(path, mode=ContractMode.STRICT), artifact
+    return saved.spec, artifact
 
 
 def _parse_pointer(value: str) -> tuple[str, ...]:
@@ -124,10 +126,44 @@ def _parse_pointer(value: str) -> tuple[str, ...]:
     for raw in raw_segments:
         if not raw or raw in {".", ".."} or "~" in raw:
             raise InvalidTestSpecPatchError("Patch path contains an escaping or malformed segment.")
-        if not raw.isdigit() and not _FIELD_SEGMENT.fullmatch(raw):
+        if not _ARRAY_INDEX_SEGMENT.fullmatch(raw) and not _FIELD_SEGMENT.fullmatch(raw):
             raise InvalidTestSpecPatchError(f"Invalid patch path segment: {raw}")
         segments.append(raw)
     return tuple(segments)
+
+
+def _canonicalize_pointer(
+    container: Any,
+    segments: tuple[str, ...],
+) -> tuple[str, ...]:
+    current = container
+    canonical: list[str] = []
+    for segment in segments:
+        if isinstance(current, dict):
+            if segment not in current:
+                raise InvalidTestSpecPatchError(
+                    f"Unknown patch path: /{'/'.join(segments)}"
+                )
+            canonical.append(segment)
+            current = current[segment]
+            continue
+        if isinstance(current, list):
+            if not _ARRAY_INDEX_SEGMENT.fullmatch(segment):
+                raise InvalidTestSpecPatchError(
+                    f"Patch path requires an ASCII array index: {segment}"
+                )
+            index = int(segment)
+            if index >= len(current):
+                raise InvalidTestSpecPatchError(
+                    f"Array index outside patch target: {segment}"
+                )
+            canonical.append(str(index))
+            current = current[index]
+            continue
+        raise InvalidTestSpecPatchError(
+            f"Patch path is not traversable: /{'/'.join(segments)}"
+        )
+    return tuple(canonical)
 
 
 def _is_prefix(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
@@ -153,7 +189,7 @@ def _replace_existing(container: Any, segments: tuple[str, ...], value: Any) -> 
             if segment not in current:
                 raise InvalidTestSpecPatchError(f"Unknown patch path: /{'/'.join(segments)}")
             current = current[segment]
-        elif isinstance(current, list) and segment.isdigit():
+        elif isinstance(current, list) and _ARRAY_INDEX_SEGMENT.fullmatch(segment):
             index = int(segment)
             if index >= len(current):
                 raise InvalidTestSpecPatchError(f"Array index outside patch target: {segment}")
@@ -165,7 +201,7 @@ def _replace_existing(container: Any, segments: tuple[str, ...], value: Any) -> 
         if leaf not in current:
             raise InvalidTestSpecPatchError(f"Unknown patch path: /{'/'.join(segments)}")
         current[leaf] = value
-    elif isinstance(current, list) and leaf.isdigit():
+    elif isinstance(current, list) and _ARRAY_INDEX_SEGMENT.fullmatch(leaf):
         index = int(leaf)
         if index >= len(current):
             raise InvalidTestSpecPatchError(f"Array index outside patch target: {leaf}")

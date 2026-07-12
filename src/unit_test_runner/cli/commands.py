@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import os
 import json
 import platform
@@ -59,6 +58,7 @@ from unit_test_runner.test_spec import (
     TestSpecContractError,
     build_current_artifact_context,
     load_test_spec,
+    load_test_spec_snapshot,
     update_test_spec,
     validate_test_spec,
 )
@@ -1024,12 +1024,13 @@ def handle_get_test_spec(args: argparse.Namespace) -> CLIResult:
     workspace = _existing_dir(args.workspace, "workspace", args.command)
     path = workspace / "reports" / "test_spec.json"
     try:
-        spec = load_test_spec(path, mode=ContractMode.STRICT)
+        snapshot = load_test_spec_snapshot(path, mode=ContractMode.STRICT)
+        spec = snapshot.spec
         context = build_current_artifact_context(workspace, spec)
         violations = validate_test_spec(spec, current_context=context)
         if violations:
             raise TestSpecContractError(violations)
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        digest = snapshot.sha256
     except (OSError, ValueError, json.JSONDecodeError) as error:
         raise CLIError(str(error), EXIT_INPUT_ERROR, args.command) from error
     return CLIResult(
