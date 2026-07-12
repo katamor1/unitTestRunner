@@ -15,6 +15,12 @@ from tests.spec_support import SIGNATURE_SHA, SOURCE_SHA, copied_payload
 def lossless_legacy_payload() -> dict:
     return {
         "schema_version": "0.1",
+        "producer": {
+            "name": "unit-test-runner",
+            "version": "0.1.0",
+            "commit": "legacy-verified-commit",
+        },
+        "extensions": {"legacy": {"preserved": True}},
         "spec_id": "spec-control-update",
         "revision": 1,
         "source": {"path": "src/control.c", "sha256": SOURCE_SHA},

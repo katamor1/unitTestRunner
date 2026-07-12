@@ -56,8 +56,10 @@ def migrate_payload(
             f"Unsupported source version for {kind.value}: {source_version or '<missing>'}"
         )
 
-    if kind is ArtifactKind.TEST_SPEC and source_version == "1.0.0":
-        return _migrate_test_spec_v1_0(source, target_version)
+    if kind is ArtifactKind.TEST_SPEC:
+        if source_version == "1.0.0":
+            return _migrate_test_spec_v1_0(source, target_version)
+        return _migrate_test_spec_v0_1(source, target_version)
 
     subject = _legacy_subject(source)
     if kind is ArtifactKind.TEST_SPEC:
@@ -253,6 +255,106 @@ _TEST_SPEC_AUTHORITY_FIELDS = {
     "review_decision",
 }
 
+_TEST_SPEC_V0_1_TOP_LEVEL_FIELDS = {
+    "artifact_kind",
+    "schema_version",
+    "producer",
+    "extensions",
+    "spec_id",
+    "revision",
+    "source",
+    "function",
+    "generated_from",
+    "generation_policy",
+    "test_cases",
+    "additional_case_candidates",
+    "coverage_summary",
+    "unresolved_items",
+    "warnings",
+    "review_item_ids",
+}
+
+
+def _migrate_test_spec_v0_1(
+    payload: Mapping[str, Any],
+    target_version: str,
+) -> dict[str, Any]:
+    authority_path = _first_test_spec_authority_path(payload, "$")
+    if authority_path is not None:
+        raise ValueError(
+            f"Lossless test_spec v0.1 migration cannot preserve embedded review authority at {authority_path}."
+        )
+    unknown = set(payload) - _TEST_SPEC_V0_1_TOP_LEVEL_FIELDS
+    if unknown:
+        names = ", ".join(sorted(str(item) for item in unknown))
+        raise ValueError(
+            f"Lossless test_spec v0.1 migration cannot represent unknown top-level fields: {names}."
+        )
+    _validate_test_spec_case_fields(payload, version="v0.1")
+    producer = payload.get("producer")
+    if not isinstance(producer, Mapping):
+        raise ValueError(
+            "migration_requires_fabrication at $.producer: lossless v0.1 migration requires supplied producer provenance."
+        )
+    source = payload.get("source")
+    function = payload.get("function")
+    if not isinstance(source, Mapping) or not isinstance(function, Mapping):
+        raise ValueError(
+            "migration_requires_fabrication at $.source/$.function: lossless v0.1 migration requires supplied identity."
+        )
+    required = {
+        "$.spec_id": payload.get("spec_id"),
+        "$.revision": payload.get("revision"),
+        "$.source.path": source.get("path"),
+        "$.source.sha256": source.get("sha256"),
+        "$.function.function_id": function.get("function_id"),
+        "$.function.name": function.get("name"),
+        "$.function.signature_sha256": function.get("signature_sha256"),
+    }
+    missing = [path for path, value in required.items() if value is None or value == ""]
+    if missing:
+        raise ValueError(
+            "migration_requires_fabrication: missing " + ", ".join(missing)
+        )
+    data_fields = (
+        "spec_id",
+        "revision",
+        "generated_from",
+        "generation_policy",
+        "test_cases",
+        "additional_case_candidates",
+        "coverage_summary",
+        "unresolved_items",
+        "warnings",
+        "review_item_ids",
+    )
+    missing_data = [field for field in data_fields if field not in payload]
+    if missing_data:
+        raise ValueError(
+            "migration_requires_fabrication: missing "
+            + ", ".join(f"$.{field}" for field in missing_data)
+        )
+    extensions = _migration_extensions(
+        payload.get("extensions"),
+        source_version="0.1",
+        source_artifact_kind=payload.get("artifact_kind"),
+    )
+    data = {field: copy.deepcopy(payload[field]) for field in data_fields}
+    data["source"] = copy.deepcopy(dict(source))
+    data["function"] = copy.deepcopy(dict(function))
+    return {
+        "artifact_kind": ArtifactKind.TEST_SPEC.value,
+        "schema_version": target_version,
+        "producer": copy.deepcopy(dict(producer)),
+        "subject": {
+            "function_id": str(function["function_id"]),
+            "source_path": str(source["path"]),
+            "source_sha256": str(source["sha256"]),
+        },
+        "data": data,
+        "extensions": extensions,
+    }
+
 
 def _migrate_test_spec_v1_0(
     payload: Mapping[str, Any],
@@ -261,8 +363,30 @@ def _migrate_test_spec_v1_0(
     data = payload.get("data")
     if not isinstance(data, Mapping):
         raise ValueError("test_spec v1.0 data must be an object.")
+    _validate_test_spec_case_fields(data, version="v1.0", data_prefix="$.data")
+    authority_path = _first_test_spec_authority_path(data)
+    if authority_path is not None:
+        raise ValueError(
+            f"Lossless test_spec v1.0 migration cannot preserve embedded review authority at {authority_path}; review_decisions.json is authoritative."
+        )
+    migrated = copy.deepcopy(dict(payload))
+    migrated["schema_version"] = target_version
+    migrated["extensions"] = _migration_extensions(
+        migrated.get("extensions"),
+        source_version="1.0.0",
+        source_artifact_kind=ArtifactKind.TEST_SPEC.value,
+    )
+    return migrated
+
+
+def _validate_test_spec_case_fields(
+    value: Mapping[str, Any],
+    *,
+    version: str,
+    data_prefix: str = "$",
+) -> None:
     for collection in ("test_cases", "additional_case_candidates"):
-        cases = data.get(collection)
+        cases = value.get(collection)
         if not isinstance(cases, list):
             continue
         for index, case in enumerate(cases):
@@ -272,24 +396,32 @@ def _migrate_test_spec_v1_0(
             if unknown:
                 names = ", ".join(sorted(str(item) for item in unknown))
                 raise ValueError(
-                    f"Lossless test_spec v1.0 migration cannot represent unknown fields at $.data.{collection}[{index}]: {names}."
+                    f"Lossless test_spec {version} migration cannot represent unknown fields at {data_prefix}.{collection}[{index}]: {names}."
                 )
-    authority_path = _first_test_spec_authority_path(data)
-    if authority_path is not None:
+
+
+def _migration_extensions(
+    extensions: Any,
+    *,
+    source_version: str,
+    source_artifact_kind: Any,
+) -> dict[str, Any]:
+    if extensions is None:
+        normalized: dict[str, Any] = {}
+    elif isinstance(extensions, Mapping):
+        normalized = copy.deepcopy(dict(extensions))
+    else:
+        raise ValueError("Lossless test_spec migration requires extensions to be an object.")
+    if "migration" in normalized:
         raise ValueError(
-            f"Lossless test_spec v1.0 migration cannot preserve embedded review authority at {authority_path}; review_decisions.json is authoritative."
+            "Lossless test_spec migration cannot overwrite existing extensions.migration metadata."
         )
-    migrated = copy.deepcopy(dict(payload))
-    migrated["schema_version"] = target_version
-    extensions = migrated.get("extensions")
-    normalized_extensions = copy.deepcopy(dict(extensions)) if isinstance(extensions, Mapping) else {}
-    normalized_extensions["migration"] = {
-        "source_version": "1.0.0",
-        "source_artifact_kind": ArtifactKind.TEST_SPEC.value,
+    normalized["migration"] = {
+        "source_version": source_version,
+        "source_artifact_kind": source_artifact_kind,
         "in_memory_only": True,
     }
-    migrated["extensions"] = normalized_extensions
-    return migrated
+    return normalized
 
 
 def _first_test_spec_authority_path(value: Any, path: str = "$.data") -> str | None:

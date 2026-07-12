@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from unit_test_runner import __version__
 from unit_test_runner.contracts import ArtifactKind, validate_payload
+from unit_test_runner.contracts.registry import get_contract
 from unit_test_runner.harness.c90_writer import sha256_file
 from unit_test_runner.reports.japanese import ja_label, md_cell, md_label_cell
 
@@ -144,7 +145,7 @@ def build_artifact_payload(
 ) -> dict[str, Any]:
     return {
         "artifact_kind": kind.value,
-        "schema_version": "1.0.0",
+        "schema_version": get_contract(kind).current_version,
         "producer": {
             "name": "unit-test-runner",
             "version": __version__,

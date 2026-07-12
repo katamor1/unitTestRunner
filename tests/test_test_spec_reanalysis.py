@@ -55,8 +55,17 @@ class TestSpecReanalysisTests(unittest.TestCase):
 
         candidate = _merge_reanalysis_candidate(current, previous, updated_design)
 
-        self.assertEqual("tc-control-update-001", candidate.test_cases[0]["test_case_id"])
-        self.assertEqual("tc-current-candidate", candidate.additional_case_candidates[0]["test_case_id"])
+        self.assertNotIn(
+            "tc-control-update-001",
+            {item["test_case_id"] for item in candidate.test_cases},
+        )
+        self.assertEqual(
+            {"tc-control-update-001", "tc-current-candidate"},
+            {
+                item["test_case_id"]
+                for item in candidate.additional_case_candidates
+            },
+        )
         self.assertTrue({"review-current", "review-input-001", "review-oracle-001"}.issubset(candidate.review_item_ids))
         self.assertEqual(
             {"review-current", "review-input-001"},

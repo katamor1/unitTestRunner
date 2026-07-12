@@ -608,6 +608,7 @@ def _run_reanalysis(args: argparse.Namespace) -> CLIResult:
             project_name=args.project,
             previous_dossier_path=args.previous_dossier,
             previous_test_case_design_path=(args.previous_test_spec or args.previous_test_case_design),
+            previous_legacy_alias=bool(args.previous_test_case_design),
             policy=policy,
         )
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
@@ -1095,6 +1096,8 @@ def handle_reconcile_test_cases(args: argparse.Namespace) -> CLIResult:
             _existing_file(args.current_boundary_candidates, "current-boundary-candidates", args.command),
             Path(args.out),
             policy=policy,
+            previous_legacy_alias=bool(args.previous_test_case_design),
+            current_legacy_alias=bool(args.current_test_case_design),
         )
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
         raise CLIError(str(exc), EXIT_INPUT_ERROR, args.command) from exc

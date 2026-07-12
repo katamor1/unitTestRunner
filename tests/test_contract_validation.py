@@ -42,6 +42,12 @@ def valid_test_spec() -> dict:
                 {
                     "test_case_id": "tc-control-update-001",
                     "coverage_links": [{"coverage_id": "cov-control-update-001"}],
+                    "expected_observations": [
+                        {
+                            "observation_kind": "return_value",
+                            "expected_expression": "CONTROL_OK",
+                        }
+                    ],
                 }
             ],
             "additional_case_candidates": [],
@@ -555,7 +561,7 @@ class ContractValidationTests(unittest.TestCase):
         payload = valid_test_spec()
         payload["data"]["test_cases"][0]["coverage_links"][0]["coverage_id"] = "cov-missing"
 
-        self.assertIn("invalid_reference", violation_codes(ArtifactKind.TEST_SPEC, payload))
+        self.assertIn("invalid_coverage_reference", violation_codes(ArtifactKind.TEST_SPEC, payload))
 
     def test_absolute_subject_path_is_rejected(self):
         payload = valid_test_spec()

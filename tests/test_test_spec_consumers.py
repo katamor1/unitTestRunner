@@ -109,8 +109,13 @@ class TestSpecConsumerTests(unittest.TestCase):
             )
 
             self.assertEqual(before, legacy_path.read_bytes())
-            self.assertNotIn("review_status", payload["test_cases"][0])
-            self.assertTrue(payload["test_cases"][0]["review_item_ids"])
+            self.assertEqual(
+                "review_required", payload["test_cases"][0]["review_status"]
+            )
+            self.assertNotIn("review_item_ids", payload["test_cases"][0])
+            self.assertNotIn("review_item_ids", payload)
+            self.assertNotIn("spec_id", payload)
+            self.assertNotIn("function_id", payload["function"])
 
     def test_v0_1_alias_rejects_source_path_or_hash_mismatch_with_signature(self):
         for field, value in (("path", "src/other.c"), ("sha256", "9" * 64)):

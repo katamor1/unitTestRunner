@@ -22,6 +22,7 @@ from .identity import (
     stable_function_id,
 )
 from .generation import create_test_spec_from_design, test_spec_consumer_payload
+from .legacy_adapter import load_legacy_test_case_design_view
 
 __all__ = [
     "ArtifactReference",
@@ -40,6 +41,7 @@ __all__ = [
     "build_current_artifact_context",
     "export_test_spec_views",
     "load_test_spec",
+    "load_legacy_test_case_design_view",
     "save_test_spec",
     "signature_sha256",
     "stable_function_id",

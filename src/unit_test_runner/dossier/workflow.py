@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -34,12 +33,12 @@ from ..test_design.test_case_design_generator import generate_test_case_design, 
 from ..test_design.test_case_design_writer import write_test_case_design_format, write_test_case_design_payload_format, write_test_case_design_report
 from ..contracts import ContractMode
 from ..test_spec import (
-    ArtifactReference,
     artifact_reference,
     build_current_artifact_context,
     create_test_spec_from_design,
     export_test_spec_views,
     load_test_spec,
+    load_legacy_test_case_design_view,
     save_test_spec,
     test_spec_consumer_payload,
     validate_test_spec,
@@ -546,40 +545,10 @@ def load_test_spec_for_consumer(
         raise ValueError("Expected canonical TEST_SPEC v1.1; only --test-case-design accepts the v0.1 legacy alias.")
     if function_signature_path is None:
         raise ValueError("Legacy test-case-design migration requires an explicit function signature artifact.")
-    signature_path = Path(function_signature_path)
-    signature_payload = _read_json(signature_path)
-    source = raw.get("source")
-    if not isinstance(source, dict) or not source.get("path"):
-        raise ValueError("Legacy test-case-design has no lossless source identity.")
-    source_path = str(source["path"]).replace("\\", "/")
-    if Path(source_path).is_absolute() or ":" in source_path[:3] or ".." in Path(source_path).parts:
-        raise ValueError("Legacy test-case-design source path has no verified workspace-relative mapping.")
-    signature_source = signature_payload.get("data")
-    if isinstance(signature_source, dict):
-        signature_source = signature_source.get("source")
-    else:
-        signature_source = signature_payload.get("source")
-    if not isinstance(signature_source, dict):
-        raise ValueError("Function signature artifact has no source identity.")
-    signature_source_path = str(signature_source.get("path") or "").replace("\\", "/")
-    if (
-        source_path != signature_source_path
-        or str(source.get("sha256") or "") != str(signature_source.get("sha256") or "")
-    ):
-        raise ValueError("Legacy test-case-design source identity does not exactly match the supplied function signature artifact.")
-    reference = ArtifactReference(
-        artifact_kind="function_signature",
-        path=signature_path.name,
-        sha256=hashlib.sha256(signature_path.read_bytes()).hexdigest(),
+    return load_legacy_test_case_design_view(
+        path,
+        function_signature_path=Path(function_signature_path),
     )
-    spec = create_test_spec_from_design(
-        raw,
-        signature_payload,
-        source_path=source_path,
-        generated_from=[reference],
-        revision=int(raw.get("revision") or 1),
-    )
-    return test_spec_consumer_payload(spec)
 
 
 def generate_build_workspace_from_reports(
