@@ -409,17 +409,62 @@ def analyze_function_workflow(
             "iteration_status": build_completion_iteration.status,
         }
     if test_execution is not None and evidence_manifest is not None:
+        execution_paths = test_execution.run_paths
+        evidence_paths = evidence_manifest.evidence_paths
+        execution_json = (
+            execution_paths.execution_report
+            if execution_paths is not None
+            else out_dir / "reports" / "test_execution_report.json"
+        )
+        result_json = (
+            execution_paths.result_json
+            if execution_paths is not None
+            else out_dir / "reports" / "test_result.json"
+        )
+        result_csv = (
+            execution_paths.result_csv
+            if execution_paths is not None
+            else out_dir / "reports" / "test_result.csv"
+        )
+        parsed = test_execution.parsed_result
+        green = bool(
+            test_execution.executed
+            and test_execution.status == "passed"
+            and parsed is not None
+            and parsed.total > 0
+            and parsed.passed == parsed.total
+            and parsed.failed == 0
+            and parsed.inconclusive == 0
+            and parsed.crashed == 0
+            and parsed.not_run == 0
+        )
         dossier["test_execution"] = {
-            "json": str(out_dir / "reports" / "test_execution_report.json"),
-            "markdown": str(out_dir / "reports" / "test_execution_report.md"),
-            "result_json": str(out_dir / "reports" / "test_result.json"),
-            "result_csv": str(out_dir / "reports" / "test_result.csv"),
+            "run_id": execution_paths.run_id if execution_paths is not None else None,
+            "json": str(execution_json),
+            "result_json": str(result_json),
+            "result_csv": str(result_csv),
+            "stdout_log": str(execution_paths.stdout_log) if execution_paths is not None else None,
+            "stderr_log": str(execution_paths.stderr_log) if execution_paths is not None else None,
+            "combined_log": str(execution_paths.combined_log) if execution_paths is not None else None,
+            "latest_run_pointer": str(out_dir / "reports" / "latest_run.json"),
             "status": test_execution.status,
             "executed": test_execution.executed,
+            "green": green,
         }
         dossier["evidence"] = {
-            "manifest_json": str(out_dir / "reports" / "evidence_manifest.json"),
-            "package_markdown": str(out_dir / "reports" / "evidence_package.md"),
+            "evidence_id": evidence_paths.evidence_id if evidence_paths is not None else None,
+            "manifest_json": str(
+                evidence_paths.evidence_manifest
+                if evidence_paths is not None
+                else out_dir / "reports" / "evidence_manifest.json"
+            ),
+            "source_run_json": str(evidence_paths.source_run) if evidence_paths is not None else None,
+            "package_markdown": str(
+                evidence_paths.evidence_package
+                if evidence_paths is not None
+                else out_dir / "reports" / "evidence_package.md"
+            ),
+            "latest_evidence_pointer": str(out_dir / "reports" / "latest_evidence.json"),
             "status": evidence_manifest.summary.test_execution_status,
         }
     _write_json(out_dir / "reports" / "function_dossier.json", dossier)

@@ -120,7 +120,7 @@ export function buildBuildProbeInvocation(settings: AdapterSettings, workspace: 
 }
 
 export function buildRunTestsInvocation(settings: AdapterSettings, workspace: string, run: boolean): CliInvocation {
-  const args = jsonPrefix(settings).concat(['run-tests', '--workspace', workspace, run ? '--run' : '--dry-run']);
+  const args = jsonPrefix(settings).concat(['run-tests', '--workspace', workspace, run ? '--run' : '--plan']);
   return invocation(settings, args, run && settings.runTestsRequiresConfirmation);
 }
 
@@ -156,7 +156,7 @@ export function buildSuiteRunInvocation(settings: AdapterSettings, selector: Sui
       args.push('--entry-id', entryId);
     }
   }
-  args.push(selector.run ? '--run' : '--dry-run');
+  args.push(selector.run ? '--run' : '--plan');
   if (selector.requireGreen) {
     args.push('--require-green');
   }

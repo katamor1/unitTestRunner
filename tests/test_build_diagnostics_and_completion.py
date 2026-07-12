@@ -130,14 +130,16 @@ generated\\tests\\test_Control_Update.c(7) : error C2143: syntax error : missing
 
             analyze = run_module("--json", "analyze-build-errors", "--workspace", str(workspace), "--source-root", str(VC6_FIXTURE_ROOT))
             self.assertEqual(0, analyze.returncode, analyze.stderr)
-            analyze_payload = json.loads(analyze.stdout)
-            self.assertEqual("completion_plan_generated", analyze_payload["status"])
-            self.assertTrue(Path(analyze_payload["data"]["build_completion_plan"]["json"]).exists())
+            analyze_envelope = json.loads(analyze.stdout)
+            self.assertEqual("cli_result", analyze_envelope["artifact_kind"])
+            self.assertEqual("passed", analyze_envelope["data"]["outcome"])
+            analyze_payload = analyze_envelope["data"]["details"]
+            self.assertTrue(Path(analyze_payload["build_completion_plan"]["json"]).exists())
 
             complete = run_module("--json", "complete-build", "--workspace", str(workspace), "--apply-safe-completions", "--max-iterations", "1")
             self.assertEqual(0, complete.returncode, complete.stderr)
-            complete_payload = json.loads(complete.stdout)
-            self.assertEqual("completion_applied", complete_payload["status"])
+            complete_envelope = json.loads(complete.stdout)
+            self.assertEqual("passed", complete_envelope["data"]["outcome"])
             self.assertTrue((workspace / "reports" / "build_completion_iteration_report.json").exists())
             completion_plan = json.loads((workspace / "reports" / "build_completion_plan.json").read_text(encoding="utf-8"))
             self.assertFalse(completion_plan["policy"]["generate_unknown_symbol_stubs"])
@@ -164,10 +166,10 @@ generated\\tests\\test_Control_Update.c(7) : error C2143: syntax error : missing
                 str(out_dir),
             )
             self.assertEqual(0, full.returncode, full.stderr)
-            full_payload = json.loads(full.stdout)
-            self.assertEqual("evidence_prepared", full_payload["status"])
-            self.assertIn("dossier review", full_payload["message"])
-            self.assertIn("build_completion", full_payload["data"])
+            full_envelope = json.loads(full.stdout)
+            self.assertEqual("passed", full_envelope["data"]["outcome"])
+            self.assertIn("dossier review", full_envelope["data"]["message"])
+            self.assertIn("build_completion", full_envelope["data"]["details"])
             self.assertTrue((out_dir / "reports" / "build_completion_plan.json").exists())
 
             apply_out_dir = Path(temp_dir) / "AnalyzeFunctionApplyCompletions"

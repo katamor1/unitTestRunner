@@ -27,7 +27,10 @@ class CliOutputEncodingTests(unittest.TestCase):
 
         text.encode("cp932")
         self.assertIn("\\ufffd", text)
-        self.assertEqual("invalid byte was decoded as \ufffd", json.loads(text)["data"]["log_excerpt"])
+        self.assertEqual(
+            "invalid byte was decoded as \ufffd",
+            json.loads(text)["data"]["details"]["log_excerpt"],
+        )
 
     def test_stream_writer_falls_back_when_console_encoding_rejects_text(self):
         buffer = io.BytesIO()

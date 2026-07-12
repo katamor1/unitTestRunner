@@ -43,9 +43,14 @@ class Vc6WorkspaceDiscoveryCliTests(unittest.TestCase):
             self.assertEqual("", completed.stderr)
             stdout_payload = json.loads(completed.stdout)
             file_payload = json.loads(out.read_text(encoding="utf-8"))
-            self.assertEqual(stdout_payload["data"], file_payload)
-            self.assertEqual("ok", stdout_payload["status"])
-            self.assertEqual("discover-projects", stdout_payload["command"])
+            self.assertEqual("cli_result", stdout_payload["artifact_kind"])
+            self.assertEqual("1.0.0", stdout_payload["schema_version"])
+            data = stdout_payload["data"]
+            details = data["details"]
+            self.assertEqual(details, file_payload)
+            self.assertEqual("passed", data["outcome"])
+            self.assertEqual("discover-projects", data["command"])
+            self.assertEqual("ok", details["status"])
             self.assertEqual(1, len(file_payload["workspaces"]))
             self.assertEqual("Control", file_payload["workspaces"][0]["projects"][0]["name"])
 
@@ -54,7 +59,7 @@ class Vc6WorkspaceDiscoveryCliTests(unittest.TestCase):
 
         self.assertEqual(0, completed.returncode, completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertEqual(1, len(payload["data"]["workspaces"]))
+        self.assertEqual(1, len(payload["data"]["details"]["workspaces"]))
 
     def test_discover_projects_workspace_directory_multiple_dsw(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -73,7 +78,7 @@ class Vc6WorkspaceDiscoveryCliTests(unittest.TestCase):
 
         self.assertEqual(0, completed.returncode, completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertEqual(2, len(payload["data"]["workspaces"]))
+        self.assertEqual(2, len(payload["data"]["details"]["workspaces"]))
 
     def test_discover_projects_workspace_directory_without_dsw_exits_two(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -82,8 +87,13 @@ class Vc6WorkspaceDiscoveryCliTests(unittest.TestCase):
         self.assertEqual(2, completed.returncode)
         self.assertEqual("", completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertEqual("error", payload["status"])
-        self.assertIn(".dsw", payload["errors"][0])
+        self.assertEqual("cli_result", payload["artifact_kind"])
+        self.assertEqual("1.0.0", payload["schema_version"])
+        data = payload["data"]
+        self.assertEqual("error", data["outcome"])
+        self.assertEqual(2, data["exit_code"])
+        self.assertEqual("error", data["errors"][0]["code"])
+        self.assertIn(".dsw", data["errors"][0]["message"])
 
     def test_discover_projects_out_markdown_writes_markdown_report(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -126,9 +136,12 @@ class Vc6WorkspaceDiscoveryCliTests(unittest.TestCase):
         self.assertEqual(0, completed.returncode, completed.stderr)
         self.assertEqual("", completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertEqual("not_found", payload["status"])
-        self.assertEqual("src/control.c", payload["data"]["source"]["input"])
-        self.assertEqual(["Control", "Common"], [item["name"] for item in payload["data"]["candidate_projects"]])
+        data = payload["data"]
+        details = data["details"]
+        self.assertEqual("passed", data["outcome"])
+        self.assertEqual("not_found", details["status"])
+        self.assertEqual("src/control.c", details["source"]["input"])
+        self.assertEqual(["Control", "Common"], [item["name"] for item in details["candidate_projects"]])
 
     def test_json_discover_projects_stdout_is_json_only(self):
         completed = run_module("--json", "discover-projects", "--workspace", str(FIXTURE_ROOT / "minimal"))

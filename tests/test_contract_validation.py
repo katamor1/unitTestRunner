@@ -64,14 +64,21 @@ def valid_test_spec() -> dict:
 def valid_cli_result() -> dict:
     payload = valid_test_spec()
     payload["artifact_kind"] = "cli_result"
+    payload["subject"] = {"invocation_id": "inv-contract-001"}
     payload["data"] = {
+        "invocation_id": "inv-contract-001",
         "command": "run-tests",
         "lifecycle": "finished",
+        "outcome_kind": "test_run",
         "outcome": "passed",
+        "green": True,
         "exit_code": 0,
         "message": "Tests passed.",
+        "diagnostics": [],
         "artifacts": [],
+        "expected_artifacts": [],
         "errors": [],
+        "details": {},
     }
     return payload
 

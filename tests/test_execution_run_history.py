@@ -454,7 +454,7 @@ class ExecutionRunHistoryTests(unittest.TestCase):
                 )
             )
 
-            self.assertEqual("tests_passed", result.status)
+            self.assertEqual("passed", result.status)
             latest_run = json.loads(
                 (workspace / "reports" / "latest_run.json").read_text(encoding="utf-8")
             )

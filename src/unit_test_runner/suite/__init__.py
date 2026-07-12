@@ -5,6 +5,7 @@ from .manager import (
     register_workspace,
     remove_entry,
     run_suite,
+    validate_suite_selection,
 )
 from .models import SuiteEntry, SuiteManifest, SuiteRunEntryResult, SuiteRunPolicy, SuiteRunReport
 
@@ -20,4 +21,5 @@ __all__ = [
     "register_workspace",
     "remove_entry",
     "run_suite",
+    "validate_suite_selection",
 ]

@@ -9,8 +9,10 @@ from typing import TextIO
 from .commands import dispatch
 from .errors import CLIError
 from .exit_codes import EXIT_INPUT_ERROR, EXIT_INTERNAL_ERROR
+from .outcomes import DomainOutcome
 from .parser import ArgumentParseError, build_parser
 from .result import CLIResult
+from unit_test_runner.contracts import RunOutcome
 from unit_test_runner.utils.logging import setup_logging
 
 
@@ -62,15 +64,34 @@ def main(argv: list[str] | None = None) -> int:
             errors=[str(exc)],
         )
 
+    json_output = None
+    if args.json:
+        result, json_output = _validated_json_result(result)
     logging.info("command finished: %s status=%s exit_code=%s", result.command, result.status, result.exit_code)
     if args.json:
-        _write_stream(sys.stdout, result.to_json())
+        _write_stream(sys.stdout, json_output or "")
     else:
         if result.exit_code == 0:
             _write_stream(sys.stdout, result.render_human())
         else:
             _write_stream(sys.stderr, result.render_human())
     return result.exit_code
+
+
+def _validated_json_result(result: CLIResult) -> tuple[CLIResult, str]:
+    try:
+        return result, result.to_json()
+    except ValueError as exc:
+        logging.error("CLI result contract validation failed: %s", exc)
+        fallback = CLIResult(
+            status="internal_error",
+            exit_code=EXIT_INTERNAL_ERROR,
+            command=result.command,
+            message="The command result violated the CLI contract.",
+            errors=[{"code": "contract_error", "message": str(exc)}],
+            outcome=DomainOutcome("command", RunOutcome.ERROR, None),
+        )
+        return fallback, fallback.to_json()
 
 
 def _apply_build_probe_environment(args) -> None:

@@ -261,7 +261,8 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.ok(selectedRun.args.includes('--run'));
     assert.equal(selectedRun.requiresConfirmation, true);
     assert.deepEqual(tagRun.args.slice(tagRun.args.indexOf('--tag'), tagRun.args.indexOf('--tag') + 2), ['--tag', 'selected']);
-    assert.ok(tagRun.args.includes('--dry-run'));
+    assert.ok(tagRun.args.includes('--plan'));
+    assert.equal(tagRun.args.includes('--dry-run'), false);
     assert.ok(allGreen.args.includes('--all'));
     assert.ok(allGreen.args.includes('--require-green'));
   });
@@ -314,10 +315,13 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.equal(resolveCliPath(DEFAULT_CLI_PATH, extensionRoot, exists, 'linux', 'x64'), DEFAULT_CLI_PATH);
   });
 
-  it('parses CLI JSON report paths and falls back to conventional report names', () => {
+  it('parses only explicit legacy CLI report paths and does not infer reports', () => {
     const parsed = parseCliResultReportPaths(
       JSON.stringify({
+        schema_version: '0.1',
         status: 'dossier_finalized',
+        exit_code: 0,
+        command: 'finalize-dossier',
         data: {
           review: {
             reports: {
@@ -327,19 +331,27 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
             },
           },
         },
+        warnings: [],
+        errors: [],
       }),
       '',
       'C:\\work\\out\\Control_Update',
     );
     const topLevel = parseCliResultReportPaths(
       JSON.stringify({
+        schema_version: '0.1',
         status: 'dossier_finalized',
+        exit_code: 0,
+        command: 'finalize-dossier',
+        data: {},
         reports: {
           function_dossier_md: 'C:\\work\\out\\Control_Update\\reports\\top_level_dossier.md',
           test_case_design_md: 'C:\\work\\out\\Control_Update\\reports\\top_level_design.md',
           test_case_design_json: 'C:\\work\\out\\Control_Update\\reports\\top_level_design.json',
           test_case_design_csv: 'C:\\work\\out\\Control_Update\\reports\\top_level_design.csv',
         },
+        warnings: [],
+        errors: [],
       }),
       '',
       'C:\\work\\out\\Control_Update',
@@ -348,13 +360,18 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     const direct = resolveReportPaths('C:\\work\\out\\Control_Update');
     const directStep19 = parseCliResultReportPaths(
       JSON.stringify({
+        schema_version: '0.1',
         status: 'reanalysis_completed',
+        exit_code: 0,
+        command: 'reanalyze-function',
         data: {
           reports: {
             change_impact_report_md: 'C:\\work\\out\\Control_Update\\reports\\custom_change.md',
             regression_selection_csv: 'C:\\work\\out\\Control_Update\\reports\\custom_regression.csv',
           },
         },
+        warnings: [],
+        errors: [],
       }),
       '',
       'C:\\work\\out\\Control_Update',
@@ -366,7 +383,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.equal(basename(topLevel.testCaseDesignMd), 'top_level_design.md');
     assert.equal(basename(topLevel.testCaseDesignJson), 'top_level_design.json');
     assert.equal(basename(topLevel.testCaseDesignCsv), 'top_level_design.csv');
-    assert.equal(basename(fallback.nextActionsMd), 'next_actions.md');
+    assert.equal(fallback.nextActionsMd, undefined);
     assert.equal(basename(direct.unresolvedItemsMd), 'unresolved_items.md');
     assert.equal(basename(direct.testCaseDesignMd), 'test_case_design.md');
     assert.equal(basename(direct.testCaseDesignJson), 'test_case_design.json');
@@ -376,20 +393,31 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.equal(basename(directStep19.regressionSelectionCsv), 'custom_regression.csv');
   });
 
-  it('warns when CLI JSON omits report paths and uses conventional paths', () => {
-    const parsed = parseCliResult(JSON.stringify({ status: 'ok', data: {} }), '', 'C:\\work\\out\\Control_Update');
+  it('warns when a genuine v0.1 envelope omits report paths without fabricating them', () => {
+    const parsed = parseCliResult(JSON.stringify({
+      schema_version: '0.1',
+      status: 'ok',
+      exit_code: 0,
+      command: 'doctor',
+      data: {},
+      warnings: [],
+      errors: [],
+    }), '', 'C:\\work\\out\\Control_Update');
 
-    assert.ok(parsed.warnings.some((warning) => warning.includes('レポートパス')));
-    assert.equal(basename(parsed.reports.functionDossierMd), 'function_dossier.md');
+    assert.ok(parsed.warnings.some((warning) => warning.includes('v0.1')));
+    assert.equal(parsed.reports.functionDossierMd, undefined);
   });
 
   it('formats nonzero CLI JSON with environment diagnostics for panel errors', () => {
     const message = formatCliFailureMessage(
       JSON.stringify({
+        schema_version: '0.1',
         status: 'build_probe_environment_missing',
         exit_code: 30,
         command: 'build-probe',
         message: 'Build probe could not run because the VC6 environment is missing.',
+        data: {},
+        warnings: [],
         errors: ['VC6 build tools were not found on PATH.'],
       }),
       '',
@@ -404,6 +432,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
   it('formats suite require-green failures with a clear non-green summary', () => {
     const message = formatCliFailureMessage(
       JSON.stringify({
+        schema_version: '0.1',
         status: 'suite_run_failed',
         exit_code: 32,
         command: 'suite-run',
@@ -420,6 +449,8 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
             suite_run_report_md: 'D:\\out\\suites\\default\\reports\\suite_run_report.md',
           },
         },
+        warnings: [],
+        errors: [],
       }),
       '',
       32,

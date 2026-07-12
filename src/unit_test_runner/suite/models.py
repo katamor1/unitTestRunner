@@ -115,7 +115,7 @@ class SuiteRunEntryResult:
             "entry_id": self.entry_id,
             "function": self.function_name,
             "workspace": _path_text(self.workspace),
-            "execution_status": self.execution_status,
+            "outcome": self.execution_status,
             "green_status": self.green_status,
             "executed": self.executed,
             "total_tests": self.total_tests,
@@ -143,7 +143,7 @@ class SuiteRunReport:
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
-            "status": "suite_run_completed" if self.status == "completed" else "suite_run_failed",
+            "outcome": self.status,
             "suite_id": self.suite_id,
             "selector": self.selector,
             "policy": self.policy.to_dict(),

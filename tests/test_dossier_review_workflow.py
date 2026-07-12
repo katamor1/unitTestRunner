@@ -269,13 +269,13 @@ class DossierReviewWorkflowTests(unittest.TestCase):
             finalize = run_module("--json", "finalize-dossier", "--workspace", str(workspace))
             self.assertEqual(0, finalize.returncode, finalize.stderr)
             finalize_payload = json.loads(finalize.stdout)
-            self.assertEqual("dossier_finalized", finalize_payload["status"])
-            self.assertTrue(Path(finalize_payload["data"]["reports"]["function_dossier_md"]).exists())
+            self.assertEqual("passed", finalize_payload["data"]["outcome"])
+            self.assertTrue(Path(finalize_payload["data"]["details"]["reports"]["function_dossier_md"]).exists())
 
             prepare = run_module("--json", "prepare-review", "--dossier", str(workspace / "reports" / "function_dossier.json"))
             self.assertEqual(0, prepare.returncode, prepare.stderr)
             prepare_payload = json.loads(prepare.stdout)
-            self.assertEqual("review_prepared", prepare_payload["status"])
+            self.assertEqual("passed", prepare_payload["data"]["outcome"])
 
             out_dir = Path(temp_dir) / "AnalyzeFunctionDossierReview"
             full = run_module(
@@ -301,8 +301,8 @@ class DossierReviewWorkflowTests(unittest.TestCase):
             )
             self.assertEqual(0, full.returncode, full.stderr)
             full_payload = json.loads(full.stdout)
-            self.assertEqual("dossier_finalized", full_payload["status"])
-            self.assertIn("review", full_payload["data"])
+            self.assertEqual("passed", full_payload["data"]["outcome"])
+            self.assertIn("review", full_payload["data"]["details"])
             self.assertTrue((out_dir / "reports" / "review_checklist.md").exists())
 
             final_dossier_path = out_dir / "reports" / "function_dossier.json"
@@ -335,11 +335,11 @@ class DossierReviewWorkflowTests(unittest.TestCase):
 
             probe = run_module("--json", "build-probe", "--dossier", str(final_dossier_path), "--dry-run")
             self.assertEqual(0, probe.returncode, probe.stderr)
-            self.assertIn("extracted", json.loads(probe.stdout)["data"]["command"])
+            self.assertIn("extracted", json.loads(probe.stdout)["data"]["details"]["command"])
 
             design = run_module("--json", "generate-test-design", "--dossier", str(final_dossier_path))
             self.assertEqual(0, design.returncode, design.stderr)
-            self.assertEqual("test_case_design_generated", json.loads(design.stdout)["status"])
+            self.assertEqual("passed", json.loads(design.stdout)["data"]["outcome"])
 
 
 if __name__ == "__main__":

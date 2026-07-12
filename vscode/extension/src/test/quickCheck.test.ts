@@ -133,7 +133,9 @@ describe('UnitTestRunner quick check adapter core', () => {
 
     const parsed = parseCliResult(
       JSON.stringify({
+        schema_version: '0.1',
         status: 'analysis_completed',
+        exit_code: 0,
         command: 'analyze-function',
         data: {
           reports: {
@@ -142,6 +144,8 @@ describe('UnitTestRunner quick check adapter core', () => {
             function_dossier_md: 'D:/quick/reports/function_dossier.md',
           },
         },
+        warnings: [],
+        errors: [],
       }),
       '',
       workspace,

@@ -182,8 +182,9 @@ class FunctionAnalysisReportTests(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             result = json.loads(completed.stdout)
-            self.assertEqual("evidence_prepared", result["status"])
-            self.assertIn("dossier review", result["message"])
+            self.assertEqual("cli_result", result["artifact_kind"])
+            self.assertEqual("passed", result["data"]["outcome"])
+            self.assertIn("dossier review", result["data"]["message"])
             reports = out_dir / "reports"
             for filename in [
                 "function_signature.json",

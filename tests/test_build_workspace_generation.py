@@ -306,16 +306,17 @@ generated\tests\test.c(7) : fatal error C1083: Cannot open include file: 'stdint
                 str(out_dir),
             )
             self.assertEqual(0, analyze.returncode, analyze.stderr)
-            payload = json.loads(analyze.stdout)
-            self.assertEqual("evidence_prepared", payload["status"])
-            self.assertIn("dossier review", payload["message"])
-            self.assertIn("build_workspace", payload["data"])
-            self.assertIn("build_probe", payload["data"])
+            envelope = json.loads(analyze.stdout)
+            self.assertEqual("passed", envelope["data"]["outcome"])
+            self.assertIn("dossier review", envelope["data"]["message"])
+            payload = envelope["data"]["details"]
+            self.assertIn("build_workspace", payload)
+            self.assertIn("build_probe", payload)
 
             probe = run_module("--json", "build-probe", "--workspace", str(out_dir), "--dry-run")
             self.assertEqual(0, probe.returncode, probe.stderr)
             probe_payload = json.loads(probe.stdout)
-            self.assertEqual("build_workspace_generated", probe_payload["status"])
+            self.assertEqual("passed", probe_payload["data"]["outcome"])
             self.assertTrue((out_dir / "build" / "Makefile").exists())
 
             explicit = run_module(
@@ -332,7 +333,7 @@ generated\tests\test.c(7) : fatal error C1083: Cannot open include file: 'stdint
                 "--dry-run",
             )
             self.assertEqual(0, explicit.returncode, explicit.stderr)
-            self.assertEqual("build_workspace_generated", json.loads(explicit.stdout)["status"])
+            self.assertEqual("passed", json.loads(explicit.stdout)["data"]["outcome"])
 
 
 if __name__ == "__main__":

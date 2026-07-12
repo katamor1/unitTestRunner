@@ -101,9 +101,14 @@ class Vc6DspParserTests(unittest.TestCase):
         self.assertEqual(0, completed.returncode, completed.stderr)
         self.assertEqual("", completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertEqual("multiple_matches", payload["status"])
-        self.assertEqual(2, len(payload["data"]["matches"]))
-        self.assertEqual(["Win32 Debug"], payload["data"]["matches"][0]["configurations"])
+        self.assertEqual("cli_result", payload["artifact_kind"])
+        self.assertEqual("1.0.0", payload["schema_version"])
+        self.assertEqual("map-source", payload["data"]["command"])
+        self.assertEqual("passed", payload["data"]["outcome"])
+        details = payload["data"]["details"]
+        self.assertEqual("multiple_matches", details["status"])
+        self.assertEqual(2, len(details["matches"]))
+        self.assertEqual(["Win32 Debug"], details["matches"][0]["configurations"])
 
     def test_map_source_markdown_report(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -134,7 +139,10 @@ class Vc6DspParserTests(unittest.TestCase):
 
         self.assertEqual(0, completed.returncode, completed.stderr)
         payload = json.loads(completed.stdout)
-        projects = payload["data"]["workspaces"][0]["projects"]
+        self.assertEqual("cli_result", payload["artifact_kind"])
+        self.assertEqual("1.0.0", payload["schema_version"])
+        self.assertEqual("discover-projects", payload["data"]["command"])
+        projects = payload["data"]["details"]["workspaces"][0]["projects"]
         self.assertIn("dsp_summary", projects[0])
         self.assertEqual(1, projects[0]["dsp_summary"]["source_file_count"])
         self.assertEqual(["ProductA - Win32 Debug"], projects[0]["dsp_summary"]["configurations"])
