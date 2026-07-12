@@ -21,12 +21,33 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Reassemble and verify bundle
+      - name: Reassemble bundle
         shell: bash
         run: |
           set -euo pipefail
+          ls -l .github/bootstrap/p1t6.bundle.b64.part*
+          for part in .github/bootstrap/p1t6.bundle.b64.part*; do
+            wc -c "$part"
+            sha256sum "$part"
+          done
           cat .github/bootstrap/p1t6.bundle.b64.part* \
             | base64 --decode > "$RUNNER_TEMP/p1t6.bundle"
+          wc -c "$RUNNER_TEMP/p1t6.bundle"
+          sha256sum "$RUNNER_TEMP/p1t6.bundle"
+
+      - name: Upload reconstructed bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1t6-reconstructed-bundle
+          path: ${{ runner.temp }}/p1t6.bundle
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Verify bundle
+        shell: bash
+        run: |
+          set -euo pipefail
           actual_sha="$(sha256sum "$RUNNER_TEMP/p1t6.bundle" | awk '{print $1}')"
           test "$actual_sha" = "aee95696be58e5102bc2fe26cc8f447b0942de8569be2750e4adf1bde1bb4d57"
           git bundle verify "$RUNNER_TEMP/p1t6.bundle"
