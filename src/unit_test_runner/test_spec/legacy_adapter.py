@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from unit_test_runner.contracts import ContractViolation
 
 from .models import TestSpecContractError
+from .path_safety import assert_no_reparse_components, lexical_absolute
 
 
 _TOP_LEVEL_FIELDS = {
@@ -58,8 +59,9 @@ def load_legacy_test_case_design_view(
     function_signature_path: Path | str,
 ) -> dict[str, Any]:
     """Validate a genuine v0.1 alias and return its unpromoted consumer view."""
-    legacy_path = Path(path)
-    signature_path = Path(function_signature_path)
+    legacy_path, signature_path = assert_safe_legacy_alias_paths(
+        path, function_signature_path
+    )
     legacy = _read_object(legacy_path, "legacy_alias_invalid")
     signature = _read_object(signature_path, "legacy_companion_invalid")
     violations = _legacy_shape_violations(legacy)
@@ -67,6 +69,38 @@ def load_legacy_test_case_design_view(
     if violations:
         raise TestSpecContractError(tuple(violations))
     return copy.deepcopy(legacy)
+
+
+def assert_safe_legacy_alias_paths(
+    path: Path | str,
+    function_signature_path: Path | str,
+) -> tuple[Path, Path]:
+    legacy_path = lexical_absolute(path)
+    signature_path = lexical_absolute(function_signature_path)
+    if legacy_path.parent != signature_path.parent:
+        raise TestSpecContractError(
+            (
+                ContractViolation(
+                    "legacy_companion_invalid",
+                    "$",
+                    "Legacy alias and signature companion must share one report directory.",
+                    "blocking",
+                ),
+            )
+        )
+    try:
+        trusted_root = legacy_path.parent.parent
+        assert_no_reparse_components(legacy_path, trusted_root)
+        assert_no_reparse_components(signature_path, trusted_root)
+    except ValueError as error:
+        raise TestSpecContractError(
+            (
+                ContractViolation(
+                    "unsafe_legacy_path", "$", str(error), "blocking"
+                ),
+            )
+        ) from error
+    return legacy_path, signature_path
 
 
 def _read_object(path: Path, code: str) -> dict[str, Any]:

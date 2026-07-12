@@ -34,6 +34,7 @@ from ..test_design.test_case_design_writer import write_test_case_design_format,
 from ..contracts import ContractMode
 from ..test_spec import (
     artifact_reference,
+    assert_safe_legacy_alias_paths,
     bind_test_spec_inputs,
     build_current_artifact_context,
     create_test_spec_from_design,
@@ -45,6 +46,7 @@ from ..test_spec import (
     validate_test_spec,
 )
 from ..vc6 import select_project_context
+from ..test_spec.path_safety import assert_safe_canonical_test_spec_path
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -556,6 +558,12 @@ def load_test_spec_for_consumer(
     path = Path(path)
     if path.suffix.lower() != ".json":
         raise ValueError("Generated Markdown/CSV test-spec views are never accepted as inputs.")
+    if path.name == "test_spec.json":
+        assert_safe_canonical_test_spec_path(path)
+    elif allow_legacy_alias and function_signature_path is not None:
+        assert_safe_legacy_alias_paths(path, function_signature_path)
+    else:
+        assert_safe_canonical_test_spec_path(path)
     raw = _read_json(path)
     if raw.get("artifact_kind") == "test_spec":
         spec = load_test_spec(

@@ -24,6 +24,23 @@ def validate_payload(
     kind: ArtifactKind,
     payload: Mapping[str, Any],
 ) -> tuple[ContractViolation, ...]:
+    violations = list(validate_payload_schema(kind, payload))
+    contract = get_contract(kind)
+    if not any(item.code == "unsupported_version" for item in violations):
+        violations.extend(_common_semantic_violations(kind, payload))
+        violations.extend(
+            _artifact_semantic_violations(
+                contract.semantic_validator,
+                payload,
+            )
+        )
+    return _deduplicate_violations(violations)
+
+
+def validate_payload_schema(
+    kind: ArtifactKind,
+    payload: Mapping[str, Any],
+) -> tuple[ContractViolation, ...]:
     contract = get_contract(kind)
     version = str(payload.get("schema_version") or "")
     violations: list[ContractViolation] = []
@@ -42,14 +59,6 @@ def validate_payload(
     for error in sorted(validator.iter_errors(dict(payload)), key=_error_sort_key):
         violations.append(_schema_violation(error))
 
-    if not any(item.code == "unsupported_version" for item in violations):
-        violations.extend(_common_semantic_violations(kind, payload))
-        violations.extend(
-            _artifact_semantic_violations(
-                contract.semantic_validator,
-                payload,
-            )
-        )
     return _deduplicate_violations(violations)
 
 

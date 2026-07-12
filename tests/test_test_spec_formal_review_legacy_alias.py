@@ -88,6 +88,31 @@ def write_coverage(path: Path) -> None:
 
 
 class TestSpecFormalReviewLegacyAliasTests(unittest.TestCase):
+    def test_legacy_alias_leaf_and_parent_symlinks_are_rejected(self):
+        for mutation in ("leaf", "parent"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                bundle = root / "bundle"
+                legacy_path, signature_path = write_genuine_legacy_pair(bundle)
+                try:
+                    if mutation == "leaf":
+                        real_legacy = bundle / "real_test_case_design.json"
+                        legacy_path.replace(real_legacy)
+                        os.symlink(real_legacy, legacy_path)
+                    else:
+                        real_bundle = root / "real-bundle"
+                        bundle.rename(real_bundle)
+                        os.symlink(real_bundle, bundle, target_is_directory=True)
+                except OSError as error:
+                    self.skipTest(f"symlink creation unavailable: {error}")
+
+                with self.assertRaises(TestSpecContractError):
+                    load_test_spec_for_consumer(
+                        legacy_path,
+                        function_signature_path=signature_path,
+                        allow_legacy_alias=True,
+                    )
+
     def test_harness_alias_returns_genuine_legacy_view_without_fabricated_canonical_identity(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             legacy_path, signature_path = write_genuine_legacy_pair(Path(temp_dir))

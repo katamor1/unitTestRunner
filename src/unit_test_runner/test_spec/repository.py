@@ -26,6 +26,7 @@ from .models import (
     TestSpecContractError,
     validate_test_spec,
 )
+from .path_safety import assert_safe_canonical_test_spec_path
 
 
 class StaleRevisionError(ValueError):
@@ -59,6 +60,17 @@ def load_test_spec_snapshot(
     current_context: CurrentArtifactContext | None = None,
 ) -> TestSpecSnapshot:
     path = Path(path)
+    if mode is ContractMode.STRICT:
+        try:
+            assert_safe_canonical_test_spec_path(path)
+        except ValueError as error:
+            raise TestSpecContractError(
+                (
+                    ContractViolation(
+                        "unsafe_canonical_path", "$", str(error), "blocking"
+                    ),
+                )
+            ) from error
     try:
         raw_bytes = path.read_bytes()
     except OSError as error:
@@ -192,6 +204,7 @@ def save_test_spec_snapshot(
             )
         )
     root = (current_context.workspace_root or path.parent.parent).resolve()
+    assert_safe_canonical_test_spec_path(path)
     expected_path = root / "reports" / "test_spec.json"
     lexical_path = Path(os.path.abspath(path))
     if lexical_path != expected_path:

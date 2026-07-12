@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
-from unit_test_runner.contracts import ArtifactKind, migrate_payload, validate_payload
+from unit_test_runner.contracts import (
+    ArtifactKind,
+    migrate_payload,
+    validate_payload,
+    validate_payload_schema,
+)
 from unit_test_runner.contracts.registry import get_contract
 
 from .models import ArtifactReference, CurrentArtifactContext, TestSpec
+from .path_safety import assert_no_reparse_components, lexical_absolute
 
 
 _TOP_LEVEL_PROVENANCE_FILES = (
@@ -103,6 +110,217 @@ _LEGACY_ALLOWED_FIELDS: dict[str, set[str]] = {
 }
 
 
+def _nullable(shape: Any) -> tuple[str, Any]:
+    return ("nullable", shape)
+
+
+_POSITION_SHAPE = {"line": int, "column": int, "offset": int}
+_SHORT_POSITION_SHAPE = {"line": int, "column": int}
+_RANGE_SHAPE = {"start": _POSITION_SHAPE, "end": _POSITION_SHAPE}
+_MASKED_RANGE_SHAPE = {
+    "kind": str,
+    "start_line": int,
+    "start_column": int,
+    "end_line": int,
+    "end_column": int,
+    "preview": _nullable(str),
+}
+_FUNCTION_CANDIDATE_SHAPE = {
+    "name": str,
+    "kind": str,
+    "confidence": str,
+    "header_range": _RANGE_SHAPE,
+    "body_range": _nullable(_RANGE_SHAPE),
+    "full_range": _RANGE_SHAPE,
+    "opening_brace": _nullable(_POSITION_SHAPE),
+    "closing_brace": _nullable(_POSITION_SHAPE),
+    "storage_class_hint": _nullable(str),
+    "conditional_context": _nullable(dict),
+    "signature_preview": str,
+    "reason": str,
+}
+_SIGNATURE_PARAMETER_SHAPE = {
+    "index": int,
+    "name": _nullable(str),
+    "type": dict,
+    "raw": str,
+    "direction_hint": str,
+    "is_variadic": bool,
+    "is_void": bool,
+    "default_value": _nullable(str),
+    "confidence": str,
+    "warnings": list,
+}
+_VARIABLE_DECLARATION_SHAPE = {
+    "name": str,
+    "scope": str,
+    "storage_class": _nullable(str),
+    "type_raw": str,
+    "declaration_range": _RANGE_SHAPE,
+    "initializer_range": _nullable(_RANGE_SHAPE),
+    "is_array": bool,
+    "is_pointer": bool,
+    "is_struct_like": bool,
+    "confidence": str,
+    "raw": str,
+}
+_GLOBAL_ACCESS_SHAPE = {
+    "name": str,
+    "access_kind": str,
+    "scope": str,
+    "position": _POSITION_SHAPE,
+    "expression_range": _RANGE_SHAPE,
+    "access_path": _nullable(str),
+    "operator": _nullable(str),
+    "confidence": str,
+    "evidence": str,
+    "related_declaration": _nullable(_VARIABLE_DECLARATION_SHAPE),
+}
+_IDENTIFIER_USE_SHAPE = {
+    "name": str,
+    "position": _POSITION_SHAPE,
+    "context": str,
+    "token_index": int,
+    "resolved_as": str,
+    "confidence": str,
+}
+_CALL_ARGUMENT_SHAPE = {
+    "index": int,
+    "raw": str,
+    "expression_range": _RANGE_SHAPE,
+    "identifiers": [_IDENTIFIER_USE_SHAPE],
+    "argument_kind": str,
+    "passing_mode_hint": str,
+    "confidence": str,
+    "warnings": list,
+}
+_RETURN_USAGE_SHAPE = {
+    "usage_kind": str,
+    "consumer_range": _nullable(_RANGE_SHAPE),
+    "assigned_to": _nullable(str),
+    "compared_with": _nullable(str),
+    "evidence": str,
+    "confidence": str,
+}
+_LINK_PROVIDER_SHAPE = {
+    "library": str,
+    "symbol": str,
+    "provider_kind": str,
+    "source": str,
+    "link_order": int,
+    "project_name": _nullable(str),
+}
+_FUNCTION_CALL_SHAPE = {
+    "call_id": str,
+    "name": str,
+    "target_kind": str,
+    "call_range": _RANGE_SHAPE,
+    "name_position": _POSITION_SHAPE,
+    "arguments": [_CALL_ARGUMENT_SHAPE],
+    "return_usage": _RETURN_USAGE_SHAPE,
+    "nesting_level": int,
+    "conditional_context": _nullable(dict),
+    "confidence": str,
+    "evidence": str,
+    "warnings": list,
+    "link_provider": _nullable(_LINK_PROVIDER_SHAPE),
+    "link_providers": [_LINK_PROVIDER_SHAPE],
+}
+_RESOLVED_PARAMETER_SHAPE = {
+    "index": int,
+    "name": _nullable(str),
+    "type_raw": str,
+    "pointer_level": int,
+    "qualifiers": [str],
+    "is_variadic": bool,
+    "canonical_type": _nullable(str),
+    "type_category": str,
+}
+_RESOLVED_SIGNATURE_SHAPE = {
+    "resolution": str,
+    "return_type_raw": _nullable(str),
+    "return_type_canonical": _nullable(str),
+    "return_type_category": str,
+    "calling_convention": _nullable(str),
+    "parameters": [_RESOLVED_PARAMETER_SHAPE],
+    "prototype": _nullable(str),
+    "declaration_source": _nullable(str),
+    "definition_source": _nullable(str),
+    "conflicts": [str],
+    "confidence": str,
+}
+_DEPENDENCY_REWRITE_SITE_SHAPE = {
+    "call_id": str,
+    "start": _SHORT_POSITION_SHAPE,
+    "end": _SHORT_POSITION_SHAPE,
+}
+_DEPENDENCY_EVIDENCE_SHAPE = {
+    "kind": str,
+    "detail": str,
+    "source": str,
+    "weight": int,
+}
+_DEPENDENCY_SHAPE = {
+    "callee": str,
+    "target_kind": str,
+    "configured_mode": str,
+    "resolved_mode": str,
+    "review_status": str,
+    "signature": _RESOLVED_SIGNATURE_SHAPE,
+    "implementation_source": _nullable(str),
+    "related_call_ids": [str],
+    "rewrite_sites": [_DEPENDENCY_REWRITE_SITE_SHAPE],
+    "evidence": [_DEPENDENCY_EVIDENCE_SHAPE],
+    "shared_globals": [str],
+    "warnings": [str],
+}
+_COVERAGE_ITEM_SHAPE = {
+    "coverage_id": str,
+    "coverage_type": str,
+    "target_id": str,
+    "purpose": str,
+    "condition_value": _nullable(str),
+    "required_state": _nullable(str),
+    "related_variables": [str],
+    "related_calls": [str],
+    "review_required": bool,
+    "confidence": str,
+}
+_INPUT_CANDIDATE_SHAPE = {
+    "candidate_id": str,
+    "target_name": str,
+    "target_kind": str,
+    "value_expression": str,
+    "value_kind": str,
+    "source": str,
+    "related_condition_id": _nullable(str),
+    "related_coverage_ids": [str],
+    "purpose": str,
+    "confidence": str,
+    "review_required": bool,
+    "evidence": str,
+}
+_LEGACY_PRIMARY_RECORD_SHAPES: dict[str, tuple[tuple[tuple[str, ...], Any], ...]] = {
+    "source_digest": ((('masking', 'masked_ranges'), [_MASKED_RANGE_SHAPE]),),
+    "function_location": (
+        (("function", "selected_candidate"), _nullable(_FUNCTION_CANDIDATE_SHAPE)),
+        (("function", "candidates"), [_FUNCTION_CANDIDATE_SHAPE]),
+    ),
+    "function_signature": (
+        (("function", "signature_range"), _RANGE_SHAPE),
+        (("function", "parameters"), [_SIGNATURE_PARAMETER_SHAPE]),
+    ),
+    "global_access": ((('global_accesses',), [_GLOBAL_ACCESS_SHAPE]),),
+    "call_report": (
+        (("calls",), [_FUNCTION_CALL_SHAPE]),
+        (("unresolved_calls",), [_FUNCTION_CALL_SHAPE]),
+    ),
+    "dependency_policy": ((('dependencies',), [_DEPENDENCY_SHAPE]),),
+    "coverage_design": ((('coverage_items',), [_COVERAGE_ITEM_SHAPE]),),
+    "boundary_candidates": ((('input_candidates',), [_INPUT_CANDIDATE_SHAPE]),),
+}
+
+
 def signature_sha256(payload: Mapping[str, Any]) -> str:
     data = payload.get("data")
     if isinstance(data, Mapping) and isinstance(data.get("function"), Mapping):
@@ -136,7 +354,8 @@ def build_current_artifact_context(
     workspace: Path,
     spec: TestSpec,
 ) -> CurrentArtifactContext:
-    workspace = Path(workspace).resolve()
+    workspace = lexical_absolute(workspace)
+    assert_no_reparse_components(workspace, workspace)
     request_path = workspace / "input" / "request.json"
     request = _read_json(request_path) if request_path.is_file() else {}
     source_path = _relative_path(spec.source.path)
@@ -145,8 +364,9 @@ def build_current_artifact_context(
     source_candidates = [workspace / source_path, workspace / "extracted" / source_path]
     request_workspace = request.get("workspace")
     if isinstance(request_workspace, str) and request_workspace:
-        declared_root = Path(request_workspace).expanduser().resolve()
-        declared_source = (declared_root / source_path).resolve(strict=False)
+        declared_root = lexical_absolute(Path(request_workspace).expanduser())
+        assert_no_reparse_components(declared_root, declared_root)
+        declared_source = declared_root / source_path
         try:
             declared_source.relative_to(declared_root)
         except ValueError:
@@ -156,7 +376,11 @@ def build_current_artifact_context(
     source_file = _first_regular_from_scoped_roots(
         workspace,
         tuple(source_candidates),
-        extra_root=(Path(request_workspace).expanduser().resolve() if isinstance(request_workspace, str) and request_workspace else None),
+        extra_root=(
+            lexical_absolute(Path(request_workspace).expanduser())
+            if isinstance(request_workspace, str) and request_workspace
+            else None
+        ),
     )
     source_hash = hashlib.sha256(source_file.read_bytes()).hexdigest()
     prefix, layout, references = _saved_provenance_layout(spec)
@@ -178,6 +402,7 @@ def build_current_artifact_context(
             raw_bytes,
             source_path=source_path,
             source_sha256=source_hash,
+            source_file=source_file,
             function_name=expected_function,
         )
         if artifact_kind == "function_signature":
@@ -228,6 +453,7 @@ def _validated_provenance_payload(
     *,
     source_path: str,
     source_sha256: str,
+    source_file: Path,
     function_name: str,
 ) -> dict[str, Any]:
     try:
@@ -239,7 +465,8 @@ def _validated_provenance_payload(
     if not isinstance(payload, dict):
         raise ValueError(f"{artifact_kind} provenance root must be an object.")
     declared_kind = payload.get("artifact_kind")
-    if declared_kind is None:
+    is_legacy = declared_kind is None
+    if is_legacy:
         _validate_legacy_provenance_shape(artifact_kind, payload)
         normalized = payload
     else:
@@ -285,8 +512,17 @@ def _validated_provenance_payload(
         normalized,
         source_path=source_path,
         source_sha256=source_sha256,
+        source_file=source_file,
         function_name=function_name,
     )
+    if is_legacy:
+        _validate_legacy_provenance_contract(
+            artifact_kind,
+            payload,
+            source_path=source_path,
+            source_sha256=source_sha256,
+            function_name=function_name,
+        )
     return normalized
 
 
@@ -317,6 +553,7 @@ def _validate_legacy_provenance_shape(
             f"Legacy {artifact_kind} provenance has unknown fields: "
             + ", ".join(sorted(unknown))
         )
+    _validate_legacy_primary_records(artifact_kind, payload)
     function = payload.get("function")
     if artifact_kind == "function_location" and (
         not isinstance(function, Mapping)
@@ -329,6 +566,160 @@ def _validate_legacy_provenance_shape(
         or not isinstance(function.get("header_text_normalized"), str)
     ):
         raise ValueError("Legacy function_signature has no parsed signature identity.")
+    authority_path = _first_provenance_authority_path(payload)
+    if authority_path is not None:
+        raise ValueError(
+            f"Legacy {artifact_kind} provenance embeds review authority at {authority_path}."
+        )
+
+
+def _validate_legacy_primary_records(
+    artifact_kind: str,
+    payload: Mapping[str, Any],
+) -> None:
+    for path, shape in _LEGACY_PRIMARY_RECORD_SHAPES[artifact_kind]:
+        value: Any = payload
+        rendered_path = "$"
+        for segment in path:
+            if not isinstance(value, Mapping) or segment not in value:
+                raise ValueError(
+                    f"Legacy {artifact_kind} provenance is missing {rendered_path}.{segment}."
+                )
+            value = value[segment]
+            rendered_path = f"{rendered_path}.{segment}"
+        _validate_json_shape(value, shape, rendered_path, artifact_kind)
+
+
+def _validate_json_shape(
+    value: Any,
+    shape: Any,
+    path: str,
+    artifact_kind: str,
+) -> None:
+    if (
+        isinstance(shape, tuple)
+        and len(shape) == 2
+        and shape[0] == "nullable"
+    ):
+        if value is None:
+            return
+        _validate_json_shape(value, shape[1], path, artifact_kind)
+        return
+    if isinstance(shape, list):
+        if type(value) is not list:
+            raise ValueError(
+                f"Legacy {artifact_kind} provenance field {path} must be an array."
+            )
+        item_shape = shape[0]
+        for index, item in enumerate(value):
+            _validate_json_shape(
+                item,
+                item_shape,
+                f"{path}[{index}]",
+                artifact_kind,
+            )
+        return
+    if isinstance(shape, dict):
+        if type(value) is not dict:
+            raise ValueError(
+                f"Legacy {artifact_kind} provenance field {path} must be an object."
+            )
+        missing = set(shape) - set(value)
+        unknown = set(value) - set(shape)
+        if missing or unknown:
+            details: list[str] = []
+            if missing:
+                details.append("missing " + ", ".join(sorted(missing)))
+            if unknown:
+                details.append("unknown " + ", ".join(sorted(unknown)))
+            raise ValueError(
+                f"Legacy {artifact_kind} provenance record {path} has "
+                + "; ".join(details)
+                + "."
+            )
+        for field, child_shape in shape.items():
+            _validate_json_shape(
+                value[field],
+                child_shape,
+                f"{path}.{field}",
+                artifact_kind,
+            )
+        return
+    if not isinstance(shape, type) or type(value) is not shape:
+        expected = shape.__name__ if isinstance(shape, type) else "valid JSON"
+        raise ValueError(
+            f"Legacy {artifact_kind} provenance field {path} must be {expected}."
+        )
+
+
+def _validate_legacy_provenance_contract(
+    artifact_kind: str,
+    payload: Mapping[str, Any],
+    *,
+    source_path: str,
+    source_sha256: str,
+    function_name: str,
+) -> None:
+    kind = ArtifactKind(artifact_kind)
+    data = copy.deepcopy(
+        {
+            key: value
+            for key, value in payload.items()
+            if key not in {"artifact_kind", "schema_version"}
+        }
+    )
+    source = data.get("source")
+    if isinstance(source, dict):
+        source["path"] = source_path
+    projection = {
+        "artifact_kind": artifact_kind,
+        "schema_version": get_contract(kind).current_version,
+        "producer": {
+            "name": "unit-test-runner-validation",
+            "version": "validation-only",
+            "commit": "validation-only",
+        },
+        "subject": {
+            "function_id": stable_function_id(source_path, function_name),
+            "source_path": source_path,
+            "source_sha256": source_sha256,
+        },
+        "data": data,
+        "extensions": {},
+    }
+    violations = validate_payload_schema(kind, projection)
+    if violations:
+        detail = "; ".join(
+            f"{item.code} at {item.json_path}: {item.message}"
+            for item in violations
+        )
+        raise ValueError(
+            f"Invalid raw v0.1 {artifact_kind} provenance structure: {detail}"
+        )
+
+
+def _first_provenance_authority_path(value: Any, path: str = "$") -> str | None:
+    authority_fields = {
+        "approved",
+        "approval",
+        "approval_status",
+        "is_approved",
+        "review_decision",
+    }
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            child_path = f"{path}.{key}"
+            if str(key).lower() in authority_fields:
+                return child_path
+            nested = _first_provenance_authority_path(child, child_path)
+            if nested is not None:
+                return nested
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            nested = _first_provenance_authority_path(child, f"{path}[{index}]")
+            if nested is not None:
+                return nested
+    return None
 
 
 def _validate_provenance_identity(
@@ -337,13 +728,16 @@ def _validate_provenance_identity(
     *,
     source_path: str,
     source_sha256: str,
+    source_file: Path,
     function_name: str,
 ) -> None:
     data = payload.get("data")
     identity = data if isinstance(data, Mapping) else payload
     source = identity.get("source")
-    if not isinstance(source, Mapping) or not _source_path_matches(
-        str(source.get("path") or ""), source_path
+    if not isinstance(source, Mapping) or not _declared_source_matches(
+        str(source.get("path") or ""),
+        source_path,
+        source_file,
     ):
         raise ValueError(
             f"{artifact_kind} provenance source path does not match {source_path}."
@@ -368,7 +762,7 @@ def _validate_provenance_identity(
     subject = payload.get("subject")
     if isinstance(subject, Mapping):
         subject_path = subject.get("source_path")
-        if subject_path and not _source_path_matches(str(subject_path), source_path):
+        if subject_path and _relative_path(str(subject_path)) != source_path:
             raise ValueError(f"{artifact_kind} subject source path is inconsistent.")
         subject_sha = subject.get("source_sha256")
         if subject_sha and str(subject_sha) != source_sha256:
@@ -382,11 +776,21 @@ def _validate_provenance_identity(
             raise ValueError(f"{artifact_kind} subject function is inconsistent.")
 
 
-def _source_path_matches(declared: str, expected_relative: str) -> bool:
+def _declared_source_matches(
+    declared: str,
+    expected_relative: str,
+    selected_source: Path,
+) -> bool:
     normalized = declared.replace("\\", "/")
-    if normalized == expected_relative:
-        return True
-    return normalized.endswith("/" + expected_relative)
+    is_absolute = bool(re.match(r"^[A-Za-z]:/", normalized)) or Path(
+        normalized
+    ).is_absolute()
+    if is_absolute:
+        return lexical_absolute(normalized) == lexical_absolute(selected_source)
+    try:
+        return _relative_path(normalized) == expected_relative
+    except ValueError:
+        return False
 
 
 def artifact_reference(
@@ -395,15 +799,15 @@ def artifact_reference(
     *,
     artifact_kind: str,
 ) -> ArtifactReference:
-    workspace = Path(workspace).resolve()
-    resolved = path.resolve()
-    relative = resolved.relative_to(workspace).as_posix()
-    if not resolved.is_file() or resolved.is_symlink():
+    workspace = lexical_absolute(workspace)
+    lexical_path = assert_no_reparse_components(path, workspace)
+    relative = lexical_path.relative_to(workspace).as_posix()
+    if not lexical_path.is_file():
         raise ValueError(f"Artifact reference must identify a regular non-symlink file: {path}")
     return ArtifactReference(
         artifact_kind=artifact_kind,
         path=relative,
-        sha256=hashlib.sha256(resolved.read_bytes()).hexdigest(),
+        sha256=hashlib.sha256(lexical_path.read_bytes()).hexdigest(),
     )
 
 
@@ -456,13 +860,12 @@ def _contained_file(workspace: Path, relative: str) -> Path:
 
 def _first_regular_contained(workspace: Path, candidates: tuple[Path, ...]) -> Path:
     for candidate in candidates:
-        resolved = candidate.resolve(strict=False)
         try:
-            resolved.relative_to(workspace)
+            lexical = assert_no_reparse_components(candidate, workspace)
         except ValueError:
-            continue
-        if resolved.is_file() and not candidate.is_symlink():
-            return resolved
+            raise
+        if lexical.is_file():
+            return lexical
     raise FileNotFoundError(
         "Current artifact file is missing or escapes the workspace: "
         + ", ".join(str(item) for item in candidates)
@@ -477,11 +880,20 @@ def _first_regular_from_scoped_roots(
 ) -> Path:
     roots = (workspace,) if extra_root is None else (workspace, extra_root)
     for candidate in candidates:
-        resolved = candidate.resolve(strict=False)
-        if not any(_is_within(resolved, root) for root in roots):
+        lexical = lexical_absolute(candidate)
+        containing_root = next(
+            (
+                lexical_absolute(root)
+                for root in roots
+                if _is_within(lexical, lexical_absolute(root))
+            ),
+            None,
+        )
+        if containing_root is None:
             continue
-        if resolved.is_file() and not candidate.is_symlink():
-            return resolved
+        assert_no_reparse_components(lexical, containing_root)
+        if lexical.is_file():
+            return lexical
     raise FileNotFoundError(
         "Current source artifact is missing or escapes declared roots: "
         + ", ".join(str(item) for item in candidates)
