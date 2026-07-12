@@ -1483,14 +1483,31 @@ def _review_decisions_semantic_violations(
         return []
     violations: list[ContractViolation] = []
     decisions = data.get("decisions")
+    terminal = {"approved", "changes_requested", "waived"}
     if isinstance(decisions, list):
         for index, decision in enumerate(decisions):
-            if isinstance(decision, Mapping):
+            if not isinstance(decision, Mapping):
+                continue
+            base = f"$.data.decisions[{index}]"
+            resolution = decision.get("resolution")
+            decided_at = decision.get("decided_at")
+            if resolution in terminal:
+                for field in ("reviewer", "rationale"):
+                    value = decision.get(field)
+                    if not isinstance(value, str) or not value.strip():
+                        violations.append(
+                            ContractViolation(
+                                "required_terminal_metadata",
+                                f"{base}.{field}",
+                                f"Terminal review resolution requires nonblank {field}.",
+                            )
+                        )
                 violations.extend(
-                    _timestamp_violation(
-                        decision.get("decided_at"),
-                        f"$.data.decisions[{index}].decided_at",
-                    )
+                    _timestamp_violation(decided_at, f"{base}.decided_at")
+                )
+            elif decided_at:
+                violations.extend(
+                    _timestamp_violation(decided_at, f"{base}.decided_at")
                 )
     return violations
 

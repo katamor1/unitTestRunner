@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import re
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, Mapping
@@ -31,6 +32,108 @@ class ArtifactKindMismatchError(ValueError):
         )
 
 
+
+def _review_subject_fingerprint(subjects: list[dict[str, Any]]) -> str:
+    encoded = json.dumps(
+        sorted(subjects, key=lambda item: (
+            str(item.get("artifact_kind") or ""),
+            str(item.get("path") or ""),
+            str(item.get("sha256") or ""),
+            str(item.get("revision") or ""),
+        )),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _task6_migration_extensions(payload: Mapping[str, Any]) -> dict[str, Any]:
+    extensions = copy.deepcopy(dict(payload.get("extensions") or {}))
+    previous = extensions.get("migration")
+    migration = copy.deepcopy(dict(previous)) if isinstance(previous, Mapping) else {}
+    migration.update({
+        "source_version": "1.0.0",
+        "display_only": True,
+        "reason": "Task 6 semantic subject revisions cannot be reconstructed from v1.0.",
+    })
+    extensions["migration"] = migration
+    return extensions
+
+
+def _migrate_task6_v1(
+    kind: ArtifactKind,
+    payload: Mapping[str, Any],
+    target_version: str,
+) -> dict[str, Any]:
+    result = copy.deepcopy(dict(payload))
+    result["schema_version"] = target_version
+    result["extensions"] = _task6_migration_extensions(payload)
+    data = result.get("data")
+    if not isinstance(data, dict):
+        raise ValueError(f"{kind.value} v1.0 data must be an object")
+
+    if kind is ArtifactKind.REVIEW_DECISIONS:
+        migrated_decisions: list[dict[str, Any]] = []
+        for raw in data.get("decisions") or []:
+            if not isinstance(raw, Mapping):
+                raise ValueError("review_decisions v1.0 decision must be an object")
+            decision = copy.deepcopy(dict(raw))
+            references: list[dict[str, Any]] = []
+            for raw_reference in decision.get("subject_artifacts") or []:
+                if not isinstance(raw_reference, Mapping):
+                    raise ValueError("review decision subject artifact must be an object")
+                reference = copy.deepcopy(dict(raw_reference))
+                reference["revision"] = None
+                references.append(reference)
+            decision["subject_artifacts"] = references
+            decision["subject_fingerprint"] = _review_subject_fingerprint(references)
+            decision["migration_metadata"] = {
+                "source_version": "1.0.0",
+                "subject_revision_proven": False,
+            }
+            migrated_decisions.append(decision)
+        data["decisions"] = migrated_decisions
+    elif kind is ArtifactKind.FUNCTION_DOSSIER:
+        subject = result.get("subject")
+        function_id = subject.get("function_id") if isinstance(subject, Mapping) else None
+        migrated_items: list[dict[str, Any]] = []
+        for raw in data.get("review_items") or []:
+            if not isinstance(raw, Mapping):
+                raise ValueError("function_dossier v1.0 review item must be an object")
+            item = copy.deepcopy(dict(raw))
+            related_cases = item.get("related_test_cases") or []
+            legacy_done = bool(item.pop("done", False))
+            item.update({
+                "function_id": function_id,
+                "case_id": str(related_cases[0]) if related_cases else None,
+                "semantic_subject_key": None,
+                "subjects": [],
+                "migration_metadata": {
+                    "source_version": "1.0.0",
+                    "legacy_done": legacy_done,
+                    "display_only": True,
+                },
+            })
+            migrated_items.append(item)
+        data["review_items"] = migrated_items
+        readiness = data.get("readiness")
+        if isinstance(readiness, dict):
+            readiness["review_complete"] = False
+            readiness["test_green"] = False
+        data.setdefault("review_assessments", [])
+        data.setdefault("orphaned_decision_ids", [])
+        data.setdefault("review_ledger_revision", None)
+    elif kind is ArtifactKind.DOSSIER_MANIFEST:
+        readiness = data.get("readiness")
+        if isinstance(readiness, dict):
+            readiness["review_complete"] = False
+            readiness["test_green"] = False
+        data.setdefault("review_assessments", [])
+        data.setdefault("orphaned_decision_ids", [])
+        data.setdefault("review_ledger_revision", None)
+    return result
+
 def migrate_payload(
     kind: ArtifactKind,
     payload: Mapping[str, Any],
@@ -41,11 +144,12 @@ def migrate_payload(
     if declared_kind is not None and declared_kind != kind.value:
         raise ArtifactKindMismatchError(kind, declared_kind)
 
-    contract = get_contract(kind)
-    if target_version != contract.current_version:
+    try:
+        contract = get_contract(kind, target_version)
+    except ValueError as error:
         raise ValueError(
             f"Unsupported migration target for {kind.value}: {target_version}"
-        )
+        ) from error
 
     source = copy.deepcopy(dict(payload))
     source_version = str(source.get("schema_version") or "")
@@ -60,6 +164,12 @@ def migrate_payload(
         if source_version == "1.0.0":
             return _migrate_test_spec_v1_0(source, target_version)
         return _migrate_test_spec_v0_1(source, target_version)
+    if source_version == "1.0.0" and kind in {
+        ArtifactKind.REVIEW_DECISIONS,
+        ArtifactKind.FUNCTION_DOSSIER,
+        ArtifactKind.DOSSIER_MANIFEST,
+    }:
+        return _migrate_task6_v1(kind, source, target_version)
 
     subject = _legacy_subject(source)
     if kind is ArtifactKind.TEST_SPEC:

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from unit_test_runner.contracts import ArtifactKind
 from unit_test_runner.contracts.migrations import migrate_payload
+from unit_test_runner.contracts.registry import get_contract
 from unit_test_runner.contracts.validator import validate_payload
 from unit_test_runner.dsw_parser import discover_dsw_workspaces
 
@@ -93,7 +94,7 @@ def valid_cli_result() -> dict:
 def artifact_payload(kind: ArtifactKind, data: dict) -> dict:
     payload = valid_test_spec()
     payload["artifact_kind"] = kind.value
-    payload["schema_version"] = "1.0.0"
+    payload["schema_version"] = get_contract(kind).current_version
     payload["data"] = data
     return payload
 
@@ -246,7 +247,19 @@ def valid_function_dossier() -> dict:
                     "related_test_cases": [],
                     "severity": "warning",
                     "suggested_reviewer_role": "unit_test_reviewer",
-                    "done": False,
+                    "function_id": "fn_control_update_7a32c11d",
+                    "case_id": None,
+                    "semantic_subject_key": "analysis/source-digest",
+                    "subjects": [{
+                        "artifact_kind": "source_digest",
+                        "path": "reports/source_digest.json",
+                        "sha256": SHA256,
+                        "revision": 1,
+                        "function_id": "fn_control_update_7a32c11d",
+                        "source_path": "src/control.c",
+                        "source_sha256": SHA256,
+                        "semantic_subject_key": "analysis/source-digest",
+                    }],
                 }
             ],
             "unresolved_items": [],
@@ -258,11 +271,16 @@ def valid_function_dossier() -> dict:
                 "ready_for_build_probe": False,
                 "ready_for_execution": False,
                 "evidence_ready": False,
+                "review_complete": False,
+                "test_green": False,
                 "blocked": False,
                 "blocked_reasons": [],
                 "quality_score": None,
             },
             "warnings": [],
+            "review_assessments": [],
+            "orphaned_decision_ids": [],
+            "review_ledger_revision": 0,
         },
     )
 
@@ -365,12 +383,18 @@ def resolved_contract_payloads() -> dict[ArtifactKind, dict]:
                         "reviewer": "reviewer@example.com",
                         "rationale": "Evidence is complete.",
                         "decided_at": "2026-07-12T00:00:00+00:00",
-                        "subject_artifacts": [
-                            artifact_reference(
-                                "function_dossier",
-                                "reports/function_dossier.json",
-                            )
-                        ],
+                        "subject_fingerprint": SHA256,
+                        "subject_artifacts": [{
+                            **artifact_reference(
+                                "test_spec",
+                                "reports/test_spec.json",
+                            ),
+                            "revision": 1,
+                            "function_id": "fn_control_update_7a32c11d",
+                            "source_path": "src/control.c",
+                            "source_sha256": SHA256,
+                            "semantic_subject_key": "oracle/return",
+                        }],
                     }
                 ],
             },
@@ -597,7 +621,7 @@ class ContractValidationTests(unittest.TestCase):
             (
                 ArtifactKind.REVIEW_DECISIONS,
                 review,
-                ("schema_error", "$.data.decisions[0].rationale"),
+                ("required_terminal_metadata", "$.data.decisions[0].rationale"),
             )
         )
 

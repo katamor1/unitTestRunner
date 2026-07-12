@@ -50,7 +50,7 @@ class PublicArtifactSchemaTests(unittest.TestCase):
     def test_schema_package_contains_exactly_one_file_per_kind_plus_common(self):
         root = resources.files("unit_test_runner.schemas")
         actual = {item.name for item in root.iterdir() if item.name.endswith(".json")}
-        expected = {"common.schema.json"} | {
+        expected = {"common.schema.json", "common_v1_0.schema.json"} | {
             contract.schema_resource for contract in iter_contract_versions()
         }
 

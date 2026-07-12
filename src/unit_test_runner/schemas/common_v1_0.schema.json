@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://unit-test-runner.local/schemas/common.schema.json",
+  "$id": "https://unit-test-runner.local/schemas/common_v1_0.schema.json",
   "title": "unitTestRunner artifact envelope",
   "type": "object",
   "additionalProperties": false,
@@ -1003,10 +1003,7 @@
         "related_test_cases",
         "severity",
         "suggested_reviewer_role",
-        "function_id",
-        "case_id",
-        "semantic_subject_key",
-        "subjects"
+        "done"
       ],
       "properties": {
         "review_id": {
@@ -1050,46 +1047,8 @@
           "type": "string",
           "minLength": 1
         },
-        "function_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/identifier"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "case_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/identifier"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "semantic_subject_key": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "subjects": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": {
-            "$ref": "#/$defs/reviewSubjectReference"
-          }
-        },
-        "migration_metadata": {
-          "$ref": "#/$defs/openMap"
+        "done": {
+          "type": "boolean"
         }
       }
     },
@@ -1105,9 +1064,7 @@
         "evidence_ready",
         "blocked",
         "blocked_reasons",
-        "quality_score",
-        "review_complete",
-        "test_green"
+        "quality_score"
       ],
       "properties": {
         "mvp_level": {
@@ -1155,12 +1112,6 @@
               "type": "null"
             }
           ]
-        },
-        "review_complete": {
-          "type": "boolean"
-        },
-        "test_green": {
-          "type": "boolean"
         }
       }
     },
@@ -3111,30 +3062,6 @@
         },
         "evidence": {
           "$ref": "#/$defs/openMap"
-        },
-        "review_assessments": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/opaqueRecord"
-          }
-        },
-        "orphaned_decision_ids": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/identifier"
-          },
-          "uniqueItems": true
-        },
-        "review_ledger_revision": {
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": 0
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       }
     },
@@ -3154,30 +3081,6 @@
         },
         "readiness": {
           "$ref": "#/$defs/dossierReadiness"
-        },
-        "review_assessments": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/opaqueRecord"
-          }
-        },
-        "orphaned_decision_ids": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/identifier"
-          },
-          "uniqueItems": true
-        },
-        "review_ledger_revision": {
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": 0
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       }
     },
@@ -3787,7 +3690,6 @@
         "reviewer",
         "rationale",
         "decided_at",
-        "subject_fingerprint",
         "subject_artifacts"
       ],
       "properties": {
@@ -3803,29 +3705,48 @@
           ]
         },
         "reviewer": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "rationale": {
           "type": "string"
         },
         "decided_at": {
-          "type": "string"
-        },
-        "subject_fingerprint": {
-          "$ref": "#/$defs/sha256"
+          "$ref": "#/$defs/dateTime"
         },
         "subject_artifacts": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
           "items": {
-            "$ref": "#/$defs/reviewSubjectReference"
+            "$ref": "#/$defs/artifact_reference"
           }
-        },
-        "migration_metadata": {
-          "$ref": "#/$defs/openMap"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "resolution": {
+                "enum": [
+                  "changes_requested",
+                  "waived"
+                ]
+              }
+            },
+            "required": [
+              "resolution"
+            ]
+          },
+          "then": {
+            "properties": {
+              "rationale": {
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
     },
     "reviewDecisionsData": {
       "type": "object",
@@ -4329,80 +4250,6 @@
           "items": {
             "$ref": "#/$defs/dswWarning"
           }
-        }
-      }
-    },
-    "reviewSubjectReference": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "artifact_kind",
-        "path",
-        "sha256",
-        "revision"
-      ],
-      "properties": {
-        "artifact_kind": {
-          "type": "string",
-          "minLength": 1
-        },
-        "path": {
-          "$ref": "#/$defs/relativePath"
-        },
-        "sha256": {
-          "$ref": "#/$defs/sha256"
-        },
-        "revision": {
-          "anyOf": [
-            {
-              "type": "integer",
-              "minimum": 1
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "function_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/identifier"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "source_path": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/relativePath"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "source_sha256": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/sha256"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "semantic_subject_key": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       }
     }

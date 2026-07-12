@@ -16,7 +16,16 @@ class ContractRegistryTests(unittest.TestCase):
         self.assertEqual(len(ArtifactKind), len(contracts))
         for kind in ArtifactKind:
             contract = get_contract(kind)
-            expected_version = "1.1.0" if kind is ArtifactKind.TEST_SPEC else "1.0.0"
+            expected_version = (
+                "1.1.0"
+                if kind in {
+                    ArtifactKind.TEST_SPEC,
+                    ArtifactKind.REVIEW_DECISIONS,
+                    ArtifactKind.FUNCTION_DOSSIER,
+                    ArtifactKind.DOSSIER_MANIFEST,
+                }
+                else "1.0.0"
+            )
             self.assertEqual(expected_version, contract.current_version)
             self.assertEqual(f"{kind.value}.schema.json", contract.schema_resource)
             self.assertTrue(
