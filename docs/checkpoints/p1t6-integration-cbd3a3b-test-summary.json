@@ -1,0 +1,13 @@
+{
+  "completed_modules": 117,
+  "elapsed_this_run_seconds": 928.642,
+  "errors": 0,
+  "failed_modules": [],
+  "failures": 0,
+  "head": "9c1075375a902f5e1a3f443eff9b4d1cd456c2f8",
+  "nonzero_modules": 0,
+  "passed_modules": 117,
+  "skipped": 2,
+  "tests": 563,
+  "total_modules": 117
+}
