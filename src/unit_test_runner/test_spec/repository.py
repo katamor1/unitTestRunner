@@ -18,6 +18,7 @@ from unit_test_runner.contracts import (
     validate_payload,
 )
 from unit_test_runner.contracts.registry import get_contract
+from unit_test_runner.path_utils import resolved_relative_to
 
 from .migration import migrate_legacy_test_case_design
 from .models import (
@@ -203,15 +204,23 @@ def save_test_spec_snapshot(
                 ),
             )
         )
-    root = (current_context.workspace_root or path.parent.parent).resolve()
-    assert_safe_canonical_test_spec_path(path)
-    expected_path = root / "reports" / "test_spec.json"
-    lexical_path = Path(os.path.abspath(path))
-    if lexical_path != expected_path:
-        raise ValueError("Canonical test specifications must be written to the workspace reports/test_spec.json.")
-    resolved_parent = path.parent.resolve(strict=False)
-    if resolved_parent != root / "reports":
+    lexical_path, lexical_workspace = assert_safe_canonical_test_spec_path(path)
+    root = Path(current_context.workspace_root or lexical_workspace)
+    try:
+        relative_path = resolved_relative_to(lexical_path, root)
+    except ValueError as error:
+        raise ValueError(
+            "Canonical test specifications must be written to the workspace reports/test_spec.json."
+        ) from error
+    if relative_path != Path("reports") / "test_spec.json":
+        raise ValueError(
+            "Canonical test specifications must be written to the workspace reports/test_spec.json."
+        )
+    resolved_root = root.resolve(strict=False)
+    resolved_parent = lexical_path.parent.resolve(strict=False)
+    if resolved_parent != resolved_root / "reports":
         raise ValueError("Canonical test_spec parent must not escape through a symlink.")
+    path = lexical_path
     if path.is_symlink():
         raise ValueError("Canonical test_spec.json must not be a symbolic link.")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -265,7 +274,7 @@ def save_test_spec_snapshot(
         )
         artifact = ProducedArtifact(
             kind=ArtifactKind.TEST_SPEC.value,
-            path=path.resolve().relative_to(root).as_posix(),
+            path=relative_path.as_posix(),
             exists=True,
             sha256=snapshot.sha256,
             schema_version=snapshot.spec.schema_version,

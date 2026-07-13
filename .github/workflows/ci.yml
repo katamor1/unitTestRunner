@@ -50,6 +50,8 @@ jobs:
   python-tests:
     name: Python tests
     runs-on: windows-latest
+    env:
+      UNIT_TEST_RUNNER_REQUIRE_8DOT3_ALIAS: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4

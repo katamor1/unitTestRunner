@@ -6,6 +6,10 @@ import unittest
 from pathlib import Path
 
 from tests.spec_support import write_canonical_test_spec
+from tests.windows_path_alias_support import (
+    WINDOWS_8DOT3_PREFIX,
+    require_windows_path_alias_pair,
+)
 
 
 class PrepareEvidenceNonDestructiveTests(unittest.TestCase):
@@ -259,8 +263,10 @@ class PrepareEvidenceNonDestructiveTests(unittest.TestCase):
         from unit_test_runner.execution.execution_models import TestRunRequest
         from unit_test_runner.execution.test_execution import execute_test_run
 
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(prefix=WINDOWS_8DOT3_PREFIX) as temp_dir:
             workspace = Path(temp_dir)
+            if os.name == "nt":
+                workspace = require_windows_path_alias_pair(self, workspace).short
             runner = self._prepare_workspace(workspace)
             execute_test_run(
                 TestRunRequest(workspace, runner, 5, True, run_id="run-older")
@@ -281,8 +287,13 @@ class PrepareEvidenceNonDestructiveTests(unittest.TestCase):
             execution = result.data["test_execution"]
             self.assertEqual("run-older", execution["run_id"])
             self.assertEqual(
-                workspace / "runs" / "run-older" / "test_execution_report.json",
-                Path(execution["json"]),
+                (
+                    workspace
+                    / "runs"
+                    / "run-older"
+                    / "test_execution_report.json"
+                ).resolve(),
+                Path(execution["json"]).resolve(),
             )
             latest_evidence = json.loads(
                 (workspace / "reports" / "latest_evidence.json").read_text(
