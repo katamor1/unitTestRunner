@@ -1,4 +1,4 @@
-name: Publish Phase 1 Task 6 checkpoint
+name: Export Phase 1 Task 6 checkpoint
 
 on:
   push:
@@ -10,10 +10,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  publish:
+  export:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout upload branch
@@ -33,54 +33,36 @@ jobs:
             base64 --decode --ignore-garbage "$part" >> "$RUNNER_TEMP/p1t6.bundle"
           done
 
-      - name: Verify Git bundle
+      - name: Verify and import checkpoint
         shell: bash
         run: |
           set -euo pipefail
           git bundle verify "$RUNNER_TEMP/p1t6.bundle"
-          git bundle list-heads "$RUNNER_TEMP/p1t6.bundle"
-
-      - name: Fetch advertised task ref
-        shell: bash
-        run: |
-          set +e
           git fetch "$RUNNER_TEMP/p1t6.bundle" \
-            "+refs/heads/codex/p1t6-review-decisions-readiness:refs/heads/p1t6-imported" \
-            > "$RUNNER_TEMP/p1t6-fetch.log" 2>&1
-          rc=$?
-          echo "fetch_rc=$rc" >> "$RUNNER_TEMP/p1t6-fetch.log"
-          cat "$RUNNER_TEMP/p1t6-fetch.log"
-          exit "$rc"
-
-      - name: Upload fetch diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: p1t6-fetch-diagnostics
-          path: ${{ runner.temp }}/p1t6-fetch.log
-          if-no-files-found: warn
-          retention-days: 1
-
-      - name: Verify imported commit
-        shell: bash
-        run: |
-          set -euo pipefail
+            "+refs/heads/codex/p1t6-review-decisions-readiness:refs/heads/p1t6-imported"
           test "$(git rev-parse refs/heads/p1t6-imported)" = \
             "efbff7825b94afda01d86d15b8f0ec6be520225b"
-          git cat-file -e \
-            efbff7825b94afda01d86d15b8f0ec6be520225b^{commit}
-
-      - name: Validate bundle ancestry
-        shell: bash
-        run: |
-          set -euo pipefail
           git merge-base --is-ancestor \
             b66790165a2d4f82943cd199b3b499e1f1725fc3 \
             efbff7825b94afda01d86d15b8f0ec6be520225b
 
-      - name: Publish task branch
+      - name: Build checkpoint source archive
         shell: bash
         run: |
           set -euo pipefail
-          git push origin \
-            refs/heads/p1t6-imported:refs/heads/codex/p1t6-review-decisions-readiness
+          git archive --format=tar.gz \
+            --prefix=unitTestRunner-p1t6-efbff78/ \
+            --output=unitTestRunner-p1t6-efbff78-source.tar.gz \
+            efbff7825b94afda01d86d15b8f0ec6be520225b
+          sha256sum unitTestRunner-p1t6-efbff78-source.tar.gz \
+            > unitTestRunner-p1t6-efbff78-source.tar.gz.sha256
+
+      - name: Upload checkpoint source
+        uses: actions/upload-artifact@v4
+        with:
+          name: unitTestRunner-p1t6-efbff78-source
+          path: |
+            unitTestRunner-p1t6-efbff78-source.tar.gz
+            unitTestRunner-p1t6-efbff78-source.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 1
