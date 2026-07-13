@@ -1,6 +1,9 @@
 name: Materialize Phase 1 Task 6 checkpoint
 
 on:
+  push:
+    branches:
+      - codex/bootstrap-p1t6-c581-exact
   pull_request:
     branches:
       - main
@@ -18,18 +21,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Reconstruct and verify patch
+      - name: Reconstruct checkpoint patch
         shell: bash
         run: |
           set -euo pipefail
           cat .github/bootstrap/p1t6-patch-b64/part* \
             | base64 --decode > "$RUNNER_TEMP/p1t6.patch.gz"
-          test "$(stat -c%s "$RUNNER_TEMP/p1t6.patch.gz")" = "41409"
-          test "$(sha256sum "$RUNNER_TEMP/p1t6.patch.gz" | awk '{print $1}')" = \
-            "f09f489c4eff0e532c84833741f69fe8d09a6a3be14715d0629f0dc0f6f4813c"
+          echo "compressed_size=$(stat -c%s "$RUNNER_TEMP/p1t6.patch.gz")"
+          sha256sum "$RUNNER_TEMP/p1t6.patch.gz"
+          gzip -t "$RUNNER_TEMP/p1t6.patch.gz"
           gzip -dc "$RUNNER_TEMP/p1t6.patch.gz" > "$RUNNER_TEMP/p1t6.patch"
-          test "$(sha256sum "$RUNNER_TEMP/p1t6.patch" | awk '{print $1}')" = \
-            "8aaa74a87b2e1ea64087726bbcbfd8c998d5940c458d04768b63f969fe461ef0"
+          echo "patch_size=$(stat -c%s "$RUNNER_TEMP/p1t6.patch")"
+          sha256sum "$RUNNER_TEMP/p1t6.patch"
 
       - name: Apply exact Task 6 tree
         shell: bash
@@ -40,8 +43,10 @@ jobs:
           git apply --check "$RUNNER_TEMP/p1t6.patch"
           git apply "$RUNNER_TEMP/p1t6.patch"
           git add -A
-          test "$(git write-tree)" = \
-            "363ddb6f86a4508eb5f4dd2a26013b837a5e26d6"
+          actual_tree="$(git write-tree)"
+          echo "actual_tree=$actual_tree"
+          test "$actual_tree" = "363ddb6f86a4508eb5f4dd2a26013b837a5e26d6"
+          git diff --cached --check
 
       - name: Install package
         shell: bash
@@ -68,7 +73,10 @@ jobs:
 
           modules = sorted(f"tests.{path.stem}" for path in Path("tests").glob("test_*.py"))
           failures = []
-          for module in modules:
+          tests = 0
+          skips = 0
+          for index, module in enumerate(modules, 1):
+              print(f"[{index}/{len(modules)}] {module}", flush=True)
               result = subprocess.run(
                   [sys.executable, "-m", "unittest", module, "-v"],
                   env=os.environ.copy(),
@@ -81,7 +89,7 @@ jobs:
           PY
           python -m compileall -q src tests
           python -m unit_test_runner --help >/dev/null
-          git diff --check --cached
+          git diff --cached --check
 
       - name: Commit and publish product branch
         shell: bash
@@ -90,5 +98,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "feat: complete phase 1 task 6 review decisions"
+          test "$(git rev-parse HEAD^{tree})" = "363ddb6f86a4508eb5f4dd2a26013b837a5e26d6"
           git push --force origin \
             HEAD:refs/heads/codex/p1t6-review-decisions-c581
