@@ -1,0 +1,116 @@
+name: Materialize Phase 1 Task 6 v3
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout checkpoint carrier
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and verify checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/bootstrap/p1t6-v3-b64/part* \
+            | tr -d '\r\n' \
+            | base64 --decode > "$RUNNER_TEMP/p1t6.patch.gz"
+          test "$(stat -c%s "$RUNNER_TEMP/p1t6.patch.gz")" = "41476"
+          test "$(sha256sum "$RUNNER_TEMP/p1t6.patch.gz" | awk '{print $1}')" = \
+            "121bfc6fdcbb6e8728402997f291a0ef3af000d775d3c8bca791e0de28d13123"
+          gzip -t "$RUNNER_TEMP/p1t6.patch.gz"
+          gzip -dc "$RUNNER_TEMP/p1t6.patch.gz" > "$RUNNER_TEMP/p1t6.patch"
+          test "$(stat -c%s "$RUNNER_TEMP/p1t6.patch")" = "223625"
+          test "$(sha256sum "$RUNNER_TEMP/p1t6.patch" | awk '{print $1}')" = \
+            "8aaa74a87b2e1ea64087726bbcbfd8c998d5940c458d04768b63f969fe461ef0"
+
+      - name: Apply exact Task 6 tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout -B codex/p1t6-review-decisions-c581 \
+            b66790165a2d4f82943cd199b3b499e1f1725fc3
+          git apply --check "$RUNNER_TEMP/p1t6.patch"
+          git apply "$RUNNER_TEMP/p1t6.patch"
+          git add -A
+          test "$(git write-tree)" = \
+            "363ddb6f86a4508eb5f4dd2a26013b837a5e26d6"
+          git diff --cached --check
+
+      - name: Install Python package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install "setuptools>=61" wheel
+          python -m pip install -e .
+
+      - name: Run isolated Python gate
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+          OPENBLAS_NUM_THREADS: "1"
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import subprocess
+          import sys
+
+          modules = sorted(f"tests.{path.stem}" for path in Path("tests").glob("test_*.py"))
+          failures = []
+          for index, module in enumerate(modules, 1):
+              print(f"[{index}/{len(modules)}] {module}", flush=True)
+              result = subprocess.run(
+                  [sys.executable, "-m", "unittest", module, "-v"],
+                  env=os.environ.copy(),
+              )
+              if result.returncode:
+                  failures.append(module)
+          print(f"isolated_modules={len(modules)} failures={len(failures)}", flush=True)
+          if failures:
+              raise SystemExit("isolated Python failures: " + ", ".join(failures))
+          PY
+          python -m compileall -q src tests
+          python -m unit_test_runner --help >/dev/null
+          git diff --cached --check
+
+      - name: Build and inspect wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/dist" .
+          python - <<'PY'
+          import json
+          from importlib import resources
+          from unit_test_runner.contracts import ArtifactKind
+          root = resources.files("unit_test_runner.schemas")
+          for kind in ArtifactKind:
+              assert root.joinpath(f"{kind.value}.schema.json").is_file(), kind.value
+          print(f"artifact_kinds={len(list(ArtifactKind))}")
+          PY
+
+      - name: Commit and publish product branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat: complete phase 1 task 6 review decisions"
+          test "$(git rev-parse HEAD^{tree})" = \
+            "363ddb6f86a4508eb5f4dd2a26013b837a5e26d6"
+          git push --force origin \
+            HEAD:refs/heads/codex/p1t6-review-decisions-c581
