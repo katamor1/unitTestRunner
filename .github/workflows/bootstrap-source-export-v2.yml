@@ -1,4 +1,4 @@
-name: bootstrap-source-export-v2
+name: guarded-phase1-task6-recovery
 
 on:
   push:
@@ -14,33 +14,249 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  actions: read
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: guarded-p1t6-recovery
+  cancel-in-progress: false
 
 jobs:
-  export:
-    runs-on: ubuntu-latest
+  recover-verify-publish:
+    runs-on: windows-latest
+    timeout-minutes: 300
+    env:
+      TARGET_BRANCH: codex/p1t6-review-decisions-readiness
+      EXPECTED_HEAD: 9da6b8ecbcd4a95d80ea61347558e4d5721d30a5
+      PATCH_RUN_ID: "29221806111"
+      PATCH_ARTIFACT: p1t6-4c239-patch
+      PYTHONUTF8: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout bootstrap repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Fetch repository refs and build bundle
-        shell: bash
+
+      - name: Download recovered Task 6 patch
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          git fetch origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' --prune
-          git bundle create "$RUNNER_TEMP/unitTestRunner-all.bundle" --all
-          git bundle verify "$RUNNER_TEMP/unitTestRunner-all.bundle"
-          git bundle list-heads "$RUNNER_TEMP/unitTestRunner-all.bundle" \
-            > "$RUNNER_TEMP/unitTestRunner-all-heads.txt"
-          sha256sum "$RUNNER_TEMP/unitTestRunner-all.bundle" \
-            > "$RUNNER_TEMP/unitTestRunner-all.bundle.sha256"
-      - name: Upload repository bundle
+          $ErrorActionPreference = 'Stop'
+          $artifactDir = Join-Path $env:RUNNER_TEMP 'p1t6-artifact'
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+          gh run download $env:PATCH_RUN_ID --repo $env:GITHUB_REPOSITORY --name $env:PATCH_ARTIFACT --dir $artifactDir
+          Get-ChildItem -LiteralPath $artifactDir -Recurse -File | ForEach-Object {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant()
+            Write-Host ("artifact-file path={0} bytes={1} sha256={2}" -f $_.FullName, $_.Length, $hash)
+          }
+
+      - name: Extract and validate unified patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifactDir = Join-Path $env:RUNNER_TEMP 'p1t6-artifact'
+          $output = Join-Path $env:RUNNER_TEMP 'p1t6-recovered.patch'
+          @'
+          from __future__ import annotations
+          import gzip
+          import hashlib
+          import pathlib
+          import sys
+          import zipfile
+
+          root = pathlib.Path(sys.argv[1])
+          destination = pathlib.Path(sys.argv[2])
+          queue = sorted(path for path in root.rglob('*') if path.is_file())
+          seen: set[tuple[str, str]] = set()
+          candidates: list[tuple[pathlib.Path, bytes]] = []
+
+          def visit(name: pathlib.Path, data: bytes) -> None:
+              digest = hashlib.sha256(data).hexdigest()
+              key = (str(name), digest)
+              if key in seen:
+                  return
+              seen.add(key)
+              print(f'inspect name={name} bytes={len(data)} sha256={digest}')
+              if data.startswith(b'\x1f\x8b'):
+                  visit(pathlib.Path(str(name) + '.gunzipped'), gzip.decompress(data))
+                  return
+              if data.startswith(b'PK\x03\x04'):
+                  import io
+                  with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                      for member in archive.infolist():
+                          if not member.is_dir():
+                              visit(pathlib.Path(str(name)) / member.filename, archive.read(member))
+                  return
+              if b'diff --git ' in data and (b'--- a/' in data or b'new file mode ' in data):
+                  candidates.append((name, data))
+
+          for path in queue:
+              visit(path.relative_to(root), path.read_bytes())
+
+          if len(candidates) != 1:
+              raise SystemExit(f'expected exactly one unified patch, found {len(candidates)}: {[str(n) for n, _ in candidates]}')
+          name, patch = candidates[0]
+          destination.write_bytes(patch)
+          print(f'selected={name} patch_bytes={len(patch)} patch_sha256={hashlib.sha256(patch).hexdigest()}')
+          '@ | python - $artifactDir $output
+          if ($LASTEXITCODE -ne 0) { throw 'patch extraction failed' }
+          Select-String -LiteralPath $output -Pattern '^diff --git ' | Select-Object -First 200
+
+      - name: Check out exact Task 6 head and apply candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git fetch origin $env:TARGET_BRANCH
+          git checkout -B $env:TARGET_BRANCH ("origin/{0}" -f $env:TARGET_BRANCH)
+          $head = (git rev-parse HEAD).Trim()
+          if ($head -ne $env:EXPECTED_HEAD) {
+            throw "refusing recovery: expected $env:EXPECTED_HEAD but branch is $head"
+          }
+          $patch = Join-Path $env:RUNNER_TEMP 'p1t6-recovered.patch'
+          git apply --check $patch
+          git apply $patch
+          git diff --stat
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'candidate patch has whitespace errors' }
+          $changed = @(git diff --name-only)
+          if ($changed.Count -eq 0) { throw 'candidate patch produced no changes' }
+          $forbidden = @($changed | Where-Object { $_ -like '.github/*' -or $_ -eq '.github' })
+          if ($forbidden.Count -ne 0) { throw ('candidate patch changes workflow/bootstrap files: ' + ($forbidden -join ', ')) }
+
+      - name: Install project dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "setuptools>=61" wheel
+          python -m pip install -e .
+
+      - name: Run Task 6 focused verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $focused = @(
+            'tests.test_review_decisions',
+            'tests.test_review_decision_staleness',
+            'tests.test_dossier_readiness',
+            'tests.test_dossier_review_authority',
+            'tests.test_review_decision_integration',
+            'tests.test_review_decision_cli',
+            'tests.test_reanalysis_cli',
+            'tests.test_test_spec_consumers',
+            'tests.test_vc6_fixture_build_e2e'
+          )
+          foreach ($module in $focused) {
+            Write-Host "=== focused $module ==="
+            & python -m unittest $module -v
+            if ($LASTEXITCODE -ne 0) { throw "focused test failed: $module" }
+          }
+
+      - name: Run authoritative isolated Python gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:PYTHONPATH = (Resolve-Path .\src).Path
+          $modules = Get-ChildItem -LiteralPath .\tests -Filter 'test_*.py' -File |
+            Sort-Object Name |
+            ForEach-Object { 'tests.' + $_.BaseName }
+          if ($modules.Count -lt 100) { throw "unexpected test module count: $($modules.Count)" }
+          $failed = @()
+          foreach ($module in $modules) {
+            Write-Host "=== isolated $module ==="
+            & python -m unittest $module -v
+            if ($LASTEXITCODE -ne 0) { $failed += $module }
+          }
+          Write-Host "isolated-module-count=$($modules.Count)"
+          if ($failed.Count -ne 0) {
+            throw ('isolated Python failures: ' + ($failed -join ', '))
+          }
+
+      - name: Run compile, CLI, fixture, and package gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m compileall -q src tests
+          if ($LASTEXITCODE -ne 0) { throw 'compileall failed' }
+          python -m unit_test_runner --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'CLI help failed' }
+          python -m unittest tests.test_fixture_cli_smoke tests.test_vc6_fixture_build_e2e -v
+          if ($LASTEXITCODE -ne 0) { throw 'fixture smoke failed' }
+
+          $dist = Join-Path $env:RUNNER_TEMP 'p1t6-wheel'
+          $venv = Join-Path $env:RUNNER_TEMP 'p1t6-fresh-venv'
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          python -m pip wheel --no-deps --wheel-dir $dist .
+          if ($LASTEXITCODE -ne 0) { throw 'wheel build failed' }
+          python -m venv $venv
+          if ($LASTEXITCODE -ne 0) { throw 'fresh venv creation failed' }
+          $freshPython = Join-Path $venv 'Scripts\python.exe'
+          $wheel = Get-ChildItem -LiteralPath $dist -Filter 'unit_test_runner-*.whl' | Select-Object -First 1
+          if ($null -eq $wheel) { throw 'wheel was not produced' }
+          & $freshPython -m pip install $wheel.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'fresh wheel install failed' }
+          & $freshPython -m unit_test_runner --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'fresh-installed CLI failed' }
+          @'
+          from importlib import resources
+          from unit_test_runner.contracts import ArtifactKind
+          from unit_test_runner.contracts.registry import get_contract
+          root = resources.files('unit_test_runner.schemas')
+          missing = []
+          for kind in ArtifactKind:
+              contract = get_contract(kind)
+              if not root.joinpath(contract.schema_resource).is_file():
+                  missing.append((kind.value, contract.schema_resource))
+          assert root.joinpath('common.schema.json').is_file()
+          assert not missing, missing
+          print(f'loaded-current-contracts={len(list(ArtifactKind))}')
+          '@ | & $freshPython -
+          if ($LASTEXITCODE -ne 0) { throw 'fresh-installed contract registry check failed' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff check failed' }
+
+      - name: Run VS Code gates when extension changed
+        shell: pwsh
+        run: |
+          $changed = @(git diff --name-only)
+          if ($changed | Where-Object { $_ -like 'vscode/extension/*' }) {
+            Push-Location vscode\extension
+            npm ci
+            npm.cmd test
+            if ($LASTEXITCODE -ne 0) { throw 'VS Code tests failed' }
+            npm.cmd run compile
+            if ($LASTEXITCODE -ne 0) { throw 'VS Code compile failed' }
+            Pop-Location
+          } else {
+            Write-Host 'VS Code extension unchanged; dedicated repository CI remains authoritative.'
+          }
+
+      - name: Commit and publish only after all gates pass
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git status --short
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A src tests docs README.md pyproject.toml
+          if (git diff --cached --quiet) { throw 'no verified product changes to commit' }
+          git diff --cached --check
+          if ($LASTEXITCODE -ne 0) { throw 'staged diff check failed' }
+          git commit -m 'feat: complete phase 1 task 6 review decisions'
+          git push origin ("HEAD:refs/heads/{0}" -f $env:TARGET_BRANCH)
+
+      - name: Upload diagnostics on failure
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: unitTestRunner-all-git-bundle
+          name: guarded-p1t6-recovery-diagnostics
           path: |
-            ${{ runner.temp }}/unitTestRunner-all.bundle
-            ${{ runner.temp }}/unitTestRunner-all.bundle.sha256
-            ${{ runner.temp }}/unitTestRunner-all-heads.txt
-          if-no-files-found: error
-          retention-days: 1
+            ${{ runner.temp }}/p1t6-artifact
+            ${{ runner.temp }}/p1t6-recovered.patch
+          if-no-files-found: warn
+          retention-days: 3
