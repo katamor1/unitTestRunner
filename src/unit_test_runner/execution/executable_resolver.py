@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from unit_test_runner.harness.c90_writer import sha256_file
+from unit_test_runner.path_utils import resolved_relative_to
 
 from .execution_models import ExecutableInfo, TestExecutionWarning
 
@@ -17,9 +18,9 @@ def resolve_executable(
     build_probe_report = build_probe_report or {}
     path = Path(executable) if executable else Path("bin") / "utr_probe.exe"
     if path.is_absolute():
-        absolute = path
+        absolute = path.resolve(strict=False)
         try:
-            relative = path.relative_to(workspace)
+            relative = resolved_relative_to(absolute, workspace)
         except ValueError:
             relative = path
     else:

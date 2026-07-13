@@ -8,6 +8,7 @@ from unittest import mock
 
 import unit_test_runner.path_utils as path_utils
 from tests import windows_path_alias_support as alias_support
+from unit_test_runner.execution.executable_resolver import resolve_executable
 
 
 class WindowsPathAliasPolicyTests(unittest.TestCase):
@@ -82,6 +83,24 @@ class WindowsPathAliasIntegrationTests(unittest.TestCase):
                 os.path.normcase(os.fspath(pair.long)),
                 os.path.normcase(os.fspath(pair.short)),
             )
+
+    def test_resolve_executable_relativizes_short_executable_under_long_workspace_alias(self):
+        with tempfile.TemporaryDirectory(
+            prefix=alias_support.WINDOWS_8DOT3_PREFIX
+        ) as temp_dir:
+            pair = alias_support.require_windows_path_alias_pair(
+                self, Path(temp_dir)
+            )
+            executable = pair.long / "bin" / "utr_probe.exe"
+            executable.parent.mkdir()
+            executable.write_bytes(b"fixture executable")
+            info = resolve_executable(
+                pair.long,
+                pair.short / "bin" / "utr_probe.exe",
+                {"function": {"status": "succeeded"}},
+            )
+            self.assertTrue(info.exists)
+            self.assertEqual("bin/utr_probe.exe", info.path.as_posix())
 
     def test_relative_path_accepts_long_child_under_short_root_alias(self):
         with tempfile.TemporaryDirectory(
