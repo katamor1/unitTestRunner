@@ -27,6 +27,7 @@ jobs:
       - name: Decode Task 6 patch diagnostics
         shell: bash
         run: |
+          set +e
           set -u
           cp .github/bootstrap/p1t6-after-contract.part00.b64 \
             "$RUNNER_TEMP/p1t6-after-contract.part00.b64"
