@@ -22,26 +22,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: codex/bootstrap-p1t6-4c239-v1
-          fetch-depth: 1
-      - name: Inventory Task 6 patch chunks
+          fetch-depth: 0
+      - name: Fetch repository refs and build bundle
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/p1t6-4c239-chunks"
-          for part in \
-            .github/bootstrap/p1t6-4c239.patch.gz.b64.part00 \
-            .github/bootstrap/p1t6-4c239.patch.gz.b64.part01 \
-            .github/bootstrap/p1t6-4c239.patch.gz.b64.part02
-          do
-            cp "$part" "$RUNNER_TEMP/p1t6-4c239-chunks/$(basename "$part")"
-            wc -c "$part" >> "$RUNNER_TEMP/p1t6-4c239-chunks/inventory.txt"
-            sha256sum "$part" >> "$RUNNER_TEMP/p1t6-4c239-chunks/inventory.txt"
-          done
-      - name: Upload raw Task 6 patch chunks
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' --prune
+          git bundle create "$RUNNER_TEMP/unitTestRunner-all.bundle" --all
+          git bundle verify "$RUNNER_TEMP/unitTestRunner-all.bundle"
+          git bundle list-heads "$RUNNER_TEMP/unitTestRunner-all.bundle" \
+            > "$RUNNER_TEMP/unitTestRunner-all-heads.txt"
+          sha256sum "$RUNNER_TEMP/unitTestRunner-all.bundle" \
+            > "$RUNNER_TEMP/unitTestRunner-all.bundle.sha256"
+      - name: Upload repository bundle
         uses: actions/upload-artifact@v4
         with:
-          name: p1t6-4c239-raw-chunks
-          path: ${{ runner.temp }}/p1t6-4c239-chunks
+          name: unitTestRunner-all-git-bundle
+          path: |
+            ${{ runner.temp }}/unitTestRunner-all.bundle
+            ${{ runner.temp }}/unitTestRunner-all.bundle.sha256
+            ${{ runner.temp }}/unitTestRunner-all-heads.txt
           if-no-files-found: error
           retention-days: 1
