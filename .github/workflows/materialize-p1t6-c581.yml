@@ -21,25 +21,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Capture checkpoint blob
+      - name: Capture v4 hex payload
         uses: actions/upload-artifact@v4
         with:
-          name: p1t6-checkpoint-blob
-          path: .github/bootstrap/p1t6-full-from-b667.patch.gz
+          name: p1t6-v4-hex-payload
+          path: .github/bootstrap/p1t6-v4-hex
           if-no-files-found: error
           retention-days: 1
 
-      - name: Verify and unpack checkpoint blob
+      - name: Reconstruct checkpoint patch
         shell: bash
         run: |
           set -euo pipefail
-          cp .github/bootstrap/p1t6-full-from-b667.patch.gz "$RUNNER_TEMP/p1t6.patch.gz"
+          cat .github/bootstrap/p1t6-v4-hex/part* \
+            | tr -d '[:space:]' \
+            | xxd -r -p > "$RUNNER_TEMP/p1t6.patch.gz"
           echo "compressed_size=$(stat -c%s "$RUNNER_TEMP/p1t6.patch.gz")"
           sha256sum "$RUNNER_TEMP/p1t6.patch.gz"
+          test "$(stat -c%s "$RUNNER_TEMP/p1t6.patch.gz")" = "41476"
+          test "$(sha256sum "$RUNNER_TEMP/p1t6.patch.gz" | awk '{print $1}')" = \
+            "121bfc6fdcbb6e8728402997f291a0ef3af000d775d3c8bca791e0de28d13123"
           gzip -t "$RUNNER_TEMP/p1t6.patch.gz"
           gzip -dc "$RUNNER_TEMP/p1t6.patch.gz" > "$RUNNER_TEMP/p1t6.patch"
-          echo "patch_size=$(stat -c%s "$RUNNER_TEMP/p1t6.patch")"
-          sha256sum "$RUNNER_TEMP/p1t6.patch"
+          test "$(sha256sum "$RUNNER_TEMP/p1t6.patch" | awk '{print $1}')" = \
+            "8aaa74a87b2e1ea64087726bbcbfd8c998d5940c458d04768b63f969fe461ef0"
 
       - name: Apply exact Task 6 tree
         shell: bash
