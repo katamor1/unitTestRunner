@@ -22,20 +22,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 9da6b8ecbcd4a95d80ea61347558e4d5721d30a5
-          fetch-depth: 0
-      - name: Build Task 6 source archive
+          ref: codex/p1t6-patch-publish
+          fetch-depth: 1
+      - name: Decode Task 6 patch
         shell: bash
         run: |
           set -euo pipefail
-          git archive --format=tar.gz --prefix=unitTestRunner-p1t6/ --output=unitTestRunner-p1t6-source.tar.gz 9da6b8ecbcd4a95d80ea61347558e4d5721d30a5
-          sha256sum unitTestRunner-p1t6-source.tar.gz > unitTestRunner-p1t6-source.tar.gz.sha256
-      - name: Upload Task 6 source artifact
+          base64 --decode --ignore-garbage \
+            .github/bootstrap/p1t6-after-contract.part00.b64 \
+            > "$RUNNER_TEMP/p1t6-after-contract.patch.gz"
+          gzip -t "$RUNNER_TEMP/p1t6-after-contract.patch.gz"
+          gzip -dc "$RUNNER_TEMP/p1t6-after-contract.patch.gz" \
+            > "$RUNNER_TEMP/p1t6-after-contract.patch"
+          sha256sum "$RUNNER_TEMP/p1t6-after-contract.patch.gz" \
+            "$RUNNER_TEMP/p1t6-after-contract.patch"
+      - name: Upload Task 6 patch
         uses: actions/upload-artifact@v4
         with:
-          name: unitTestRunner-p1t6-source
+          name: p1t6-after-contract-patch
           path: |
-            unitTestRunner-p1t6-source.tar.gz
-            unitTestRunner-p1t6-source.tar.gz.sha256
+            ${{ runner.temp }}/p1t6-after-contract.patch.gz
+            ${{ runner.temp }}/p1t6-after-contract.patch
           if-no-files-found: error
           retention-days: 1
