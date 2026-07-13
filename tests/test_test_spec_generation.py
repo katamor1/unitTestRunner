@@ -53,7 +53,10 @@ class TestSpecGenerationTests(unittest.TestCase):
             payload = json.loads(canonical.read_text(encoding="utf-8"))
             self.assertEqual("1.1.0", payload["schema_version"])
             self.assertEqual(1, payload["data"]["revision"])
-            self.assertEqual(str(canonical), dossier["test_spec"]["json"])
+            self.assertEqual(
+                canonical.resolve(),
+                Path(dossier["test_spec"]["json"]).resolve(),
+            )
             self.assertTrue((out / "reports" / "test_spec.md").exists())
             self.assertTrue((out / "reports" / "test_spec.csv").exists())
             self.assertFalse((out / "reports" / "test_case_design.json").exists())
@@ -69,7 +72,7 @@ class TestSpecGenerationTests(unittest.TestCase):
                 "all",
                 out / "generated-views",
             )
-            self.assertEqual(canonical, exported["json"])
+            self.assertEqual(canonical.resolve(), Path(exported["json"]).resolve())
             self.assertEqual("test_spec.md", exported["markdown"].name)
             self.assertEqual("test_spec.csv", exported["csv"].name)
             self.assertEqual(1, json.loads(canonical.read_text(encoding="utf-8"))["data"]["revision"])
@@ -83,7 +86,7 @@ class TestSpecGenerationTests(unittest.TestCase):
                 "all",
                 out / "regenerated-views",
             )
-            self.assertEqual(canonical, regenerated["json"])
+            self.assertEqual(canonical.resolve(), Path(regenerated["json"]).resolve())
             self.assertEqual(2, json.loads(canonical.read_text(encoding="utf-8"))["data"]["revision"])
 
     def test_legacy_writer_cannot_create_an_alternate_editable_json(self):

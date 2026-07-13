@@ -105,7 +105,10 @@ class TestSpecReanalysisTests(unittest.TestCase):
             after = json.loads(canonical.read_text(encoding="utf-8"))
             self.assertEqual(2, after["data"]["revision"])
             self.assertNotEqual(before["data"]["source"]["sha256"], after["data"]["source"]["sha256"])
-            self.assertEqual(canonical, result["test_spec_path"])
+            self.assertEqual(
+                canonical.resolve(),
+                Path(result["test_spec_path"]).resolve(),
+            )
             self.assertEqual(2, result["test_spec_revision"])
             self.assertFalse((out / "reports" / "updated_test_case_design.json").exists())
             self.assertFalse((out / "reports" / "test_case_design.json").exists())
