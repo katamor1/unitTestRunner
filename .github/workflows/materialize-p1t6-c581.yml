@@ -1,4 +1,5 @@
 name: Materialize Phase 1 Task 6 checkpoint
+# diagnostic revision: capture current remote hex payload before reconstruction
 
 on:
   push:
@@ -106,7 +107,7 @@ jobs:
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "4189828+github-actions[bot]@users.noreply.github.com"
           git commit -m "feat: complete phase 1 task 6 review decisions"
           test "$(git rev-parse HEAD^{tree})" = "363ddb6f86a4508eb5f4dd2a26013b837a5e26d6"
           git push --force origin \
