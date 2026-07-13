@@ -24,24 +24,34 @@ jobs:
         with:
           ref: codex/p1t6-patch-publish
           fetch-depth: 1
-      - name: Decode Task 6 patch
+      - name: Decode Task 6 patch diagnostics
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
+          cp .github/bootstrap/p1t6-after-contract.part00.b64 \
+            "$RUNNER_TEMP/p1t6-after-contract.part00.b64"
           base64 --decode --ignore-garbage \
             .github/bootstrap/p1t6-after-contract.part00.b64 \
             > "$RUNNER_TEMP/p1t6-after-contract.patch.gz"
+          decode_rc=$?
           gzip -t "$RUNNER_TEMP/p1t6-after-contract.patch.gz"
-          gzip -dc "$RUNNER_TEMP/p1t6-after-contract.patch.gz" \
-            > "$RUNNER_TEMP/p1t6-after-contract.patch"
-          sha256sum "$RUNNER_TEMP/p1t6-after-contract.patch.gz" \
-            "$RUNNER_TEMP/p1t6-after-contract.patch"
-      - name: Upload Task 6 patch
+          gzip_rc=$?
+          {
+            echo "decode_rc=$decode_rc"
+            echo "gzip_rc=$gzip_rc"
+            wc -c "$RUNNER_TEMP/p1t6-after-contract.part00.b64"
+            wc -c "$RUNNER_TEMP/p1t6-after-contract.patch.gz"
+            sha256sum "$RUNNER_TEMP/p1t6-after-contract.part00.b64"
+            sha256sum "$RUNNER_TEMP/p1t6-after-contract.patch.gz"
+          } | tee "$RUNNER_TEMP/p1t6-after-contract-diagnostics.txt"
+          exit 0
+      - name: Upload Task 6 patch diagnostics
         uses: actions/upload-artifact@v4
         with:
-          name: p1t6-after-contract-patch
+          name: p1t6-after-contract-patch-diagnostics
           path: |
+            ${{ runner.temp }}/p1t6-after-contract.part00.b64
             ${{ runner.temp }}/p1t6-after-contract.patch.gz
-            ${{ runner.temp }}/p1t6-after-contract.patch
+            ${{ runner.temp }}/p1t6-after-contract-diagnostics.txt
           if-no-files-found: error
           retention-days: 1
