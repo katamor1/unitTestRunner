@@ -25,6 +25,15 @@ jobs:
           set -euo pipefail
           git archive --format=tar.gz --prefix=unitTestRunner-b667901/ --output=unitTestRunner-b667901-source.tar.gz b66790165a2d4f82943cd199b3b499e1f1725fc3
           sha256sum unitTestRunner-b667901-source.tar.gz > unitTestRunner-b667901-source.tar.gz.sha256
+      - name: Upload recovery artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unitTestRunner-b667901-source
+          path: |
+            unitTestRunner-b667901-source.tar.gz
+            unitTestRunner-b667901-source.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 1
       - name: Publish recovery release
         env:
           GH_TOKEN: ${{ github.token }}
