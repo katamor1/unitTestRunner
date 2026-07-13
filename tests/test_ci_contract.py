@@ -36,6 +36,10 @@ def _named_step(
     return matches[0].group(0), matches[0].start()
 
 
+def _without_full_line_comments(text: str) -> str:
+    return re.sub(r"(?m)^[ \t]*#.*(?:\n|\Z)", "", text)
+
+
 def _python_ci_contract_violations(text: str) -> list[str]:
     violations: list[str] = []
     job = _job_block(text, "python-tests", violations)
@@ -51,10 +55,12 @@ def _python_ci_contract_violations(text: str) -> list[str]:
     if run_position >= upload_position:
         violations.append("Python failure upload must follow the isolated test step")
 
+    executable_job = _without_full_line_comments(job)
+    executable_run_step = _without_full_line_comments(run_step)
     forbidden = 'python -m unittest discover -s tests -p "test_*.py"'
-    if forbidden in job:
+    if forbidden in executable_job:
         violations.append(f"forbidden command present in python-tests: {forbidden}")
-    if "-Recurse" in run_step:
+    if "-Recurse" in executable_run_step:
         violations.append("Python module enumeration must remain top-level")
 
     ordered_tokens = (
@@ -66,7 +72,7 @@ def _python_ci_contract_violations(text: str) -> list[str]:
     )
     token_positions = []
     for token in ordered_tokens:
-        position = run_step.find(token)
+        position = executable_run_step.find(token)
         if position < 0:
             violations.append(f"isolated Python step missing: {token}")
         token_positions.append(position)
@@ -75,11 +81,32 @@ def _python_ci_contract_violations(text: str) -> list[str]:
     ):
         violations.append("Python enumeration, sorting, conversion, and loop are out of order")
 
+    executable_log_lines = [
+        line.strip()
+        for line in executable_run_step.splitlines()
+        if "$log" in line
+    ]
+    log_initializer = '$log = Join-Path $env:RUNNER_TEMP "python-tests.log"'
+    if executable_log_lines.count(log_initializer) != 1:
+        violations.append("isolated Python log must have one Join-Path initializer")
+    invalid_log_lines = [
+        line
+        for line in executable_log_lines
+        if line != log_initializer
+        and re.fullmatch(
+            r"(?:.+\|\s*)?Tee-Object -FilePath \$log -Append",
+            line,
+        )
+        is None
+    ]
+    if invalid_log_lines:
+        violations.append("isolated Python log may only be initialized or appended")
+
     loop_match = re.search(
         r"^          foreach \(\$module in \$modules\) \{\s*\n"
         r"(?P<body>.*?)"
         r"^          \}\s*$",
-        run_step,
+        executable_run_step,
         re.MULTILINE | re.DOTALL,
     )
     if loop_match is None:
@@ -89,17 +116,20 @@ def _python_ci_contract_violations(text: str) -> list[str]:
     loop_body = loop_match.group("body")
     if "& python -m unittest $module -v" not in loop_body:
         violations.append("module unittest command must run inside the module loop")
-    if "$failed += $module" not in loop_body:
-        violations.append("failed modules must be collected inside the module loop")
+    loop_lines = [line.strip() for line in loop_body.splitlines() if line.strip()]
+    exact_guard = "if ($LASTEXITCODE -ne 0) { $failed += $module }"
+    guard_count = len(re.findall(r"(?i)\bif\s*\(", loop_body))
+    if loop_lines.count(exact_guard) != 1 or guard_count != 1:
+        violations.append("module loop must contain exactly the canonical failure guard")
     if loop_body.count("Tee-Object -FilePath $log -Append") < 2:
         violations.append("per-module log writes must append")
     if re.search(
-        r"(?im)^\s*(?:throw|exit|break|return)\b",
+        r"(?i)\b(?:throw|exit|break|return)\b",
         loop_body,
     ):
         violations.append("module failures must not stop later module iterations")
 
-    post_loop = run_step[loop_match.end() :]
+    post_loop = executable_run_step[loop_match.end() :]
     summary = '"isolated_modules=$($modules.Count) failures=$($failed.Count)"'
     summary_position = post_loop.find(summary)
     if summary_position < 0:
@@ -184,8 +214,9 @@ def _fixture_ci_contract_violations(text: str) -> list[str]:
         r"\bbrew\s+install\b",
         r"\bInstall-Package\b",
     )
+    executable_job = _without_full_line_comments(job)
     if any(
-        re.search(pattern, job, re.IGNORECASE)
+        re.search(pattern, executable_job, re.IGNORECASE)
         for pattern in dynamic_install_patterns
     ):
         violations.append("fixture-smoke must not install a compiler dynamically")
@@ -334,8 +365,30 @@ class CiContractTests(unittest.TestCase):
                 "          name: renamed-python-test-failure\n",
                 1,
             ),
+            "inline exit after failure collection": text.replace(
+                "if ($LASTEXITCODE -ne 0) { $failed += $module }",
+                "if ($LASTEXITCODE -ne 0) { "
+                "$failed += $module; exit $LASTEXITCODE }",
+                1,
+            ),
+            "success polarity failure collection": text.replace(
+                "if ($LASTEXITCODE -ne 0) { $failed += $module }",
+                "if ($LASTEXITCODE -eq 0) { $failed += $module }",
+                1,
+            ),
+            "post-loop log truncation": text.replace(
+                '          "isolated_modules=$($modules.Count) '
+                'failures=$($failed.Count)" |\n'
+                "            Tee-Object -FilePath $log -Append\n",
+                '          "isolated_modules=$($modules.Count) '
+                'failures=$($failed.Count)" |\n'
+                "            Tee-Object -FilePath $log -Append\n"
+                '          Set-Content -Path $log -Value "truncated"\n',
+                1,
+            ),
         }
 
+        self.assertEqual(10, len(mutants))
         for name, mutant in mutants.items():
             with self.subTest(mutant=name):
                 self.assertNotEqual(text, mutant, f"mutation was not applied: {name}")
@@ -344,6 +397,20 @@ class CiContractTests(unittest.TestCase):
                     _ci_contract_violations(mutant),
                     f"CI contract accepted mutant: {name}",
                 )
+
+    def test_github_actions_ci_contract_accepts_harmless_comments(self):
+        workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+
+        text = workflow.read_text(encoding="utf-8")
+        commented = text.replace(
+            '          "fixture_compiler=$($compiler.Source)"\n',
+            "          # Never choco install a compiler here.\n"
+            '          "fixture_compiler=$($compiler.Source)"\n',
+            1,
+        )
+
+        self.assertNotEqual(text, commented, "comment control was not applied")
+        self.assertEqual([], _ci_contract_violations(commented))
 
     def test_github_actions_checks_rewriter_tracking_and_python_compilation(self):
         workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
