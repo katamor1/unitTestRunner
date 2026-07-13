@@ -77,7 +77,12 @@ class Vc6FixtureBuildEndToEndTests(unittest.TestCase):
             )
             self.assertEqual(0, probe.returncode, probe.stderr or probe.stdout)
             probe_payload = json.loads(probe.stdout)
-            self.assertEqual("build_probe_succeeded", probe_payload["status"])
+            self.assertEqual("passed", probe_payload["data"]["outcome"])
+            self.assertEqual(0, probe_payload["data"]["exit_code"])
+            self.assertEqual(
+                "succeeded",
+                probe_payload["data"]["details"]["build_probe"]["status"],
+            )
 
             report = json.loads(
                 (output / "reports" / "build_workspace_report.json").read_text(encoding="utf-8")
