@@ -1,9 +1,9 @@
 name: Publish Phase 1 Task 6 completion
 
 on:
-  push:
+  pull_request:
     branches:
-      - codex/bootstrap-publish-p1t6-c581
+      - main
   workflow_dispatch:
 
 permissions:
