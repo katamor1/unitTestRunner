@@ -21,6 +21,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Capture checkpoint blob
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1t6-checkpoint-blob
+          path: .github/bootstrap/p1t6-full-from-b667.patch.gz
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Verify and unpack checkpoint blob
         shell: bash
         run: |
