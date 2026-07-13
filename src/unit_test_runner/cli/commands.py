@@ -24,7 +24,7 @@ from unit_test_runner.execution import (
     validate_run_paths_available,
     validate_test_run_preflight,
 )
-from unit_test_runner.path_utils import normalize_relative
+from unit_test_runner.path_utils import normalize_relative, resolved_relative_to
 from unit_test_runner.reanalysis import (
     reconcile_test_case_reports,
     reanalyze_function_workflow,
@@ -1338,10 +1338,12 @@ def _test_spec_view_artifact_root(
     try:
         lexical_path.relative_to(lexical_workspace)
     except ValueError:
-        # A custom --out is an independently rooted produced artifact. Keep the
-        # lexical parent as the trust boundary so build_produced_artifact still
-        # rejects a symlink/reparse redirect that resolves outside that parent.
-        return lexical_path.parent
+        try:
+            resolved_relative_to(lexical_path, lexical_workspace)
+        except ValueError:
+            # A genuine external --out remains independently rooted. The
+            # artifact builder still rejects a reparse redirect outside it.
+            return lexical_path.parent
     return lexical_workspace
 
 

@@ -24,6 +24,10 @@ from unit_test_runner.test_spec import (
     save_test_spec,
 )
 from tests.spec_support import write_canonical_test_spec
+from tests.windows_path_alias_support import (
+    WINDOWS_8DOT3_PREFIX,
+    require_windows_path_alias_pair,
+)
 
 
 def run_module(*args):
@@ -204,8 +208,11 @@ UTR OK TC_Control_Update_002
             )
 
     def test_cli_run_tests_prepare_evidence_and_analyze_function_connect_execution_evidence(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            workspace = self.prepare_workspace(temp_dir)
+        with tempfile.TemporaryDirectory(prefix=WINDOWS_8DOT3_PREFIX) as temp_dir:
+            root = Path(temp_dir)
+            if os.name == "nt":
+                root = require_windows_path_alias_pair(self, root).short
+            workspace = self.prepare_workspace(root)
 
             run_tests = run_module(
                 "--json",
@@ -220,7 +227,10 @@ UTR OK TC_Control_Update_002
             self.assertEqual("blocked", run_payload["data"]["outcome"])
             run_report_path = Path(run_payload["data"]["details"]["test_execution"]["json"])
             self.assertTrue(run_report_path.exists())
-            self.assertEqual("runs", run_report_path.relative_to(workspace).parts[0])
+            self.assertEqual(
+                "runs",
+                run_report_path.resolve().relative_to(workspace.resolve()).parts[0],
+            )
             run_report = json.loads(run_report_path.read_text(encoding="utf-8"))
             self.assertTrue(run_report["data"]["policy"]["allow_placeholder_tests"])
 
