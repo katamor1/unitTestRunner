@@ -15,6 +15,7 @@ implementation.
 - Baseline assertion code commit: `1c039f308d4c10a71ed7ae2fc1756349f3978d3b`
 - CI review-remediation test commit: `bccf17e1a6f7d08e29b7f51b80f29c958114315c`
 - Second CI review-remediation test commit: `33adb15039c5ad0d12a1bd693a59f76be2cd3dee`
+- Append-only log remediation test commit: `d22a4acd626c31b19fa2e7ece14822fdcbde6b4e`
 
 ## Focused RED evidence
 
@@ -73,6 +74,26 @@ and excluding full-line comments from runtime scans,
 rejected, the harmless-comment control was accepted, and `git diff --check`
 exited successfully. Commit
 `33adb15039c5ad0d12a1bd693a59f76be2cd3dee` changes only the executable CI
+regression contract; `.github/workflows/ci.yml` and Task 6 product behavior
+were not changed. A fresh whole-branch re-review remains pending, and no final
+review verdict is claimed here.
+
+## Append-only log remediation
+
+Re-review at `544b41c484365d1c4ab83d78f9581d5398df68f2`
+identified one remaining false-green: a pipeline could truncate `$log` before
+ending in the allowed append-only `Tee-Object` form. Regression-first RED ran
+`tests.test_ci_contract` as 8 tests with the single expected accepted-mutant
+failure. The real workflow, prior 10 mutants, harmless-comment control, and
+other contract tests remained GREEN.
+
+The validator now requires every non-initializer executable log line to match
+the full append-only Tee form and contain `$log` exactly once as Tee's
+`-FilePath` argument. After the change, `tests.test_ci_contract` passed 8
+tests, `tests.test_repository_source_tracking` passed 2 tests, all 11 mutants
+were rejected, the harmless-comment control was accepted, and
+`git diff --check` exited successfully. Commit
+`d22a4acd626c31b19fa2e7ece14822fdcbde6b4e` changes only the executable CI
 regression contract; `.github/workflows/ci.yml` and Task 6 product behavior
 were not changed. A fresh whole-branch re-review remains pending, and no final
 review verdict is claimed here.
