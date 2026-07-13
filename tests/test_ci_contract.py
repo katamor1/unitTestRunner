@@ -31,6 +31,10 @@ class CiContractTests(unittest.TestCase):
         self.assertIn("python -m unittest discover -s tests -p \"test_*.py\"", text)
         self.assertIn("npm.cmd test", text)
         self.assertIn("vscode/extension", text)
+        self.assertIn(
+            'UNIT_TEST_RUNNER_REQUIRE_8DOT3_ALIAS: "1"',
+            text,
+        )
 
     def test_github_actions_uses_six_independent_required_jobs(self):
         workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
