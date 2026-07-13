@@ -13,6 +13,7 @@ implementation.
 - Product base: `b66790165a2d4f82943cd199b3b499e1f1725fc3`
 - CI contract code commit: `72e14f616884b5bcb0b9f8e61adcca8e9853776c`
 - Baseline assertion code commit: `1c039f308d4c10a71ed7ae2fc1756349f3978d3b`
+- CI review-remediation test commit: `bccf17e1a6f7d08e29b7f51b80f29c958114315c`
 
 ## Focused RED evidence
 
@@ -32,6 +33,26 @@ After aligning the assertions with the canonical envelopes:
 - `py -m unittest tests.test_vc6_fixture_build_e2e -v` ran 1 test and skipped
   it with `host C compiler is required`.
 - `git diff --check` exited successfully.
+
+## Review remediation
+
+Whole-branch review at `3ea51892ba7c6a6395eeb15b3e8441c34bc22a72`
+found one Important test-coverage gap: the CI contract did not reject removal
+or displacement of several isolated-test and compiler-precondition invariants.
+
+Regression-first RED ran `tests.test_ci_contract` as seven tests. The six
+pre-existing tests passed, while all seven mutation subtests failed because
+the incomplete validator accepted removal of sorting, failure collection, the
+final throw, and append logging; compiler-precondition reordering; dynamic
+compiler installation; and Python failure-artifact renaming.
+
+After adding job- and step-scoped validators, `tests.test_ci_contract` passed
+7 tests, `tests.test_repository_source_tracking` passed 2 tests, all seven
+mutants were rejected, and `git diff --check` exited successfully. Commit
+`bccf17e1a6f7d08e29b7f51b80f29c958114315c` changes only the executable CI
+regression contract; `.github/workflows/ci.yml` and Task 6 product behavior
+were not changed. A fresh whole-branch re-review remains pending, and no final
+review verdict is claimed here.
 
 ## Authoritative isolated gate
 
