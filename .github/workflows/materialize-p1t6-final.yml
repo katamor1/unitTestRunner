@@ -1,0 +1,177 @@
+name: Materialize Phase 1 Task 6 final checkpoint
+
+on:
+  push:
+    branches:
+      - codex/bootstrap-p1t6-final-b990
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout bootstrap branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and verify Task 6 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/bootstrap/p1t6-final/chunk-*.b64 \
+            | tr -d '\r\n' > "$RUNNER_TEMP/task6.patch.gz.b64"
+          test "$(stat -c%s "$RUNNER_TEMP/task6.patch.gz.b64")" = "46848"
+          test "$(sha256sum "$RUNNER_TEMP/task6.patch.gz.b64" | awk '{print $1}')" = \
+            "f30695e42e341864546defe6d3ea60445ca6bfb1afd4f49859592115c128f0bd"
+          base64 --decode "$RUNNER_TEMP/task6.patch.gz.b64" > "$RUNNER_TEMP/task6.patch.gz"
+          test "$(stat -c%s "$RUNNER_TEMP/task6.patch.gz")" = "35135"
+          test "$(sha256sum "$RUNNER_TEMP/task6.patch.gz" | awk '{print $1}')" = \
+            "2e036fabe7cc4b4c1926be1994f5c7580cd69c6b5bb9762590d6e228357295e7"
+          python - "$RUNNER_TEMP/task6.patch.gz" "$RUNNER_TEMP/task6.patch" <<'PY'
+          import gzip
+          import hashlib
+          import pathlib
+          import sys
+          source, destination = map(pathlib.Path, sys.argv[1:])
+          patch = gzip.decompress(source.read_bytes())
+          assert len(patch) == 198343
+          assert hashlib.sha256(patch).hexdigest() == "8db316d19a6a8d95a7783f277ab46a19528d0660349e944ae085d46d9146de40"
+          destination.write_bytes(patch)
+          PY
+
+      - name: Apply exact Task 6 tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin codex/p1t6-review-decisions-readiness
+          git checkout -B codex/p1t6-review-decisions-readiness \
+            origin/codex/p1t6-review-decisions-readiness
+          test "$(git rev-parse HEAD)" = \
+            "9da6b8ecbcd4a95d80ea61347558e4d5721d30a5"
+          git apply --check "$RUNNER_TEMP/task6.patch"
+          git apply "$RUNNER_TEMP/task6.patch"
+          git add -A
+          test "$(git write-tree)" = \
+            "bf617555a55296186311814c5f50eed57863ec36"
+          git diff --cached --check
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install "setuptools>=61" wheel
+          python -m pip install -e .
+
+      - name: Run authoritative isolated Python gate
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+          OPENBLAS_NUM_THREADS: "1"
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+          import os
+          import re
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          modules = sorted(
+              f"tests.{path.stem}"
+              for path in Path("tests").glob("test_*.py")
+          )
+          total_tests = 0
+          total_skips = 0
+          failures: list[str] = []
+          for index, module in enumerate(modules, 1):
+              print(f"[{index}/{len(modules)}] {module}", flush=True)
+              result = subprocess.run(
+                  [sys.executable, "-m", "unittest", module, "-v"],
+                  text=True,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.STDOUT,
+                  env=os.environ.copy(),
+              )
+              print(result.stdout, end="", flush=True)
+              match = re.search(r"Ran (\d+) tests?", result.stdout)
+              if match:
+                  total_tests += int(match.group(1))
+              total_skips += len(re.findall(r"\.\.\. skipped ", result.stdout))
+              if result.returncode:
+                  failures.append(module)
+                  break
+          print(
+              f"modules={len(modules)} tests={total_tests} skips={total_skips} "
+              f"failures={len(failures)}"
+          )
+          if len(modules) != 117:
+              raise SystemExit(f"expected 117 modules, found {len(modules)}")
+          if failures:
+              raise SystemExit("isolated module failures: " + ", ".join(failures))
+          if total_tests != 564:
+              raise SystemExit(f"expected 564 tests, ran {total_tests}")
+          if total_skips != 2:
+              raise SystemExit(f"expected 2 skips, saw {total_skips}")
+          PY
+
+      - name: Run compile, CLI, and package gates
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          set -euo pipefail
+          python -m compileall -q src tests
+          python -m unit_test_runner --help >/dev/null
+          git diff --cached --check
+          dist="$RUNNER_TEMP/dist"
+          venv="$RUNNER_TEMP/package-venv"
+          mkdir -p "$dist"
+          python -m pip wheel --no-deps --wheel-dir "$dist" .
+          python -m venv "$venv"
+          package_python="$venv/bin/python"
+          "$package_python" -m pip install "$dist"/unit_test_runner-*.whl
+          "$package_python" -m unit_test_runner --help >/dev/null
+          "$package_python" - <<'PY'
+          import json
+          from importlib import resources
+          from unit_test_runner.contracts.registry import iter_contract_versions
+
+          contracts = list(iter_contract_versions())
+          root = resources.files("unit_test_runner.schemas")
+          missing = [
+              contract.schema_resource
+              for contract in contracts
+              if not root.joinpath(contract.schema_resource).is_file()
+          ]
+          assert len(contracts) == 44, len(contracts)
+          assert not missing, missing
+          for contract in contracts:
+              json.loads(root.joinpath(contract.schema_resource).read_text(encoding="utf-8"))
+          print(f"contract_versions={len(contracts)} schema_resources={len(contracts)}")
+          PY
+
+      - name: Commit and publish verified Task 6 checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git write-tree)" = \
+            "bf617555a55296186311814c5f50eed57863ec36"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat: complete phase 1 task 6 review decisions"
+          git push origin HEAD:refs/heads/codex/p1t6-review-decisions-readiness \
+            --force-with-lease=refs/heads/codex/p1t6-review-decisions-readiness:9da6b8ecbcd4a95d80ea61347558e4d5721d30a5
