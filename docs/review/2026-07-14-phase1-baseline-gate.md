@@ -100,8 +100,9 @@ review verdict is claimed here.
 
 ## Authoritative isolated gate
 
-Every actual `tests/test_*.py` module was executed serially in a fresh Python
-process. The observed summary was
+Before the review-remediation commits, every actual `tests/test_*.py` module
+was executed serially in a fresh Python process. This initial authoritative
+gate observed
 `isolated_modules=111 tests=521 skips=3 failures=0`.
 
 After the isolated module loop, `py -m compileall -q src tests`,
@@ -109,12 +110,33 @@ After the isolated module loop, `py -m compileall -q src tests`,
 successfully. The CLI help exposed the expected command surface through
 `suite-run`.
 
+## Final pre-publication re-verification
+
+The final local pre-publication gate verified code/test head
+`b6ce72e34cff1d34c0cc4683a6693e616d73300f` under isolated run ID
+`20260714T045158659+0900`. It executed all 111 top-level test modules in
+separate serial Python processes and observed 523 tests, 3 skips, 0 failures,
+0 errors, 0 failing modules, 0 non-zero module exits, and 0 result-parse
+failures. All 111 module-process commands exited 0.
+
+The increase from the initial 521 tests to 523 tests is accounted for by the
+CI mutation and harmless-comment regression methods added during review
+remediation; it is not a missing or duplicated module.
+
+At the verified head, `py -m compileall -q src tests`,
+`py -m unit_test_runner --help`, and `git diff --check b667901..HEAD` each
+exited 0. The final `git status --porcelain=v1` produced no entries, confirming
+that the target worktree was clean at the end of the verification run.
+
 ## Local compiler limitation
 
 `Get-Command gcc, clang, cc -ErrorAction SilentlyContinue` found no supported
-host compiler (`fixture_compiler=not_found`). Consequently, the local VC6
-fixture E2E result is the single compiler-required skip recorded above. This
-local result does not substitute for the compiler-required GitHub fixture job.
+host compiler (`fixture_compiler=not_found`). The focused VC6 fixture E2E was
+therefore the single compiler-required skip in its module, while the final
+full gate retained three local skips; all three reported
+`host C compiler is required`. These local results do not substitute for the
+GitHub compiler-required job, which must execute its compiler-backed path
+without skip.
 
 ## Publication boundary
 
