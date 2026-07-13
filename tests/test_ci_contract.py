@@ -93,11 +93,14 @@ def _python_ci_contract_violations(text: str) -> list[str]:
         line
         for line in executable_log_lines
         if line != log_initializer
-        and re.fullmatch(
-            r"(?:.+\|\s*)?Tee-Object -FilePath \$log -Append",
-            line,
+        and (
+            line.count("$log") != 1
+            or re.fullmatch(
+                r"(?:.+\|\s*)?Tee-Object -FilePath \$log -Append",
+                line,
+            )
+            is None
         )
-        is None
     ]
     if invalid_log_lines:
         violations.append("isolated Python log may only be initialized or appended")
@@ -386,9 +389,20 @@ class CiContractTests(unittest.TestCase):
                 '          Set-Content -Path $log -Value "truncated"\n',
                 1,
             ),
+            "pipelined log truncation before append": text.replace(
+                '          "isolated_modules=$($modules.Count) '
+                'failures=$($failed.Count)" |\n'
+                "            Tee-Object -FilePath $log -Append\n",
+                '          "isolated_modules=$($modules.Count) '
+                'failures=$($failed.Count)" |\n'
+                "            Tee-Object -FilePath $log -Append\n"
+                "          'truncated' | Set-Content -Path $log | "
+                "Tee-Object -FilePath $log -Append\n",
+                1,
+            ),
         }
 
-        self.assertEqual(10, len(mutants))
+        self.assertEqual(11, len(mutants))
         for name, mutant in mutants.items():
             with self.subTest(mutant=name):
                 self.assertNotEqual(text, mutant, f"mutation was not applied: {name}")
