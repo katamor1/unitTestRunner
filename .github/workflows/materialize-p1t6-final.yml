@@ -1,0 +1,100 @@
+name: Finalize Phase 1 Task 6 product commit
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-p1t6-c581
+  cancel-in-progress: true
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bootstrap payload
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and verify exact patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/bootstrap/p1t6-patch-b64/part* \
+            | base64 --decode > "$RUNNER_TEMP/p1t6.patch.gz"
+          test "$(stat -c%s "$RUNNER_TEMP/p1t6.patch.gz")" = "41409"
+          test "$(sha256sum "$RUNNER_TEMP/p1t6.patch.gz" | awk '{print $1}')" = \
+            "f09f489c4eff0e532c84833741f69fe8d09a6a3be14715d0629f0dc0f6f4813c"
+          gzip -dc "$RUNNER_TEMP/p1t6.patch.gz" > "$RUNNER_TEMP/p1t6.patch"
+          test "$(sha256sum "$RUNNER_TEMP/p1t6.patch" | awk '{print $1}')" = \
+            "8aaa74a87b2e1ea64087726bbcbfd8c998d5940c458d04768b63f969fe461ef0"
+
+      - name: Materialize exact Task 6 tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout -B codex/bootstrap-p1t6-c581-exact \
+            b66790165a2d4f82943cd199b3b499e1f1725fc3
+          git apply --check "$RUNNER_TEMP/p1t6.patch"
+          git apply "$RUNNER_TEMP/p1t6.patch"
+          git add -A
+          test "$(git write-tree)" = \
+            "363ddb6f86a4508eb5f4dd2a26013b837a5e26d6"
+
+      - name: Install package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install "setuptools>=61" wheel
+          python -m pip install -e .
+
+      - name: Run authoritative isolated Python gate
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+          OPENBLAS_NUM_THREADS: "1"
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import subprocess
+          import sys
+
+          modules = sorted(f"tests.{path.stem}" for path in Path("tests").glob("test_*.py"))
+          failures = []
+          tests = 0
+          skips = 0
+          for module in modules:
+              result = subprocess.run(
+                  [sys.executable, "-m", "unittest", module, "-v"],
+                  env=os.environ.copy(),
+              )
+              if result.returncode:
+                  failures.append(module)
+          print(f"isolated_modules={len(modules)} failures={len(failures)}")
+          if failures:
+              raise SystemExit("isolated Python failures: " + ", ".join(failures))
+          PY
+          python -m compileall -q src tests
+          python -m unit_test_runner --help >/dev/null
+          git diff --check --cached
+
+      - name: Commit and replace PR head with product tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat: complete phase 1 task 6 review decisions"
+          git push --force origin \
+            HEAD:refs/heads/codex/bootstrap-p1t6-c581-exact
