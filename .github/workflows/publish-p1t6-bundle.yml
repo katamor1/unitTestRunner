@@ -18,11 +18,32 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Reconstruct and verify completion patch
+      - name: Reconstruct completion patch
+        shell: bash
+        run: |
+          set -u
+          ls -l .github/bootstrap/p1t6-completion-v2.part*
+          for part in .github/bootstrap/p1t6-completion-v2.part*; do
+            wc -c "$part"
+            sha256sum "$part"
+          done
+          cat .github/bootstrap/p1t6-completion-v2.part* > "$RUNNER_TEMP/p1t6.patch.gz"
+          wc -c "$RUNNER_TEMP/p1t6.patch.gz"
+          sha256sum "$RUNNER_TEMP/p1t6.patch.gz"
+
+      - name: Upload reconstructed patch
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1t6-completion-patch
+          path: ${{ runner.temp }}/p1t6.patch.gz
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Verify completion patch
         shell: bash
         run: |
           set -euo pipefail
-          cat .github/bootstrap/p1t6-completion-v2.part* > "$RUNNER_TEMP/p1t6.patch.gz"
           test "$(stat -c%s "$RUNNER_TEMP/p1t6.patch.gz")" = "30311"
           test "$(sha256sum "$RUNNER_TEMP/p1t6.patch.gz" | awk '{print $1}')" = "a103cfbf908a00d599dc908ce43d2d026764a72851402b57b35bbfb3e7ebcc02"
           python - "$RUNNER_TEMP/p1t6.patch.gz" "$RUNNER_TEMP/p1t6.patch" <<'PY'
