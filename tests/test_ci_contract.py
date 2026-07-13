@@ -28,7 +28,20 @@ class CiContractTests(unittest.TestCase):
 
         self.assertTrue(workflow.exists())
         text = workflow.read_text(encoding="utf-8")
-        self.assertIn("python -m unittest discover -s tests -p \"test_*.py\"", text)
+        self.assertNotIn(
+            'python -m unittest discover -s tests -p "test_*.py"',
+            text,
+        )
+        self.assertIn(
+            "Get-ChildItem -LiteralPath .\\tests -Filter 'test_*.py' -File",
+            text,
+        )
+        self.assertIn("foreach ($module in $modules)", text)
+        self.assertIn("& python -m unittest $module -v", text)
+        self.assertIn(
+            '"isolated_modules=$($modules.Count) failures=$($failed.Count)"',
+            text,
+        )
         self.assertIn("npm.cmd test", text)
         self.assertIn("vscode/extension", text)
 
@@ -60,6 +73,15 @@ class CiContractTests(unittest.TestCase):
         self.assertIn("npm.cmd run test:extension-host", text)
         self.assertIn(
             "python -m unittest tests.test_fixture_cli_smoke tests.test_vc6_fixture_build_e2e -v",
+            text,
+        )
+        self.assertIn(
+            "Get-Command gcc, clang, cc -ErrorAction SilentlyContinue",
+            text,
+        )
+        self.assertIn("if ($null -eq $compiler)", text)
+        self.assertIn(
+            "VC6 fixture smoke requires gcc, clang, or cc on PATH.",
             text,
         )
         self.assertIn("uses: actions/upload-artifact@v4", text)
