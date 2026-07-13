@@ -21,12 +21,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Reconstruct checkpoint patch
+      - name: Verify and unpack checkpoint blob
         shell: bash
         run: |
           set -euo pipefail
-          cat .github/bootstrap/p1t6-patch-b64/part* \
-            | base64 --decode > "$RUNNER_TEMP/p1t6.patch.gz"
+          cp .github/bootstrap/p1t6-full-from-b667.patch.gz "$RUNNER_TEMP/p1t6.patch.gz"
           echo "compressed_size=$(stat -c%s "$RUNNER_TEMP/p1t6.patch.gz")"
           sha256sum "$RUNNER_TEMP/p1t6.patch.gz"
           gzip -t "$RUNNER_TEMP/p1t6.patch.gz"
@@ -73,8 +72,6 @@ jobs:
 
           modules = sorted(f"tests.{path.stem}" for path in Path("tests").glob("test_*.py"))
           failures = []
-          tests = 0
-          skips = 0
           for index, module in enumerate(modules, 1):
               print(f"[{index}/{len(modules)}] {module}", flush=True)
               result = subprocess.run(
