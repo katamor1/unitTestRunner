@@ -1,4 +1,4 @@
-name: Publish Phase 1 Task 6 checkpoint
+name: Publish Phase 1 Task 6 completion
 
 on:
   push:
@@ -13,35 +13,64 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout bootstrap
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Reassemble bundle
+      - name: Reconstruct and verify completion patch
         shell: bash
         run: |
           set -euo pipefail
-          cat .github/bootstrap/p1t6.bundle.b64.part* \
-            | base64 --decode > "$RUNNER_TEMP/p1t6.bundle"
-          wc -c "$RUNNER_TEMP/p1t6.bundle"
-          sha256sum "$RUNNER_TEMP/p1t6.bundle"
+          cat .github/bootstrap/p1t6-completion-v2.part* > "$RUNNER_TEMP/p1t6.patch.gz"
+          test "$(stat -c%s "$RUNNER_TEMP/p1t6.patch.gz")" = "30311"
+          test "$(sha256sum "$RUNNER_TEMP/p1t6.patch.gz" | awk '{print $1}')" = "a103cfbf908a00d599dc908ce43d2d026764a72851402b57b35bbfb3e7ebcc02"
+          python - "$RUNNER_TEMP/p1t6.patch.gz" "$RUNNER_TEMP/p1t6.patch" <<'PY'
+          import gzip
+          import hashlib
+          import pathlib
+          import sys
+          source, destination = map(pathlib.Path, sys.argv[1:])
+          patch = gzip.decompress(source.read_bytes())
+          assert hashlib.sha256(patch).hexdigest() == "021b3bde96f2584cecd840f85a4d80e8cb8ff5f2aeda5bb000d94d2714a7e231"
+          destination.write_bytes(patch)
+          PY
 
-      - name: Verify bundle
+      - name: Apply and verify Task 6 completion
         shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+          OPENBLAS_NUM_THREADS: "1"
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
         run: |
           set -euo pipefail
-          actual_sha="$(sha256sum "$RUNNER_TEMP/p1t6.bundle" | awk '{print $1}')"
-          test "$actual_sha" = "515115483a5241ac2dc340e1cf9c5ae859dd11d4e8592e49d7c9caf51b37acd5"
-          git bundle verify "$RUNNER_TEMP/p1t6.bundle"
-          git fetch "$RUNNER_TEMP/p1t6.bundle" \
-            refs/heads/codex/p1t6-review-decisions-readiness:refs/remotes/bundle/p1t6
-          test "$(git rev-parse refs/remotes/bundle/p1t6)" = \
-            "c581d8d2f21762ab99152ccba9e7a2eeb09afcb7"
-
-      - name: Publish task branch
-        shell: bash
-        run: |
-          set -euo pipefail
-          git push --force-with-lease origin \
-            refs/remotes/bundle/p1t6:refs/heads/codex/p1t6-review-decisions-readiness
+          git fetch origin codex/p1t6-review-decisions-readiness
+          git checkout -B codex/p1t6-review-decisions-readiness origin/codex/p1t6-review-decisions-readiness
+          test "$(git rev-parse HEAD)" = "9da6b8ecbcd4a95d80ea61347558e4d5721d30a5"
+          git apply --check "$RUNNER_TEMP/p1t6.patch"
+          git apply "$RUNNER_TEMP/p1t6.patch"
+          python -m pip install "setuptools>=61" wheel
+          python -m pip install -e .
+          for module in \
+            tests.test_review_decisions \
+            tests.test_review_decision_staleness \
+            tests.test_dossier_readiness \
+            tests.test_dossier_review_authority \
+            tests.test_review_decision_integration \
+            tests.test_review_decision_cli \
+            tests.test_reanalysis_cli \
+            tests.test_test_spec_consumers \
+            tests.test_vc6_fixture_build_e2e
+          do
+            python -m unittest "$module" -v
+          done
+          python -m compileall -q src tests
+          python -m unit_test_runner --help >/dev/null
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src tests
+          git commit -m "feat: complete phase 1 task 6 review decisions"
+          git push origin HEAD:refs/heads/codex/p1t6-review-decisions-readiness
