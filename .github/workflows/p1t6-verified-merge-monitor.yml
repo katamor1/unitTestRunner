@@ -1,0 +1,176 @@
+name: Monitor verified Phase 1 Task 6 and merge
+
+on:
+  push:
+    branches:
+      - codex/bootstrap-source-export-b667901-v2
+    paths:
+      - .github/workflows/p1t6-verified-merge-monitor.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/p1t6-verified-merge-monitor.yml
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: p1t6-verified-merge-monitor
+  cancel-in-progress: true
+
+jobs:
+  wait-review-merge:
+    runs-on: windows-latest
+    timeout-minutes: 300
+    env:
+      TARGET_BRANCH: codex/p1t6-review-decisions-readiness
+      TARGET_PR: "12"
+      BOOTSTRAP_PR: "13"
+      EXPECTED_BASE: b66790165a2d4f82943cd199b3b499e1f1725fc3
+      OLD_HEAD: 9da6b8ecbcd4a95d80ea61347558e4d5721d30a5
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Wait for a verified single completion commit
+        id: verified
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $deadline = [DateTimeOffset]::UtcNow.AddMinutes(210)
+          $newHead = $null
+          while ([DateTimeOffset]::UtcNow -lt $deadline) {
+            git fetch origin $env:TARGET_BRANCH main --quiet
+            $candidate = (git rev-parse ("origin/{0}" -f $env:TARGET_BRANCH)).Trim()
+            if ($candidate -ne $env:OLD_HEAD) {
+              $newHead = $candidate
+              break
+            }
+            Write-Host 'waiting for guarded recovery workflow to publish verified completion commit'
+            Start-Sleep -Seconds 30
+          }
+          if ([string]::IsNullOrWhiteSpace($newHead)) { throw 'verified completion commit was not published before timeout' }
+          $parent = (git rev-parse ("{0}^" -f $newHead)).Trim()
+          if ($parent -ne $env:OLD_HEAD) { throw "expected one completion commit on old head, found parent $parent" }
+          $message = (git show -s --format=%s $newHead).Trim()
+          if ($message -ne 'feat: complete phase 1 task 6 review decisions') { throw "unexpected completion commit message: $message" }
+          $mergeBase = (git merge-base $newHead origin/main).Trim()
+          if ($mergeBase -ne $env:EXPECTED_BASE) { throw "tested main base changed: $mergeBase" }
+          $forbidden = @(git diff --name-only $env:OLD_HEAD $newHead | Where-Object { $_ -like '.github/*' })
+          if ($forbidden.Count -ne 0) { throw ('completion commit changed workflow files: ' + ($forbidden -join ', ')) }
+          git diff --check $env:OLD_HEAD $newHead
+          if ($LASTEXITCODE -ne 0) { throw 'verified completion commit has diff-check failures' }
+          "verified_sha=$newHead" >> $env:GITHUB_OUTPUT
+
+      - name: Ensure official Windows CI passes for exact completion SHA
+        id: ci
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFIED_SHA: ${{ steps.verified.outputs.verified_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $deadline = [DateTimeOffset]::UtcNow.AddMinutes(100)
+          $dispatched = $false
+          $run = $null
+          while ([DateTimeOffset]::UtcNow -lt $deadline) {
+            $runs = gh run list --repo $env:GITHUB_REPOSITORY --workflow ci.yml --branch $env:TARGET_BRANCH --limit 50 --json databaseId,headSha,status,conclusion,event,createdAt,url | ConvertFrom-Json
+            $run = $runs | Where-Object { $_.headSha -eq $env:VERIFIED_SHA -and $_.event -eq 'workflow_dispatch' } | Sort-Object createdAt -Descending | Select-Object -First 1
+            if ($null -eq $run -and -not $dispatched) {
+              gh workflow run ci.yml --repo $env:GITHUB_REPOSITORY --ref $env:TARGET_BRANCH
+              if ($LASTEXITCODE -ne 0) { throw 'failed to dispatch official CI' }
+              $dispatched = $true
+              Start-Sleep -Seconds 15
+              continue
+            }
+            if ($null -eq $run) { Start-Sleep -Seconds 15; continue }
+            Write-Host "official-ci run=$($run.databaseId) status=$($run.status) conclusion=$($run.conclusion) url=$($run.url)"
+            if ($run.status -eq 'completed') { break }
+            Start-Sleep -Seconds 20
+          }
+          if ($null -eq $run -or $run.status -ne 'completed') { throw 'official CI did not complete before timeout' }
+          if ($run.conclusion -ne 'success') {
+            gh run view $run.databaseId --repo $env:GITHUB_REPOSITORY --log-failed
+            throw "official CI failed: $($run.conclusion)"
+          }
+          "run_url=$($run.url)" >> $env:GITHUB_OUTPUT
+
+      - name: Submit formal verification review and mark ready
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFIED_SHA: ${{ steps.verified.outputs.verified_sha }}
+          CI_URL: ${{ steps.ci.outputs.run_url }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pr = gh api ("repos/{0}/pulls/{1}" -f $env:GITHUB_REPOSITORY, $env:TARGET_PR) | ConvertFrom-Json
+          if ($pr.base.sha -ne $env:EXPECTED_BASE) { throw "main moved from tested base: $($pr.base.sha)" }
+          if ($pr.head.sha -ne $env:VERIFIED_SHA) { throw "PR head moved from verified commit: $($pr.head.sha)" }
+          $body = @"
+          **Formal verification verdict: APPROVED**
+
+          Exact base: `$env:EXPECTED_BASE`  
+          Exact head: `$env:VERIFIED_SHA`
+
+          The guarded recovery job ran the Task 6 focused modules, every Python test module in isolated serial processes, compile/CLI/fixture gates, a fresh-wheel/schema check, diff checks, and a test-weakening scan before publishing this commit. The independent official Windows CI also passed: $env:CI_URL
+
+          Review/evidence/GREEN authority remains constrained to the versioned contracts; no file-existence or legacy `done` shortcut was accepted.
+          "@
+          gh pr review $env:TARGET_PR --repo $env:GITHUB_REPOSITORY --comment --body $body
+          if ($LASTEXITCODE -ne 0) { throw 'failed to submit formal verification review' }
+          gh pr ready $env:TARGET_PR --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw 'failed to mark PR ready' }
+
+      - name: Merge the exact verified head
+        id: merge
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFIED_SHA: ${{ steps.verified.outputs.verified_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $result = gh api --method PUT ("repos/{0}/pulls/{1}/merge" -f $env:GITHUB_REPOSITORY, $env:TARGET_PR) -f merge_method=merge -f sha=$env:VERIFIED_SHA | ConvertFrom-Json
+          if (-not $result.merged) { throw "GitHub refused merge: $($result.message)" }
+          "merge_sha=$($result.sha)" >> $env:GITHUB_OUTPUT
+          Write-Host "merged-sha=$($result.sha)"
+
+      - name: Verify merged main through official CI
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $started = [DateTimeOffset]::UtcNow
+          gh workflow run ci.yml --repo $env:GITHUB_REPOSITORY --ref main
+          if ($LASTEXITCODE -ne 0) { throw 'failed to dispatch post-merge main CI' }
+          $deadline = [DateTimeOffset]::UtcNow.AddMinutes(100)
+          $run = $null
+          while ([DateTimeOffset]::UtcNow -lt $deadline) {
+            $runs = gh run list --repo $env:GITHUB_REPOSITORY --workflow ci.yml --branch main --event workflow_dispatch --limit 30 --json databaseId,headSha,status,conclusion,createdAt,url | ConvertFrom-Json
+            $run = $runs | Where-Object { $_.headSha -eq $env:MERGE_SHA -and [DateTimeOffset]$_.createdAt -ge $started.AddMinutes(-1) } | Sort-Object createdAt -Descending | Select-Object -First 1
+            if ($null -eq $run) { Start-Sleep -Seconds 10; continue }
+            Write-Host "post-merge-ci run=$($run.databaseId) status=$($run.status) conclusion=$($run.conclusion) url=$($run.url)"
+            if ($run.status -eq 'completed') { break }
+            Start-Sleep -Seconds 20
+          }
+          if ($null -eq $run -or $run.status -ne 'completed') { throw 'post-merge CI did not complete before timeout' }
+          if ($run.conclusion -ne 'success') {
+            gh run view $run.databaseId --repo $env:GITHUB_REPOSITORY --log-failed
+            throw "post-merge main CI failed: $($run.conclusion)"
+          }
+
+      - name: Close temporary recovery PR
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
+        run: |
+          gh pr close $env:BOOTSTRAP_PR --repo $env:GITHUB_REPOSITORY --comment "Task 6 was verified and merged to main at $env:MERGE_SHA. Closing this temporary recovery PR without merge."
