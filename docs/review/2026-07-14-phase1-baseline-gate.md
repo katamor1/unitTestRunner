@@ -128,6 +128,78 @@ At the verified head, `py -m compileall -q src tests`,
 exited 0. The final `git status --porcelain=v1` produced no entries, confirming
 that the target worktree was clean at the end of the verification run.
 
+## Current-main integration re-verification
+
+After prerequisite PR #18 merged, current `origin/main` at
+`99f71317584bdf5bb22aac8081c1c7c02fe7ba6b` was merged into the baseline
+branch. The resulting code/test integration head was
+`2565e5387d6323542ae1c4d4f5dbf7ddc0b47a18`. Its effective pull-request diff
+against current main contains only the CI workflow, the CI contract test, and
+three plan/review documents; it contains no `src/` product-code change and no
+Phase 1 Task 6 implementation.
+
+The merged workflow retains both the sorted fresh-process module loop and
+`UNIT_TEST_RUNNER_REQUIRE_8DOT3_ALIAS: "1"`. Focused verification ran
+`tests.test_ci_contract`, `tests.test_windows_path_alias_regression`,
+`tests.test_test_spec_consumers`, and `tests.test_vc6_fixture_build_e2e` as 22
+tests: 21 passed and only the compiler-backed fixture test reported the
+expected local `host C compiler is required` skip. All seven Windows path
+alias regressions ran and passed without skipping.
+
+The first complete merged-head run executed all 112 modules successfully and
+observed 534 tests, but the prerequisite branch's external validation script
+still expected the pre-merge main total of 532. Comparing its CSV with the
+pre-merge main CSV isolated the entire two-test increase to
+`tests.test_ci_contract`: the baseline branch adds the mutation-rejection and
+harmless-comment controls, increasing that module from six tests to eight.
+No other module count changed.
+
+The same isolated gate was then rerun with the merged-head expectation of 534
+tests and exited 0. Run `20260714-073944` recorded 112 modules, 534 tests, 3
+expected compiler skips, 0 failures, 0 errors, 0 non-zero module exits, and 0
+result-parse failures. Its raw local evidence is
+`C:\Users\stell\AppData\Local\Temp\unit-test-runner-isolated-20260714-073944.log`
+with the corresponding `.csv` file at the same basename.
+
+At the integration head, `py -m compileall -q src tests`,
+`py -m unit_test_runner --help`, and `git diff --check origin/main..HEAD` each
+exited 0. Hosted verification on the new pull-request head remains mandatory;
+these local results do not claim GitHub Actions success.
+
+## Current-main review remediation
+
+Independent review of the merged branch found that the workflow itself was
+correct but its executable contract still accepted behavior-defeating
+mutations. Regression-first verification initially reproduced six accepted
+mutants: zero-test selectors, post-loop failure reset, compiler-result
+overwrite, literal-path log truncation, and relocation of the required 8.3
+environment setting. Subsequent adversarial passes reproduced job/step
+disabling, shell and environment overrides, setup-step test masking,
+workflow-level default-shell masking, trigger removal, and disabling of the
+other four jobs. A separate RED proved that strategically placed harmless
+full-line comments prevented the raw mutation anchors from applying.
+
+The contract now uses layered fail-closed checks: a normalized executable
+workflow SHA-256, an exact workflow preamble, canonical `python-tests` and
+`fixture-smoke` jobs, and canonical PowerShell run blocks. Full-line comments,
+blank lines, and trailing whitespace remain permitted. The Python loop also
+throws when module discovery returns zero modules. Mutation generation uses
+the same comment-free source as the validator, so the complete suite runs
+against both the raw workflow and a strategically commented equivalent.
+
+Focused GREEN ran all eight `tests.test_ci_contract` methods and both
+`tests.test_repository_source_tracking` methods successfully. The contract
+rejected all 35 mutants in both raw and commented forms, while accepting the
+real workflow and harmless-comment controls. A nested PowerShell proof showed
+the custom-shell mutant can mask an internal failure with wrapper exit 0;
+the contract rejects that effective variant. `py -m compileall -q src tests`
+and `git diff --check` also exited 0.
+
+Two independent final reviews reported Critical 0, Important 0, and Minor 0.
+The remediation adds no product code or Phase 1 Task 6 behavior. The complete
+112-module isolated gate must still be rerun on the remediation commit before
+publication.
+
 ## Local compiler limitation
 
 `Get-Command gcc, clang, cc -ErrorAction SilentlyContinue` found no supported
@@ -140,5 +212,7 @@ without skip.
 
 ## Publication boundary
 
-The pull-request URL, GitHub Actions URLs, review verdict, and merge SHA exist
-only after publication and are not claimed by this pre-publication record.
+The current-main integration evidence does not claim new-head GitHub Actions
+results, a final review verdict, or the final PR #17-to-main merge SHA. Those
+outcomes can be recorded only after this branch is pushed and the hosted gates
+finish. The existing draft pull-request URL is not evidence of those outcomes.

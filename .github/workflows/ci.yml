@@ -73,6 +73,9 @@ jobs:
           $modules = Get-ChildItem -LiteralPath .\tests -Filter 'test_*.py' -File |
             Sort-Object Name |
             ForEach-Object { 'tests.' + $_.BaseName }
+          if ($modules.Count -eq 0) {
+            throw 'isolated Python test discovery returned no modules'
+          }
           $failed = @()
           foreach ($module in $modules) {
             "`n=== $module ===" | Tee-Object -FilePath $log -Append
