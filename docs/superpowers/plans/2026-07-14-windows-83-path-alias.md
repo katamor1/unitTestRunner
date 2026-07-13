@@ -74,7 +74,10 @@ Expected locally: TestSpec consumer and CLI-result tests pass; the compiler-back
 
 - [ ] **Step 5: Review Task 1**
 
-Generate a review package from b667901 to the cherry-pick head. The reviewer must confirm both public-envelope expectations are current, no product code entered the task, and the effective patch matches commit 1c039f3.
+Generate a review package from the controller-recorded Task 1 base (the
+current plan-only HEAD) to the cherry-pick head. The reviewer must confirm
+both public-envelope expectations are current, no product code entered the
+task, and the effective patch matches commit 1c039f3.
 
 ---
 
