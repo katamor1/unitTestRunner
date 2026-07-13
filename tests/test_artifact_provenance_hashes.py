@@ -15,6 +15,10 @@ from unit_test_runner.build.build_report_writer import write_build_reports
 from unit_test_runner.dossier.artifact_collector import collect_artifacts
 from unit_test_runner.harness.harness_models import HarnessGenerationPolicy, HarnessSkeletonReport
 from unit_test_runner.harness.harness_report_writer import write_harness_report
+from tests.windows_path_alias_support import (
+    WINDOWS_8DOT3_PREFIX,
+    require_windows_path_alias_pair,
+)
 
 
 def sha256(path):
@@ -22,6 +26,52 @@ def sha256(path):
 
 
 class ArtifactProvenanceHashTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "Windows 8.3 aliases require Windows")
+    def test_build_report_records_long_generated_path_under_short_output_alias(self):
+        with tempfile.TemporaryDirectory(
+            prefix=WINDOWS_8DOT3_PREFIX
+        ) as temp_dir:
+            pair = require_windows_path_alias_pair(self, Path(temp_dir))
+            build = BuildWorkspaceReport(
+                source_path=Path("src/control.c"),
+                function_name="Control_Update",
+                status="generated",
+                output_root=pair.short,
+                copied_files=[],
+                referenced_files=[],
+                generated_build_files=[],
+                compile_units=[],
+                link_units=[],
+                include_dirs=[],
+                defines=[],
+                compiler_options=[],
+                build_commands=[],
+                diagnostics=[],
+            )
+            probe = BuildProbeReport(
+                source_path=Path("src/control.c"),
+                function_name="Control_Update",
+                status="not_run",
+                executed=False,
+                exit_code=None,
+                commands=[],
+                diagnostics=[],
+                missing_includes=[],
+                unresolved_symbols=[],
+                pch_issues=[],
+                vc6_compatibility_issues=[],
+                log_files=[],
+            )
+            try:
+                write_build_reports(pair.short, build, probe)
+            except ValueError as error:
+                self.fail(f"long generated path must fit short output root: {error}")
+            inventory = {
+                item.workspace_path.as_posix()
+                for item in build.generated_build_files
+            }
+            self.assertIn("build/UTR_Control_Update.dsp", inventory)
+
     def test_regenerated_report_inventories_only_hash_final_external_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)

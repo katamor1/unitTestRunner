@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from unit_test_runner.harness.c90_writer import sha256_file, write_c_file
+from unit_test_runner.path_utils import resolved_relative_to
 from unit_test_runner.reports.japanese import ja_label, md_cell, md_label_cell
 from unit_test_runner.vc6.debug_workspace_response import vc6_cpp_options_path
 from unit_test_runner.vc6.debug_workspace_writer import write_vc6_debug_project
@@ -134,7 +135,7 @@ def _record_build_file(
     *,
     hash_file: bool = True,
 ) -> None:
-    relative = path.relative_to(output_root)
+    relative = resolved_relative_to(path, output_root)
     digest = sha256_file(path) if hash_file else None
     for item in report.generated_build_files:
         if item.workspace_path == relative:

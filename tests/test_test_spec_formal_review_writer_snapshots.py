@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import os
 import shutil
 import tempfile
 import threading
@@ -27,6 +28,10 @@ from unit_test_runner.test_spec import exporters as exporter_module
 from unit_test_runner.test_spec import repository as repository_module
 
 from tests.spec_support import copied_payload, current_context
+from tests.windows_path_alias_support import (
+    WINDOWS_8DOT3_PREFIX,
+    require_windows_path_alias_pair,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -228,8 +233,13 @@ class TestSpecFormalReviewWriterSnapshotTests(unittest.TestCase):
                 with self.subTest(
                     output_format=output_format,
                     location=location,
-                ), tempfile.TemporaryDirectory() as temp_dir:
-                    out = Path(temp_dir) / "Control_Update"
+                ), tempfile.TemporaryDirectory(
+                    prefix=WINDOWS_8DOT3_PREFIX
+                ) as temp_dir:
+                    root = Path(temp_dir)
+                    if os.name == "nt":
+                        root = require_windows_path_alias_pair(self, root).short
+                    out = root / "Control_Update"
                     dossier_workflow.analyze_function_workflow(
                         FIXTURE,
                         FIXTURE / "Product.dsw",

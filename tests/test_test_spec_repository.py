@@ -17,9 +17,86 @@ from unit_test_runner.test_spec import (
 from unit_test_runner.contracts import ContractMode
 
 from tests.spec_support import copied_payload, current_context
+from tests.windows_path_alias_support import (
+    WINDOWS_8DOT3_PREFIX,
+    require_windows_path_alias_pair,
+)
 
 
 class TestSpecRepositoryTests(unittest.TestCase):
+    def _assert_alias_save(self, path_form: str, context_form: str):
+        with tempfile.TemporaryDirectory(
+            prefix=WINDOWS_8DOT3_PREFIX
+        ) as temp_dir:
+            pair = require_windows_path_alias_pair(self, Path(temp_dir))
+            roots = {"long": pair.long, "short": pair.short}
+            path = roots[path_form] / "reports" / "test_spec.json"
+            try:
+                artifact = save_test_spec(
+                    path,
+                    TestSpec.from_payload(copied_payload()),
+                    expected_revision=None,
+                    current_context=current_context(roots[context_form]),
+                )
+            except ValueError as error:
+                self.fail(f"physical workspace aliases must be accepted: {error}")
+            self.assertEqual("reports/test_spec.json", artifact.path)
+            self.assertTrue(
+                os.path.samefile(
+                    pair.long / "reports" / "test_spec.json",
+                    pair.short / "reports" / "test_spec.json",
+                )
+            )
+
+    @unittest.skipUnless(os.name == "nt", "Windows 8.3 aliases require Windows")
+    def test_save_accepts_short_canonical_path_with_long_workspace_alias(self):
+        self._assert_alias_save("short", "long")
+
+    @unittest.skipUnless(os.name == "nt", "Windows 8.3 aliases require Windows")
+    def test_save_accepts_long_canonical_path_with_short_workspace_alias(self):
+        self._assert_alias_save("long", "short")
+
+    def test_canonical_leaf_and_lock_symlinks_are_rejected_before_write(self):
+        for entry_kind in ("canonical", "lock"):
+            with (
+                self.subTest(entry_kind=entry_kind),
+                tempfile.TemporaryDirectory() as workspace_dir,
+                tempfile.TemporaryDirectory() as outside_dir,
+            ):
+                workspace = Path(workspace_dir)
+                outside = Path(outside_dir)
+                reports = workspace / "reports"
+                reports.mkdir()
+                canonical = reports / "test_spec.json"
+                target = outside / f"{entry_kind}.txt"
+                target.write_text("outside\n", encoding="utf-8")
+                link = (
+                    canonical
+                    if entry_kind == "canonical"
+                    else reports / ".test_spec.json.lock"
+                )
+                try:
+                    os.symlink(target, link)
+                except OSError as error:
+                    self.skipTest(f"symlink creation unavailable: {error}")
+                with self.assertRaises(ValueError):
+                    save_test_spec(
+                        canonical,
+                        TestSpec.from_payload(copied_payload()),
+                        expected_revision=None,
+                        current_context=current_context(workspace),
+                    )
+                self.assertTrue(link.is_symlink())
+                if entry_kind == "lock":
+                    self.assertFalse(canonical.exists())
+                self.assertFalse(
+                    list(reports.glob(".test_spec.json.*.tmp"))
+                )
+                self.assertEqual(
+                    "outside\n",
+                    target.read_text(encoding="utf-8"),
+                )
+
     def test_create_writes_exact_canonical_bytes_and_returns_truthful_artifact(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)

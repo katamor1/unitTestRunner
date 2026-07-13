@@ -53,10 +53,14 @@ class TestSpecConsumerTests(unittest.TestCase):
             workspace = Path(temp_dir)
             path = create_workspace(workspace)
 
+            canonical = json.loads(path.read_text(encoding="utf-8"))
             payload = load_test_spec_for_consumer(path)
 
-            self.assertEqual("spec-control-update", payload["spec_id"])
-            self.assertEqual("tc-control-update-001", payload["test_cases"][0]["test_case_id"])
+            self.assertEqual(canonical["data"]["spec_id"], payload["spec_id"])
+            self.assertEqual(
+                canonical["data"]["test_cases"][0]["test_case_id"],
+                payload["test_cases"][0]["test_case_id"],
+            )
             markdown = workspace / "reports" / "test_spec.md"
             markdown.write_text("generated view; edits are not imported", encoding="utf-8")
             with self.assertRaises(ValueError):

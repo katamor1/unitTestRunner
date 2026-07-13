@@ -15,6 +15,12 @@ def normalize_relative(path: Path, root: Path) -> str:
         return as_posix_path(str(path))
 
 
+def resolved_relative_to(path: Path | str, root: Path | str) -> Path:
+    return Path(path).resolve(strict=False).relative_to(
+        Path(root).resolve(strict=False)
+    )
+
+
 def resolve_vc6_path(base_dir: Path, raw_path: str) -> Path:
     clean = raw_path.strip().strip('"')
     clean = clean.replace("\\", "/")
