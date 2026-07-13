@@ -1,0 +1,158 @@
+name: Publish verified Phase 1 Task 6
+
+on:
+  push:
+    branches:
+      - codex/bootstrap-p1t6-final-8f9d03d
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout bootstrap branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Reconstruct and validate Task 6 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/bootstrap/p1t6-final.part*.b64 \
+            | base64 --decode > "$RUNNER_TEMP/p1t6-final.patch.gz"
+          test "$(stat -c%s "$RUNNER_TEMP/p1t6-final.patch.gz")" = "44286"
+          test "$(sha256sum "$RUNNER_TEMP/p1t6-final.patch.gz" | awk '{print $1}')" = \
+            "b49d71c791546edb7bfcdcfcd18d8ae8e97d676742fce674e4b7110cf893844b"
+          gzip -dc "$RUNNER_TEMP/p1t6-final.patch.gz" > "$RUNNER_TEMP/p1t6-final.patch"
+          test "$(stat -c%s "$RUNNER_TEMP/p1t6-final.patch")" = "234710"
+          test "$(sha256sum "$RUNNER_TEMP/p1t6-final.patch" | awk '{print $1}')" = \
+            "e1c1fcd6805d6a27ba306589f0013b7708c2d9100c482e3bb76e69bec7d46598"
+
+      - name: Apply exact Task 6 tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --detach b66790165a2d4f82943cd199b3b499e1f1725fc3
+          git checkout -B codex/p1t6-review-decisions-readiness
+          git apply --check "$RUNNER_TEMP/p1t6-final.patch"
+          git apply "$RUNNER_TEMP/p1t6-final.patch"
+          git diff --check
+          git add -A
+          test "$(git write-tree)" = "a3ecbfa194f16b02e5d2c4543ff4f20991b29a81"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install "setuptools>=61" wheel
+          python -m pip install -e .
+
+      - name: Run authoritative isolated Python gate
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+          OPENBLAS_NUM_THREADS: "1"
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
+        run: |
+          set -euo pipefail
+          mapfile -t modules < <(
+            find tests -maxdepth 1 -type f -name 'test_*.py' -printf '%f\n' \
+              | sort \
+              | sed -e 's/\.py$//' -e 's#^#tests.#'
+          )
+          test "${#modules[@]}" = "117"
+          total_tests=0
+          total_skips=0
+          for module in "${modules[@]}"; do
+            log="$RUNNER_TEMP/${module//./_}.log"
+            python -m unittest "$module" -v 2>&1 | tee "$log"
+            count="$(grep -Eo 'Ran [0-9]+ tests?' "$log" | tail -1 | grep -Eo '[0-9]+' || true)"
+            skips="$(grep -Eo 'skipped=[0-9]+' "$log" | tail -1 | cut -d= -f2 || true)"
+            total_tests=$((total_tests + ${count:-0}))
+            total_skips=$((total_skips + ${skips:-0}))
+          done
+          test "$total_tests" = "564"
+          test "$total_skips" = "2"
+          printf 'modules=%s\ntests=%s\nskips=%s\n' \
+            "${#modules[@]}" "$total_tests" "$total_skips" \
+            | tee "$RUNNER_TEMP/p1t6-python-gate-summary.txt"
+
+      - name: Run compile, CLI, wheel, and installed-contract gates
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          set -euo pipefail
+          python -m compileall -q src tests
+          python -m unit_test_runner --help >/dev/null
+          python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/dist" .
+          python -m venv "$RUNNER_TEMP/package-venv"
+          package_python="$RUNNER_TEMP/package-venv/bin/python"
+          "$package_python" -m pip install "$RUNNER_TEMP"/dist/unit_test_runner-*.whl
+          "$package_python" -m unit_test_runner --help >/dev/null
+          "$package_python" - <<'PY'
+          import json
+          from importlib import resources
+          from unit_test_runner.contracts import ArtifactKind
+          from unit_test_runner.contracts.registry import iter_contract_versions
+
+          root = resources.files("unit_test_runner.schemas")
+          kinds = list(ArtifactKind)
+          versions = list(iter_contract_versions())
+          assert len(kinds) == 40, len(kinds)
+          assert len(versions) == 44, len(versions)
+          for contract in versions:
+              payload = json.loads(
+                  root.joinpath(contract.schema_resource).read_text(encoding="utf-8")
+              )
+              assert payload
+          print(f"artifact_kinds={len(kinds)} contract_versions={len(versions)}")
+          PY
+          test "$(git write-tree)" = "a3ecbfa194f16b02e5d2c4543ff4f20991b29a81"
+
+      - name: Commit and publish verified branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat: complete phase 1 review decisions and readiness"
+          task_sha="$(git rev-parse HEAD)"
+          task_tree="$(git rev-parse HEAD^{tree})"
+          test "$task_tree" = "a3ecbfa194f16b02e5d2c4543ff4f20991b29a81"
+          git push --force-with-lease=refs/heads/codex/p1t6-review-decisions-readiness:9da6b8ecbcd4a95d80ea61347558e4d5721d30a5 \
+            origin HEAD:refs/heads/codex/p1t6-review-decisions-readiness
+          git checkout -B codex/unit-test-runner-hardening-sdd \
+            b66790165a2d4f82943cd199b3b499e1f1725fc3
+          git merge --no-ff "$task_sha" \
+            -m "merge: complete phase 1 review decisions and readiness"
+          test "$(git rev-parse HEAD^{tree})" = \
+            "a3ecbfa194f16b02e5d2c4543ff4f20991b29a81"
+          git push origin HEAD:refs/heads/codex/unit-test-runner-hardening-sdd
+          printf 'task_sha=%s\nintegration_sha=%s\ntree=%s\n' \
+            "$task_sha" "$(git rev-parse HEAD)" "$task_tree" \
+            | tee "$RUNNER_TEMP/p1t6-publish-summary.txt"
+
+      - name: Upload verification summaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1t6-verification-summaries
+          path: |
+            ${{ runner.temp }}/p1t6-python-gate-summary.txt
+            ${{ runner.temp }}/p1t6-publish-summary.txt
+          if-no-files-found: warn
+          retention-days: 7
