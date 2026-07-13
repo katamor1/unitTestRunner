@@ -587,6 +587,12 @@ authorization still runs before mutation:
                         expected_revision=None,
                         current_context=current_context(workspace),
                     )
+                self.assertTrue(link.is_symlink())
+                if entry_kind == "lock":
+                    self.assertFalse(canonical.exists())
+                self.assertFalse(
+                    list(reports.glob(".test_spec.json.*.tmp"))
+                )
                 self.assertEqual(
                     "outside\n",
                     target.read_text(encoding="utf-8"),
