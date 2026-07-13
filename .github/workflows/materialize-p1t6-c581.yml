@@ -1,0 +1,87 @@
+name: Materialize Phase 1 Task 6 checkpoint
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bootstrap payload
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify checkpoint payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/bootstrap/p1t6-full-from-b667.patch.gz "$RUNNER_TEMP/p1t6.patch.gz"
+          test "$(stat -c%s "$RUNNER_TEMP/p1t6.patch.gz")" = "41409"
+          test "$(sha256sum "$RUNNER_TEMP/p1t6.patch.gz" | awk '{print $1}')" = "f09f489c4eff0e532c84833741f69fe8d09a6a3be14715d0629f0dc0f6f4813c"
+          gzip -dc "$RUNNER_TEMP/p1t6.patch.gz" > "$RUNNER_TEMP/p1t6.patch"
+          test "$(sha256sum "$RUNNER_TEMP/p1t6.patch" | awk '{print $1}')" = "8aaa74a87b2e1ea64087726bbcbfd8c998d5940c458d04768b63f969fe461ef0"
+
+      - name: Apply exact Task 6 tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout -B codex/p1t6-review-decisions-c581 b66790165a2d4f82943cd199b3b499e1f1725fc3
+          git apply --check "$RUNNER_TEMP/p1t6.patch"
+          git apply "$RUNNER_TEMP/p1t6.patch"
+          git add -A
+          test "$(git write-tree)" = "363ddb6f86a4508eb5f4dd2a26013b837a5e26d6"
+          git diff --cached --check
+
+      - name: Install Python package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install "setuptools>=61" wheel
+          python -m pip install -e .
+
+      - name: Run authoritative isolated Python gate
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+          OPENBLAS_NUM_THREADS: "1"
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          modules = [f"tests.{path.stem}" for path in sorted(Path("tests").glob("test_*.py"))]
+          failed = []
+          for index, module in enumerate(modules, 1):
+              print(f"[{index}/{len(modules)}] {module}", flush=True)
+              completed = subprocess.run([sys.executable, "-m", "unittest", module, "-v"])
+              if completed.returncode:
+                  failed.append(module)
+          if failed:
+              raise SystemExit("isolated Python failures: " + ", ".join(failed))
+          print(f"isolated Python modules passed: {len(modules)}", flush=True)
+          PY
+          python -m compileall -q src tests
+          python -m unit_test_runner --help >/dev/null
+          git diff --cached --check
+
+      - name: Commit and publish checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat: complete phase 1 task 6 review decisions"
+          test "$(git rev-parse HEAD^{tree})" = "363ddb6f86a4508eb5f4dd2a26013b837a5e26d6"
+          git push --force origin HEAD:refs/heads/codex/p1t6-review-decisions-c581
