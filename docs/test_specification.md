@@ -27,12 +27,27 @@
 
 ```powershell
 py -m pip install -e ".[test]"
-py -m unittest discover -s tests -p "test_*.py"
+$env:PYTHONPATH = (Resolve-Path .\src).Path
+$modules = Get-ChildItem -LiteralPath .\tests -Filter 'test_*.py' -File |
+  Sort-Object Name |
+  ForEach-Object { 'tests.' + $_.BaseName }
+if ($modules.Count -eq 0) {
+  throw 'isolated Python test discovery returned no modules'
+}
+$failed = @()
+foreach ($module in $modules) {
+  & py -m unittest $module -v
+  if ($LASTEXITCODE -ne 0) { $failed += $module }
+}
+if ($failed.Count -ne 0) {
+  throw ('isolated Python failures: ' + ($failed -join ', '))
+}
 ```
 
 期待結果:
 
 - `Ran 0 tests` ではない
+- 各 `tests/test_*.py` モジュールが別のPythonプロセスで実行される
 - 失敗、エラーがない
 
 ### 3.2 CLI registration smoke

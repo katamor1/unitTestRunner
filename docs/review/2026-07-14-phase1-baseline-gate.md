@@ -16,6 +16,10 @@ implementation.
 - CI review-remediation test commit: `bccf17e1a6f7d08e29b7f51b80f29c958114315c`
 - Second CI review-remediation test commit: `33adb15039c5ad0d12a1bd693a59f76be2cd3dee`
 - Append-only log remediation test commit: `d22a4acd626c31b19fa2e7ece14822fdcbde6b4e`
+- Windows path-alias prerequisite merge on `main`: `99f71317584bdf5bb22aac8081c1c7c02fe7ba6b`
+- Current-main integration merge: `2565e5387d6323542ae1c4d4f5dbf7ddc0b47a18`
+- Fail-closed CI workflow remediation: `1c6c733241c6348eb5483b0aaf2c7652b37540f1`
+- YAML token-semantics remediation: `677815a0e1df60b07fdd8e04991c6b8823e722b2`
 
 ## Focused RED evidence
 

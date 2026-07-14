@@ -118,13 +118,16 @@ test, applies or writes that test first, and records an assertion-level RED on
 the merged baseline. The corresponding minimal product slice is then applied
 and verified GREEN. Import/setup errors are not accepted as RED evidence.
 
-The four known compatibility failures are handled as separate RED/GREEN
-cycles:
+The two compatibility behaviors still missing from the merged baseline are
+handled as separate RED/GREEN cycles:
 
 - current-envelope reanalysis normalization;
-- the already-fixed baseline TestSpec consumer expectation;
-- the already-fixed baseline VC6 CLI envelope expectation;
 - declared `referencing` dependency and normal fresh-wheel installation.
+
+The already-fixed baseline TestSpec consumer expectation and VC6 CLI envelope
+expectation are inherited GREEN compatibility gates. Task 6 must keep them
+GREEN, but must not manufacture an artificial RED for behavior already present
+on the merged baseline.
 
 Carrier payload files, materialization workflows, and checkpoint metadata are
 excluded from the product branch.
