@@ -218,8 +218,25 @@ post-fix code and documentation reviews reported Critical 0, Important 0, and
 Minor 0. The final code review instrumented both mutation paths: each accepted
 its normalized baseline before rejecting 48 distinct applied mutants. The ten
 CI-contract tests also passed under CPython 3.12.13 with PyYAML 6.0.1. The
-complete 112-module isolated gate must still be rerun on the follow-up
-remediation commit before publication.
+complete 112-module isolated gate was then rerun on the follow-up remediation
+commit as recorded below.
+
+## Follow-up remediation verification
+
+The verified code-and-test head is
+`677815a0e1df60b07fdd8e04991c6b8823e722b2`. A fresh isolated gate started
+from a clean tracked worktree and ran every tracked top-level
+`tests/test_*.py` module in its own Python process. The final strict summary
+was 112 modules, 536 tests, 3 expected compiler-required skips, 0 failures,
+0 errors, 0 nonzero module exits, and 0 result-parse failures. The runner
+exited 0 after also matching the exact three-method skip set.
+
+The two-test increase from the earlier 534-test integration baseline is fully
+accounted for by the scalar-boundary acceptance regression and the YAML 1.1 /
+duplicate-key collision regression added to `tests.test_ci_contract`. The
+successful raw evidence is
+`C:\Users\stell\AppData\Local\Temp\unit-test-runner-isolated-20260715-000605.log`
+with the corresponding `.csv` file at the same basename.
 
 ## Local compiler limitation
 
