@@ -7,6 +7,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, TypeVar
 from uuid import uuid4
 
 from unit_test_runner.cli.artifacts import ProducedArtifact
@@ -32,6 +33,11 @@ from .path_safety import assert_safe_canonical_test_spec_path
 
 class StaleRevisionError(ValueError):
     pass
+
+
+_T = TypeVar("_T")
+_WINDOWS_SHARING_RETRY_SECONDS = 1.0
+_WINDOWS_SHARING_RETRY_DELAY_SECONDS = 0.01
 
 
 @dataclass(frozen=True)
@@ -261,10 +267,10 @@ def save_test_spec_snapshot(
                 handle.write(final_bytes)
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temporary, path)
+            _replace_with_windows_retry(temporary, path)
         finally:
             try:
-                temporary.unlink()
+                _unlink_with_windows_retry(temporary)
             except FileNotFoundError:
                 pass
         snapshot = _snapshot_from_bytes(
@@ -293,13 +299,56 @@ def _canonical_json_bytes(payload: dict) -> bytes:
     ).encode("utf-8")
 
 
+def _running_on_windows() -> bool:
+    return os.name == "nt"
+
+
+def _retry_windows_permission_error(
+    operation: Callable[[], _T],
+    *,
+    timeout_seconds: float = _WINDOWS_SHARING_RETRY_SECONDS,
+) -> _T:
+    deadline = time.monotonic() + max(0.0, timeout_seconds)
+    last_permission_error: PermissionError | None = None
+    while True:
+        if (
+            last_permission_error is not None
+            and time.monotonic() >= deadline
+        ):
+            raise last_permission_error
+        try:
+            return operation()
+        except PermissionError as error:
+            if not _running_on_windows():
+                raise
+            last_permission_error = error
+            now = time.monotonic()
+            if now >= deadline:
+                raise
+            time.sleep(
+                min(_WINDOWS_SHARING_RETRY_DELAY_SECONDS, deadline - now)
+            )
+
+
+def _replace_with_windows_retry(source: Path, destination: Path) -> None:
+    _retry_windows_permission_error(lambda: os.replace(source, destination))
+
+
+def _unlink_with_windows_retry(path: Path) -> None:
+    _retry_windows_permission_error(path.unlink)
+
+
 @contextmanager
 def _exclusive_lock(path: Path, *, timeout_seconds: float = 10.0):
     deadline = time.monotonic() + timeout_seconds
     descriptor: int | None = None
     while descriptor is None:
         try:
-            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            remaining = max(0.0, deadline - time.monotonic())
+            descriptor = _retry_windows_permission_error(
+                lambda: os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY),
+                timeout_seconds=remaining,
+            )
         except FileExistsError:
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"Timed out acquiring test_spec lock: {path}")
@@ -310,6 +359,6 @@ def _exclusive_lock(path: Path, *, timeout_seconds: float = 10.0):
     finally:
         os.close(descriptor)
         try:
-            path.unlink()
+            _unlink_with_windows_retry(path)
         except FileNotFoundError:
             pass

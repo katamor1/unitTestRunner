@@ -14,6 +14,7 @@ from unit_test_runner.test_spec import (
     save_test_spec_snapshot,
 )
 from unit_test_runner.test_spec import exporters as exporter_module
+from unit_test_runner.test_spec import repository as repository_module
 
 from tests.spec_support import copied_payload, current_context
 
@@ -34,6 +35,50 @@ def _assert_no_residue(test: unittest.TestCase, reports: Path) -> None:
 
 
 class TestSpecFormalReviewExportAtomicityTests(unittest.TestCase):
+    def test_fixed_views_retry_one_transient_windows_replace_permission_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            canonical = workspace / "reports" / "test_spec.json"
+            snapshot, _artifact = save_test_spec_snapshot(
+                canonical,
+                TestSpec.from_payload(copied_payload()),
+                expected_revision=None,
+                current_context=current_context(workspace),
+            )
+            original_replace = exporter_module.os.replace
+            csv_attempts = 0
+
+            def transient_replace(source, destination):
+                nonlocal csv_attempts
+                if Path(destination).name == "test_spec.csv":
+                    csv_attempts += 1
+                    if csv_attempts == 1:
+                        raise PermissionError(
+                            13,
+                            "injected Windows sharing denial",
+                        )
+                return original_replace(source, destination)
+
+            with mock_patch.object(
+                repository_module,
+                "_running_on_windows",
+                return_value=True,
+            ), mock_patch.object(
+                repository_module.os,
+                "replace",
+                side_effect=transient_replace,
+            ):
+                views = export_test_spec_snapshot_views(
+                    snapshot,
+                    canonical.parent,
+                    canonical_path=canonical,
+                )
+
+            self.assertEqual(2, csv_attempts)
+            self.assertIn(snapshot.sha256, views["markdown"].read_text(encoding="utf-8"))
+            self.assertIn(snapshot.sha256, views["csv"].read_text(encoding="utf-8"))
+            _assert_no_residue(self, canonical.parent)
+
     def test_mismatched_existing_pair_is_rejected_without_visible_write(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)

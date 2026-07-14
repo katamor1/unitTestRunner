@@ -462,6 +462,8 @@ class TestSpecFormalReviewWriterSnapshotTests(unittest.TestCase):
             b_complete = threading.Event()
             failures: list[BaseException] = []
             original_render = exporter_module._render_markdown
+            original_open = repository_module.os.open
+            lock_denials = 0
 
             def blocking_render(spec, canonical_sha):
                 if threading.current_thread().name == "writer-a":
@@ -469,6 +471,20 @@ class TestSpecFormalReviewWriterSnapshotTests(unittest.TestCase):
                     if not release_a.wait(timeout=10):
                         raise TimeoutError("writer A was not released")
                 return original_render(spec, canonical_sha)
+
+            def transient_lock_open(path, flags):
+                nonlocal lock_denials
+                if (
+                    threading.current_thread().name == "writer-b"
+                    and Path(path) == canonical.parent / ".test_spec.json.lock"
+                    and lock_denials == 0
+                ):
+                    lock_denials += 1
+                    raise PermissionError(
+                        13,
+                        "injected Windows sharing denial",
+                    )
+                return original_open(path, flags)
 
             def export_a():
                 try:
@@ -495,6 +511,14 @@ class TestSpecFormalReviewWriterSnapshotTests(unittest.TestCase):
                 exporter_module,
                 "_render_markdown",
                 blocking_render,
+            ), mock_patch.object(
+                repository_module,
+                "_running_on_windows",
+                return_value=True,
+            ), mock_patch.object(
+                repository_module.os,
+                "open",
+                side_effect=transient_lock_open,
             ):
                 thread_a = threading.Thread(target=export_a, name="writer-a")
                 thread_a.start()
@@ -508,7 +532,9 @@ class TestSpecFormalReviewWriterSnapshotTests(unittest.TestCase):
 
             self.assertFalse(thread_a.is_alive())
             self.assertFalse(thread_b.is_alive())
-            self.assertEqual([], failures)
+            if failures:
+                raise failures[0]
+            self.assertEqual(1, lock_denials)
             revision, _sha256 = _view_identity(
                 canonical.parent / "test_spec.md",
                 canonical.parent / "test_spec.csv",

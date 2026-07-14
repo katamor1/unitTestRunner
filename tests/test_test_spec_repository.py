@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import patch as mock_patch
 
 from unit_test_runner.test_spec import (
     StaleRevisionError,
@@ -15,6 +16,7 @@ from unit_test_runner.test_spec import (
     save_test_spec,
 )
 from unit_test_runner.contracts import ContractMode
+from unit_test_runner.test_spec import repository as repository_module
 
 from tests.spec_support import copied_payload, current_context
 from tests.windows_path_alias_support import (
@@ -24,6 +26,192 @@ from tests.windows_path_alias_support import (
 
 
 class TestSpecRepositoryTests(unittest.TestCase):
+    def test_permission_error_is_not_retried_outside_windows(self):
+        attempts = 0
+
+        def denied():
+            nonlocal attempts
+            attempts += 1
+            raise PermissionError(13, "injected non-Windows permission denial")
+
+        with mock_patch.object(
+            repository_module,
+            "_running_on_windows",
+            return_value=False,
+        ):
+            with self.assertRaisesRegex(PermissionError, "non-Windows"):
+                repository_module._retry_windows_permission_error(denied)
+
+        self.assertEqual(1, attempts)
+
+    def test_windows_permission_error_retry_stops_at_deadline(self):
+        attempts = 0
+
+        def denied():
+            nonlocal attempts
+            attempts += 1
+            raise PermissionError(13, "persistent Windows sharing denial")
+
+        with mock_patch.object(
+            repository_module,
+            "_running_on_windows",
+            return_value=True,
+        ), mock_patch.object(
+            repository_module.time,
+            "monotonic",
+            side_effect=(0.0, 0.0, 0.25),
+        ), mock_patch.object(repository_module.time, "sleep") as sleep:
+            with self.assertRaisesRegex(PermissionError, "persistent Windows"):
+                repository_module._retry_windows_permission_error(
+                    denied,
+                    timeout_seconds=0.25,
+                )
+
+        self.assertEqual(1, attempts)
+        sleep.assert_called_once_with(0.01)
+
+    def test_lock_retries_one_transient_windows_permission_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            lock_path = Path(temp_dir) / ".test_spec.json.lock"
+            original_open = repository_module.os.open
+            attempts = 0
+
+            def transient_open(path, flags):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise PermissionError(13, "injected Windows sharing denial")
+                return original_open(path, flags)
+
+            with mock_patch.object(
+                repository_module,
+                "_running_on_windows",
+                return_value=True,
+            ), mock_patch.object(
+                repository_module.os,
+                "open",
+                side_effect=transient_open,
+            ):
+                with repository_module._exclusive_lock(
+                    lock_path,
+                    timeout_seconds=0.25,
+                ):
+                    self.assertTrue(lock_path.exists())
+
+            self.assertEqual(2, attempts)
+            self.assertFalse(lock_path.exists())
+
+    def test_lock_permission_retry_uses_the_full_lock_deadline(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            lock_path = Path(temp_dir) / ".test_spec.json.lock"
+            original_open = repository_module.os.open
+            attempts = 0
+
+            def delayed_open(path, flags):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise PermissionError(13, "delayed Windows sharing denial")
+                return original_open(path, flags)
+
+            manager = repository_module._exclusive_lock(
+                lock_path,
+                timeout_seconds=2.0,
+            )
+            with mock_patch.object(
+                repository_module,
+                "_running_on_windows",
+                return_value=True,
+            ), mock_patch.object(
+                repository_module.os,
+                "open",
+                side_effect=delayed_open,
+            ), mock_patch.object(
+                repository_module.time,
+                "monotonic",
+                side_effect=(0.0, 0.0, 0.0, 0.0, 1.5),
+            ), mock_patch.object(repository_module.time, "sleep"):
+                manager.__enter__()
+
+            try:
+                self.assertEqual(2, attempts)
+                self.assertTrue(lock_path.exists())
+            finally:
+                manager.__exit__(None, None, None)
+
+            self.assertFalse(lock_path.exists())
+
+    def test_lock_cleanup_retries_one_transient_windows_permission_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            lock_path = Path(temp_dir) / ".test_spec.json.lock"
+            original_unlink = repository_module.Path.unlink
+            attempts = 0
+
+            def transient_unlink(path, *args, **kwargs):
+                nonlocal attempts
+                if path == lock_path:
+                    attempts += 1
+                    if attempts == 1:
+                        raise PermissionError(
+                            13,
+                            "injected Windows sharing denial",
+                        )
+                return original_unlink(path, *args, **kwargs)
+
+            with mock_patch.object(
+                repository_module,
+                "_running_on_windows",
+                return_value=True,
+            ), mock_patch.object(
+                repository_module.Path,
+                "unlink",
+                new=transient_unlink,
+            ):
+                with repository_module._exclusive_lock(lock_path):
+                    self.assertTrue(lock_path.exists())
+
+            self.assertEqual(2, attempts)
+            self.assertFalse(lock_path.exists())
+
+    def test_save_retries_one_transient_windows_replace_permission_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            path = workspace / "reports" / "test_spec.json"
+            original_replace = repository_module.os.replace
+            canonical_attempts = 0
+
+            def transient_replace(source, destination):
+                nonlocal canonical_attempts
+                if Path(destination) == path:
+                    canonical_attempts += 1
+                    if canonical_attempts == 1:
+                        raise PermissionError(
+                            13,
+                            "injected Windows sharing denial",
+                        )
+                return original_replace(source, destination)
+
+            with mock_patch.object(
+                repository_module,
+                "_running_on_windows",
+                return_value=True,
+            ), mock_patch.object(
+                repository_module.os,
+                "replace",
+                side_effect=transient_replace,
+            ):
+                artifact = save_test_spec(
+                    path,
+                    TestSpec.from_payload(copied_payload()),
+                    expected_revision=None,
+                    current_context=current_context(workspace),
+                )
+
+            self.assertEqual(2, canonical_attempts)
+            self.assertEqual(1, load_test_spec(path, mode=ContractMode.STRICT).revision)
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), artifact.sha256)
+            self.assertFalse(list(path.parent.glob(".test_spec.json.*.tmp")))
+
     def _assert_alias_save(self, path_form: str, context_form: str):
         with tempfile.TemporaryDirectory(
             prefix=WINDOWS_8DOT3_PREFIX

@@ -21,6 +21,8 @@ from .path_safety import (
 from .repository import (
     TestSpecSnapshot,
     _exclusive_lock,
+    _replace_with_windows_retry,
+    _unlink_with_windows_retry,
     canonical_json_bytes,
     load_test_spec_snapshot,
 )
@@ -149,10 +151,10 @@ def export_test_spec_snapshot_custom_view(
     )
     try:
         _write_temporary(temporary, rendered)
-        os.replace(temporary, destination)
+        _replace_with_windows_retry(temporary, destination)
     finally:
         try:
-            temporary.unlink()
+            _unlink_with_windows_retry(temporary)
         except FileNotFoundError:
             pass
     return TestSpecCustomViewExport(
@@ -239,9 +241,12 @@ def _write_views_atomically(
     try:
         _write_temporary(temporary_paths["markdown"], markdown_bytes)
         _write_temporary(temporary_paths["csv"], csv_bytes)
-        os.replace(temporary_paths["markdown"], paths["markdown"])
+        _replace_with_windows_retry(
+            temporary_paths["markdown"],
+            paths["markdown"],
+        )
         replaced.append("markdown")
-        os.replace(temporary_paths["csv"], paths["csv"])
+        _replace_with_windows_retry(temporary_paths["csv"], paths["csv"])
         replaced.append("csv")
     except BaseException as operation_error:
         rollback_errors: list[BaseException] = []
@@ -265,7 +270,7 @@ def _write_views_atomically(
     finally:
         for temporary in temporary_paths.values():
             try:
-                temporary.unlink()
+                _unlink_with_windows_retry(temporary)
             except FileNotFoundError:
                 pass
 
@@ -330,7 +335,7 @@ def _restore_previous_view(
 ) -> None:
     if not existed:
         try:
-            path.unlink()
+            _unlink_with_windows_retry(path)
         except FileNotFoundError:
             pass
         return
@@ -338,10 +343,10 @@ def _restore_previous_view(
     temporary = path.with_name(f".{path.name}.{uuid4().hex}.rollback.tmp")
     try:
         _write_temporary(temporary, old_bytes)
-        os.replace(temporary, path)
+        _replace_with_windows_retry(temporary, path)
     finally:
         try:
-            temporary.unlink()
+            _unlink_with_windows_retry(temporary)
         except FileNotFoundError:
             pass
 
