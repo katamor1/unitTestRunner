@@ -27,6 +27,8 @@
 - [x] Pass repository, writer-snapshot, and export-atomicity focused tests, including repeated two-writer stress.
 - [x] Pass `compileall`, CLI help, and `git diff --check`.
 - [x] Obtain an independent whole-diff review with Critical 0 and Important 0.
-- [ ] Run the strict 112-module isolated gate and require 543 tests with only the three expected local compiler skips.
+- [x] Run the strict 112-module isolated gate and require 543 tests with only the three expected local compiler skips.
 - [ ] Push a dedicated hotfix PR, require all hosted checks green, merge, and confirm the resulting `main` push is green.
 - [ ] Only then write the Phase 1 Task 6 execution plan and resume the 38-task roadmap.
+
+**Local gate evidence:** commit `2dba644` completed 112 isolated modules and 543 tests with the exact three expected local compiler skips, zero failures, zero errors, zero nonzero exits, and zero parse failures. The seven Windows 8.3 alias regressions all executed without skips. Evidence is stored outside the checkout in `unit-test-runner-isolated-20260715-014624.log` and its matching CSV under the local temporary directory.
