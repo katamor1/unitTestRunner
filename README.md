@@ -24,10 +24,25 @@
 
 ## 開発と検証
 
-Python側の単体テストとCLIスモークを実行します。
+Python側の単体テストとCLIスモークを実行します。最初に、テスト用の追加依存関係を含めてeditable installします。
 
 ```powershell
-py -m unittest discover -s tests -p "test_*.py"
+py -m pip install -e ".[test]"
+$env:PYTHONPATH = (Resolve-Path .\src).Path
+$modules = Get-ChildItem -LiteralPath .\tests -Filter 'test_*.py' -File |
+  Sort-Object Name |
+  ForEach-Object { 'tests.' + $_.BaseName }
+if ($modules.Count -eq 0) {
+  throw 'isolated Python test discovery returned no modules'
+}
+$failed = @()
+foreach ($module in $modules) {
+  & py -m unittest $module -v
+  if ($LASTEXITCODE -ne 0) { $failed += $module }
+}
+if ($failed.Count -ne 0) {
+  throw ('isolated Python failures: ' + ($failed -join ', '))
+}
 ```
 
 インストールせずにチェックアウトからCLIを起動する場合は、`src` を `PYTHONPATH` に追加します。

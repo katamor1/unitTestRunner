@@ -64,14 +64,30 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install "setuptools>=61" wheel
-          python -m pip install -e .
+          python -m pip install -e ".[test]"
 
-      - name: Run Python tests
+      - name: Run Python tests in isolated processes
+        shell: pwsh
         run: |
           $log = Join-Path $env:RUNNER_TEMP "python-tests.log"
-          & python -m unittest discover -s tests -p "test_*.py" -v *>&1 | Tee-Object -FilePath $log
-          $testExit = $LASTEXITCODE
-          if ($testExit -ne 0) { exit $testExit }
+          $modules = Get-ChildItem -LiteralPath .\tests -Filter 'test_*.py' -File |
+            Sort-Object Name |
+            ForEach-Object { 'tests.' + $_.BaseName }
+          if ($modules.Count -eq 0) {
+            throw 'isolated Python test discovery returned no modules'
+          }
+          $failed = @()
+          foreach ($module in $modules) {
+            "`n=== $module ===" | Tee-Object -FilePath $log -Append
+            & python -m unittest $module -v *>&1 |
+              Tee-Object -FilePath $log -Append
+            if ($LASTEXITCODE -ne 0) { $failed += $module }
+          }
+          "isolated_modules=$($modules.Count) failures=$($failed.Count)" |
+            Tee-Object -FilePath $log -Append
+          if ($failed.Count -ne 0) {
+            throw ('isolated Python failures: ' + ($failed -join ', '))
+          }
 
       - name: Upload Python failure log
         if: failure()
@@ -162,6 +178,16 @@ jobs:
         run: |
           python -m pip install "setuptools>=61" wheel
           python -m pip install -e .
+
+      - name: Require host C compiler
+        shell: pwsh
+        run: |
+          $compiler = Get-Command gcc, clang, cc -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if ($null -eq $compiler) {
+            throw 'VC6 fixture smoke requires gcc, clang, or cc on PATH.'
+          }
+          "fixture_compiler=$($compiler.Source)"
 
       - name: Run fixture smoke
         run: |
