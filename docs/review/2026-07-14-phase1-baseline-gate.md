@@ -177,28 +177,49 @@ environment setting. Subsequent adversarial passes reproduced job/step
 disabling, shell and environment overrides, setup-step test masking,
 workflow-level default-shell masking, trigger removal, and disabling of the
 other four jobs. A separate RED proved that strategically placed harmless
-full-line comments prevented the raw mutation anchors from applying.
+full-line comments prevented the raw mutation anchors from applying. A final
+boundary RED then showed that a valid YAML comment immediately after a literal
+scalar changed the hand-normalized digest even though PyYAML produced the same
+workflow value.
 
-The contract now uses layered fail-closed checks: a normalized executable
-workflow SHA-256, an exact workflow preamble, canonical `python-tests` and
-`fixture-smoke` jobs, and canonical PowerShell run blocks. Full-line comments,
-blank lines, and trailing whitespace remain permitted. The Python loop also
-throws when module discovery returns zero modules. Mutation generation uses
-the same comment-free source as the validator, so the complete suite runs
-against both the raw workflow and a strategically commented equivalent.
+The contract now uses layered fail-closed checks: a canonical PyYAML token-stream
+SHA-256, a parsed-node workflow preamble, canonical `python-tests` and
+`fixture-smoke` jobs, and canonical PowerShell run blocks. Tokenization ignores
+YAML comments and structural whitespace while retaining scalar token values
+and styles, duplicate keys, and literal scalar values. This prevents PyYAML 1.1
+from collapsing `on:` into `true:` and prevents last-value handling from hiding
+duplicate keys. Full-line comments, blank lines, and trailing ASCII spaces
+remain permitted only in YAML structure outside literal block scalars; literal
+script values remain exact. The Python loop throws when module discovery
+returns zero modules. A separate scalar-aware normalizer is used only for
+mutation anchors and test-side inspection, so validator acceptance does not
+depend on the hand-normalized source.
 
-Focused GREEN ran all eight `tests.test_ci_contract` methods and both
+Focused GREEN ran all ten `tests.test_ci_contract` methods and both
 `tests.test_repository_source_tracking` methods successfully. The contract
-rejected all 35 mutants in both raw and commented forms, while accepting the
-real workflow and harmless-comment controls. A nested PowerShell proof showed
-the custom-shell mutant can mask an internal failure with wrapper exit 0;
-the contract rejects that effective variant. `py -m compileall -q src tests`
-and `git diff --check` also exited 0.
+rejected all 48 mutants in both raw and commented forms, while accepting the
+real workflow, YAML-structure comment controls, and the literal-scalar boundary
+comment control. The added collision proof confirms that token canonicalization
+distinguishes `on:` from `true:` and preserves duplicate keys even when
+`safe_load` results are equal. A nested PowerShell proof showed the custom-shell
+mutant can mask an internal failure with wrapper exit 0; the contract rejects
+that effective variant. `py -m compileall -q src tests` and `git diff --check`
+also exited 0.
 
-Two independent final reviews reported Critical 0, Important 0, and Minor 0.
-The remediation adds no product code or Phase 1 Task 6 behavior. The complete
-112-module isolated gate must still be rerun on the remediation commit before
-publication.
+The test-only dependency is declared as `PyYAML>=6.0.1,<7`, installed by the Python
+test job through `pip install -e ".[test]"`, and documented in the README, test
+specification, and developer ADR. A temporary wheel inspection confirmed both
+`Provides-Extra: test` and the conditional PyYAML requirement; an editable
+install dry-run resolved PyYAML successfully. Product, fixture, and package
+contract installs remain on the base dependency set.
+
+The remediation adds no product code or Phase 1 Task 6 behavior. Independent
+post-fix code and documentation reviews reported Critical 0, Important 0, and
+Minor 0. The final code review instrumented both mutation paths: each accepted
+its normalized baseline before rejecting 48 distinct applied mutants. The ten
+CI-contract tests also passed under CPython 3.12.13 with PyYAML 6.0.1. The
+complete 112-module isolated gate must still be rerun on the follow-up
+remediation commit before publication.
 
 ## Local compiler limitation
 

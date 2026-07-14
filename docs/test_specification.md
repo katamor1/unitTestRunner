@@ -23,7 +23,10 @@
 
 ### 3.1 Python broad gate
 
+リポジトリルートで、テスト用の追加依存関係を含めてeditable installしてから実行する。
+
 ```powershell
+py -m pip install -e ".[test]"
 py -m unittest discover -s tests -p "test_*.py"
 ```
 
@@ -244,13 +247,14 @@ code --install-extension .\dist\unit-test-runner-vscode-0.1.0.vsix
 
 ## 7. CI仕様
 
-GitHub ActionsではWindows上で以下を実行する。
+GitHub ActionsではWindows上で、次の6ジョブを独立して実行する。
 
-1. Python 3.12セットアップ
-2. `py -m unittest discover -s tests -p "test_*.py"`
-3. Node 20セットアップ
-4. `vscode/extension` で `npm ci`
-5. `npm.cmd test`
+1. Source integrity: Python 3.12とNode 20をセットアップし、Pythonソースの追跡状態、`compileall`、リポジトリ整合テスト、VS Code拡張のコンパイルを確認する
+2. Python tests: `python -m pip install -e ".[test]"` 後、`tests/test_*.py` を名前順に列挙し、各モジュールを `python -m unittest <module> -v` で独立プロセス実行する。対象0件または1件以上の失敗でジョブを失敗させる
+3. VS Code unit tests: Node 20で `npm ci` と `npm.cmd test` を実行する
+4. VS Code Extension Host activation: Node 20で `npm ci` と `npm.cmd run test:extension-host` を実行する
+5. VC6 fixture smoke: Python 3.12上で `gcc`、`clang`、`cc` のいずれかを必須とし、CLI fixture smokeとcompiler-backed E2Eを実行する
+6. Package contract: wheelを作成してfresh venvへインストールし、CLI helpと同梱schema contractを検証する
 
 ## 8. 判定方針
 

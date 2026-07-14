@@ -24,9 +24,10 @@
 
 ## 開発と検証
 
-Python側の単体テストとCLIスモークを実行します。
+Python側の単体テストとCLIスモークを実行します。最初に、テスト用の追加依存関係を含めてeditable installします。
 
 ```powershell
+py -m pip install -e ".[test]"
 py -m unittest discover -s tests -p "test_*.py"
 ```
 

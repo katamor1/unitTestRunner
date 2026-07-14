@@ -362,13 +362,13 @@ CLI 本体が Python でも、生成されるテストコードは VC6 / C90 互
 
 ### 8.1 開発者向け
 
-開発者は Python 仮想環境で実行する。
+開発者は Python 仮想環境で実行し、テスト用の追加依存関係も導入する。
 
 ```bat
 python -m venv .venv
 .venv\Scripts\activate
 python -m pip install -U pip
-python -m pip install -e .
+python -m pip install -e ".[test]"
 unit-test-runner --help
 ```
 

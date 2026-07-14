@@ -1,9 +1,13 @@
 from pathlib import Path
 import hashlib
+import json
 import re
 import subprocess
 import unittest
 from unittest import mock
+
+import yaml
+from yaml.nodes import MappingNode, ScalarNode
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -42,11 +46,77 @@ def _without_full_line_comments(text: str) -> str:
     return re.sub(r"(?m)^[ \t]*#.*(?:\n|\Z)", "", text)
 
 
-def _normalized_executable_text(text: str) -> str:
-    executable = _without_full_line_comments(text)
-    return "\n".join(
-        line.rstrip() for line in executable.splitlines() if line.strip()
-    )
+def _normalized_contract_test_source(text: str) -> str:
+    """Remove YAML-only layout noise while preserving literal scalar content.
+
+    This normalization exists only to keep mutation anchors and test-side text
+    inspection stable when harmless full-line YAML comments are present.
+    Validator acceptance is based on the parsed token stream instead.
+    """
+
+    normalized: list[str] = []
+    scalar_indent: int | None = None
+    pending_scalar_blanks: list[str] = []
+    for line in text.splitlines():
+        if scalar_indent is not None:
+            if not line.strip():
+                pending_scalar_blanks.append(line)
+                continue
+            indentation = len(line) - len(line.lstrip(" "))
+            if indentation > scalar_indent:
+                normalized.extend(pending_scalar_blanks)
+                pending_scalar_blanks.clear()
+                normalized.append(line)
+                continue
+            pending_scalar_blanks.clear()
+            scalar_indent = None
+
+        if not line.strip():
+            continue
+        if line.lstrip(" ").startswith("#"):
+            continue
+        yaml_line = line.rstrip(" ")
+        normalized.append(yaml_line)
+        if re.search(r":[ ]*[|>][+-]?$", yaml_line):
+            scalar_indent = len(yaml_line) - len(yaml_line.lstrip(" "))
+    if scalar_indent is not None:
+        normalized.extend(pending_scalar_blanks)
+    result = "\n".join(normalized)
+    if text.endswith(("\n", "\r")):
+        result += "\n"
+    return result
+
+
+_TOKEN_FIELDS = (
+    "encoding",
+    "value",
+    "plain",
+    "style",
+    "name",
+    "handle",
+    "prefix",
+    "suffix",
+)
+
+
+def _canonical_workflow_token_text(text: str) -> str:
+    """Return a deterministic, comment-free representation of YAML tokens.
+
+    Token values retain the original scalar spelling (so ``on`` and ``true``
+    cannot collapse through PyYAML 1.1 coercion), duplicate mapping keys, and
+    literal block values.  Scanner-ignored comments and structural whitespace
+    do not affect the representation.
+    """
+
+    canonical = []
+    for token in yaml.scan(text, Loader=yaml.SafeLoader):
+        fields = [
+            (field, getattr(token, field))
+            for field in _TOKEN_FIELDS
+            if hasattr(token, field)
+        ]
+        canonical.append((type(token).__name__, fields))
+    return json.dumps(canonical, ensure_ascii=False, separators=(",", ":"))
 
 
 _PYTHON_ISOLATED_SCRIPT = (
@@ -88,16 +158,8 @@ _FIXTURE_SMOKE_SCRIPT = (
     "if ($testExit -ne 0) { exit $testExit }",
 )
 
-_EXPECTED_WORKFLOW_PREAMBLE = (
-    "name: CI",
-    "on:",
-    "  push:",
-    "  pull_request:",
-    "  workflow_dispatch:",
-    "jobs:",
-)
 _EXPECTED_EXECUTABLE_WORKFLOW_SHA256 = (
-    "6bf9468ab020390dd94969bbd9cad45dd10531fdc938d624d9042e45db211b42"
+    "31e69fe8bd57ed3c0e057000eeec9eb22d4f923f8531b5d8b986896d8bad6bff"
 )
 
 _EXPECTED_PYTHON_JOB = (
@@ -116,7 +178,7 @@ _EXPECTED_PYTHON_JOB = (
     "    - name: Install Python dependencies",
     "      run: |",
     '        python -m pip install "setuptools>=61" wheel',
-    "        python -m pip install -e .",
+    '        python -m pip install -e ".[test]"',
     "    - name: Run Python tests in isolated processes",
     "      shell: pwsh",
     "      run: |",
@@ -181,27 +243,44 @@ def _require_exact_executable_workflow(
     text: str,
     violations: list[str],
 ) -> None:
-    normalized = _normalized_executable_text(text)
-    actual = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    canonical = _canonical_workflow_token_text(text)
+    actual = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     if actual != _EXPECTED_EXECUTABLE_WORKFLOW_SHA256:
         violations.append("workflow executable SHA-256 differs from contract")
 
 
 def _require_exact_workflow_preamble(
-    text: str,
+    root: object,
     violations: list[str],
 ) -> None:
-    lines = _normalized_executable_text(text).splitlines()
-    job_markers = [index for index, line in enumerate(lines) if line == "jobs:"]
-    if len(job_markers) != 1:
-        violations.append("workflow must contain one top-level jobs mapping")
+    if not isinstance(root, MappingNode):
+        violations.append("workflow must be a top-level mapping")
         return
-    preamble = tuple(
-        line.rstrip()
-        for line in lines[: job_markers[0] + 1]
-        if line.strip()
+
+    entries = root.value
+    if not all(isinstance(key, ScalarNode) for key, _ in entries):
+        violations.append("workflow top-level keys must be scalars")
+        return
+    keys = tuple(key.value for key, _ in entries)
+    if keys != ("name", "on", "jobs"):
+        violations.append("workflow triggers or top-level defaults differ from contract")
+        return
+
+    name_node = entries[0][1]
+    trigger_node = entries[1][1]
+    jobs_node = entries[2][1]
+    trigger_keys = (
+        tuple(key.value for key, _ in trigger_node.value)
+        if isinstance(trigger_node, MappingNode)
+        and all(isinstance(key, ScalarNode) for key, _ in trigger_node.value)
+        else ()
     )
-    if preamble != _EXPECTED_WORKFLOW_PREAMBLE:
+    if (
+        not isinstance(name_node, ScalarNode)
+        or name_node.value != "CI"
+        or trigger_keys != ("push", "pull_request", "workflow_dispatch")
+        or not isinstance(jobs_node, MappingNode)
+    ):
         violations.append("workflow triggers or top-level defaults differ from contract")
 
 
@@ -479,8 +558,14 @@ def _fixture_ci_contract_violations(text: str) -> list[str]:
 
 def _ci_contract_violations(text: str) -> list[str]:
     violations: list[str] = []
+    try:
+        root = yaml.compose(text, Loader=yaml.SafeLoader)
+    except yaml.YAMLError:
+        return ["workflow must be valid YAML"]
+    if root is None:
+        return ["workflow must be valid YAML"]
     _require_exact_executable_workflow(text, violations)
-    _require_exact_workflow_preamble(text, violations)
+    _require_exact_workflow_preamble(root, violations)
     return (
         violations
         + _python_ci_contract_violations(text)
@@ -541,7 +626,7 @@ class CiContractTests(unittest.TestCase):
     def test_github_actions_uses_six_independent_required_jobs(self):
         workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
-        text = _normalized_executable_text(
+        text = _normalized_contract_test_source(
             workflow.read_text(encoding="utf-8")
         )
         jobs_text = text.split("\njobs:\n", maxsplit=1)[1]
@@ -573,8 +658,13 @@ class CiContractTests(unittest.TestCase):
     def test_github_actions_ci_contract_rejects_mutants(self):
         workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
-        text = _normalized_executable_text(
+        text = _normalized_contract_test_source(
             workflow.read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            _ci_contract_violations(text),
+            "normalized mutation baseline must satisfy the CI contract",
         )
         alias_env = (
             "    env:\n"
@@ -768,6 +858,7 @@ class CiContractTests(unittest.TestCase):
                 "          python -m pip install -e .\n"
                 "          Rename-Item -LiteralPath .\\tests -NewName tests-hidden\n"
                 "          New-Item -ItemType Directory -Path .\\tests | Out-Null\n"
+                "\n"
                 "      - name: Require host C compiler\n",
                 1,
             ),
@@ -829,9 +920,85 @@ class CiContractTests(unittest.TestCase):
                 "    name: Package contract\n",
                 1,
             ),
+            "PowerShell requires directive": text.replace(
+                "        run: |\n"
+                '          $log = Join-Path $env:RUNNER_TEMP "python-tests.log"\n',
+                "        run: |\n"
+                "          #Requires -Version 999.0\n"
+                '          $log = Join-Path $env:RUNNER_TEMP "python-tests.log"\n',
+                1,
+            ),
+            "tab after workflow name": text.replace(
+                "name: CI\n",
+                "name: CI\t\n",
+                1,
+            ),
+            "tab after jobs key": text.replace(
+                "jobs:\n",
+                "jobs:\t\n",
+                1,
+            ),
+            "tab after run indicator": text.replace(
+                "        run: |\n"
+                '          $log = Join-Path $env:RUNNER_TEMP "python-tests.log"\n',
+                "        run: |\t\n"
+                '          $log = Join-Path $env:RUNNER_TEMP "python-tests.log"\n',
+                1,
+            ),
+            "nonbreaking space after jobs key": text.replace(
+                "jobs:\n",
+                "jobs:\u00a0\n",
+                1,
+            ),
+            "invalid dedent inside package script": text.replace(
+                "          import json\n"
+                "          from importlib import resources\n",
+                "          import json\n"
+                "# invalid dedent inside literal block\n"
+                "          from importlib import resources\n",
+                1,
+            ),
+            "YAML 1.1 boolean spelling replaces on key": text.replace(
+                "on:\n",
+                "true:\n",
+                1,
+            ),
+            "duplicate workflow name key": text.replace(
+                "name: CI\n",
+                "name: Wrong\nname: CI\n",
+                1,
+            ),
+            "ordinary comment inside PowerShell literal": text.replace(
+                '          $log = Join-Path $env:RUNNER_TEMP "python-tests.log"\n',
+                "          # This changes the literal script value.\n"
+                '          $log = Join-Path $env:RUNNER_TEMP "python-tests.log"\n',
+                1,
+            ),
+            "trailing space inside PowerShell literal": text.replace(
+                '          $log = Join-Path $env:RUNNER_TEMP "python-tests.log"\n',
+                '          $log = Join-Path $env:RUNNER_TEMP "python-tests.log" \n',
+                1,
+            ),
+            "blank line inside PowerShell literal": text.replace(
+                "          $failed = @()\n"
+                "          foreach ($module in $modules) {\n",
+                "          $failed = @()\n\n"
+                "          foreach ($module in $modules) {\n",
+                1,
+            ),
+            "vertical tab after jobs key": text.replace(
+                "jobs:\n",
+                "jobs:\v\n",
+                1,
+            ),
+            "form feed after jobs key": text.replace(
+                "jobs:\n",
+                "jobs:\f\n",
+                1,
+            ),
         }
 
-        self.assertEqual(35, len(mutants))
+        self.assertEqual(48, len(mutants))
         for name, mutant in mutants.items():
             with self.subTest(mutant=name):
                 self.assertNotEqual(text, mutant, f"mutation was not applied: {name}")
@@ -871,22 +1038,12 @@ class CiContractTests(unittest.TestCase):
             "        shell: pwsh\n",
             1,
         ).replace(
-            "          $failed = @()\n",
-            "          $failed = @()\n"
-            "          # Keep each module in a fresh process.\n",
-            1,
-        ).replace(
             "        shell: pwsh\n"
             "        run: |\n"
             '          $log = Join-Path $env:RUNNER_TEMP "python-tests.log"\n',
             "        shell: pwsh   \n"
             "        run: |   \n"
             '          $log = Join-Path $env:RUNNER_TEMP "python-tests.log"\n',
-            1,
-        ).replace(
-            '          "fixture_compiler=$($compiler.Source)"\n',
-            "          # Never choco install a compiler here.\n"
-            '          "fixture_compiler=$($compiler.Source)"\n',
             1,
         ).replace(
             "      - name: Require host C compiler\n"
@@ -904,16 +1061,6 @@ class CiContractTests(unittest.TestCase):
             "          $compiler = Get-Command gcc, clang, cc ",
             1,
         ).replace(
-            "          if ($null -eq $compiler) {\n"
-            "            throw 'VC6 fixture smoke requires gcc, clang, or cc on PATH.'\n"
-            "          }\n",
-            "          if ($null -eq $compiler) {\n"
-            "            # Fail before running any fixture tests.\n"
-            "            throw 'VC6 fixture smoke requires gcc, clang, or cc on PATH.'\n"
-            "            # Keep the branch explicit for reviewers.\n"
-            "          }\n",
-            1,
-        ).replace(
             "      - name: Run fixture smoke\n"
             "        run: |\n",
             "      - name: Run fixture smoke\n"
@@ -927,15 +1074,6 @@ class CiContractTests(unittest.TestCase):
             "      - name: Run fixture smoke\n"
             "        # Use the default Windows PowerShell runner.\n"
             "        run: |   \n",
-            1,
-        ).replace(
-            "          & python -m unittest tests.test_fixture_cli_smoke "
-            "tests.test_vc6_fixture_build_e2e -v *>&1 | "
-            "Tee-Object -FilePath $log\n",
-            "          # Run both fixture checks together.\n"
-            "          & python -m unittest tests.test_fixture_cli_smoke "
-            "tests.test_vc6_fixture_build_e2e -v *>&1 | "
-            "Tee-Object -FilePath $log\n",
             1,
         ).replace(
             "          python -m pip install -e .\n\n"
@@ -961,6 +1099,46 @@ class CiContractTests(unittest.TestCase):
                 with self.subTest(comment_control=test_name):
                     getattr(self, test_name)()
 
+    def test_github_actions_ci_contract_accepts_comment_at_scalar_boundary(self):
+        workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+
+        text = workflow.read_text(encoding="utf-8")
+        commented = text.replace(
+            "          }\n\n"
+            "      - name: Upload Python failure log\n",
+            "          }\n"
+            "        # The literal scalar has ended; this is YAML structure.\n\n"
+            "      - name: Upload Python failure log\n",
+            1,
+        )
+
+        self.assertNotEqual(text, commented, "scalar-boundary control was not applied")
+        self.assertEqual(yaml.safe_load(text), yaml.safe_load(commented))
+        self.assertEqual([], _ci_contract_violations(commented))
+
+    def test_workflow_token_digest_does_not_collapse_yaml_1_1_or_duplicate_keys(self):
+        workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+
+        text = workflow.read_text(encoding="utf-8")
+        variants = {
+            "YAML 1.1 on/true collision": text.replace("on:\n", "true:\n", 1),
+            "duplicate key last-value collision": text.replace(
+                "name: CI\n",
+                "name: Wrong\nname: CI\n",
+                1,
+            ),
+        }
+        canonical = _canonical_workflow_token_text(text)
+        loaded = yaml.safe_load(text)
+        for name, variant in variants.items():
+            with self.subTest(collision=name):
+                self.assertEqual(loaded, yaml.safe_load(variant))
+                self.assertNotEqual(
+                    canonical,
+                    _canonical_workflow_token_text(variant),
+                )
+                self.assertNotEqual([], _ci_contract_violations(variant))
+
     def test_github_actions_checks_rewriter_tracking_and_python_compilation(self):
         workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
@@ -978,7 +1156,8 @@ class CiContractTests(unittest.TestCase):
         workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
         text = workflow.read_text(encoding="utf-8")
-        self.assertGreaterEqual(text.count("python -m pip install -e ."), 3)
+        self.assertEqual(2, text.count("python -m pip install -e ."))
+        self.assertIn('python -m pip install -e ".[test]"', text)
         self.assertIn("python -m pip wheel --no-deps", text)
         self.assertIn("python -m venv", text)
         self.assertIn("-m unit_test_runner --help", text)
