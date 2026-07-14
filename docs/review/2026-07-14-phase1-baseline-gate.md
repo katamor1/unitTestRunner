@@ -224,12 +224,14 @@ commit as recorded below.
 ## Follow-up remediation verification
 
 The verified code-and-test head is
-`677815a0e1df60b07fdd8e04991c6b8823e722b2`. A fresh isolated gate started
-from a clean tracked worktree and ran every tracked top-level
-`tests/test_*.py` module in its own Python process. The final strict summary
-was 112 modules, 536 tests, 3 expected compiler-required skips, 0 failures,
-0 errors, 0 nonzero module exits, and 0 result-parse failures. The runner
-exited 0 after also matching the exact three-method skip set.
+`677815a0e1df60b07fdd8e04991c6b8823e722b2`. Before creating its log, the
+isolated runner executes `git status --porcelain --untracked-files=no` and
+throws if any tracked change exists. This invocation passed that fail-fast
+precondition, wrote the verified HEAD to its log, and then ran every tracked
+top-level `tests/test_*.py` module in its own Python process. The final strict
+summary was 112 modules, 536 tests, 3 expected compiler-required skips,
+0 failures, 0 errors, 0 nonzero module exits, and 0 result-parse failures. The
+runner exited 0 after also matching the exact three-method skip set.
 
 The two-test increase from the earlier 534-test integration baseline is fully
 accounted for by the scalar-boundary acceptance regression and the YAML 1.1 /
