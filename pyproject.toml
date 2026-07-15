@@ -7,7 +7,7 @@ name = "unit-test-runner"
 version = "0.1.0"
 description = "Function-level VC6/C90 unit test dossier generator"
 requires-python = ">=3.12"
-dependencies = ["jsonschema>=4.23,<5"]
+dependencies = ["jsonschema>=4.23,<5", "referencing>=0.28.4,<1"]
 
 [project.optional-dependencies]
 test = ["PyYAML>=6.0.1,<7"]

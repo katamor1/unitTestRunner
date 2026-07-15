@@ -2070,10 +2070,26 @@ $task6Summary | ConvertTo-Json -Depth 5
 
 The authoritative CLI evidence records the candidate SHA, every process/envelope exit, selected review ID/fingerprint, revisions 0→1, exact final ledger hash, re-read assessment, copied-source hash set, unchanged Git status, and cleanup result.
 
-Wheel/METADATA/normal fresh-install gate. First run `py -m unittest tests.test_wheel_contract tests.test_contract_registry tests.test_public_artifact_schemas tests.test_contract_validation -v`; then run this independent installed-wheel probe. `--no-deps` is allowed only while building this project's wheel and is forbidden on the fresh-venv install:
+Wheel/METADATA/normal fresh-install gate. First run `py -m unittest tests.test_wheel_contract tests.test_contract_registry tests.test_public_artifact_schemas tests.test_contract_validation -v`; then run this independent installed-wheel probe. `--no-deps` is allowed only while building this project's wheel and is forbidden on the fresh-venv install. The source-tree checks intentionally use `PYTHONPATH=src`; before creating the fresh venv, the gate removes Python/virtual-environment and `UNIT_TEST_RUNNER_*` process variables, changes to a repository-external directory, and restores the exact starting environment even if install, probing, or cleanup fails:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
+$wheelSanitizedEnvironmentNames = @(
+  'PYTHONHOME',
+  'PYTHONPATH',
+  'VIRTUAL_ENV',
+  '__PYVENV_LAUNCHER__'
+)
+$wheelSavedEnvironment = @{}
+foreach ($wheelEnvironmentEntry in Get-ChildItem Env:) {
+  if (($wheelSanitizedEnvironmentNames -contains $wheelEnvironmentEntry.Name) -or
+      $wheelEnvironmentEntry.Name.StartsWith('UNIT_TEST_RUNNER_',[StringComparison]::OrdinalIgnoreCase)) {
+    $wheelSavedEnvironment[$wheelEnvironmentEntry.Name] = $wheelEnvironmentEntry.Value
+  }
+}
+$wheelLocationPushed = $false
+
+try {
 $task6SourceRoot = (Resolve-Path -LiteralPath .\src).Path
 $env:PYTHONPATH = $task6SourceRoot
 $task6SourcePrefix = $task6SourceRoot.TrimEnd('\') + '\'
@@ -2088,11 +2104,16 @@ $wheelGateRoot = [IO.Path]::GetFullPath((Join-Path $wheelTempRoot ('unitTestRunn
 if (-not $wheelGateRoot.StartsWith($wheelTempPrefix,[StringComparison]::OrdinalIgnoreCase)) {
   throw "wheel gate root escaped system temp: $wheelGateRoot"
 }
+$wheelRepoPrefix = $wheelRepoRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+if ($wheelGateRoot.Equals($wheelRepoRoot,[StringComparison]::OrdinalIgnoreCase) -or
+    $wheelGateRoot.StartsWith($wheelRepoPrefix,[StringComparison]::OrdinalIgnoreCase)) {
+  throw "wheel gate root must be outside the repository: $wheelGateRoot"
+}
 $wheelDistRoot = Join-Path $wheelGateRoot 'dist'
 $wheelVenvRoot = Join-Path $wheelGateRoot 'venv'
-New-Item -ItemType Directory -Path $wheelDistRoot -Force | Out-Null
 
 try {
+  New-Item -ItemType Directory -Path $wheelDistRoot -Force | Out-Null
   py -m pip wheel --disable-pip-version-check --no-deps --no-build-isolation --wheel-dir $wheelDistRoot $wheelRepoRoot
   if ($LASTEXITCODE -ne 0) { throw "wheel build failed: $LASTEXITCODE" }
   $projectWheels = @(Get-ChildItem -LiteralPath $wheelDistRoot -Filter 'unit_test_runner-*.whl' -File)
@@ -2134,16 +2155,26 @@ print("METADATA Requires-Dist:", requirements)
   $metadataProbe | py - $projectWheel.FullName
   if ($LASTEXITCODE -ne 0) { throw "wheel METADATA validation failed: $LASTEXITCODE" }
 
-  py -m venv $wheelVenvRoot
-  if ($LASTEXITCODE -ne 0) { throw "fresh venv creation failed: $LASTEXITCODE" }
-  $wheelVenvPython = Join-Path $wheelVenvRoot 'Scripts\python.exe'
-  if (-not (Test-Path -LiteralPath $wheelVenvPython -PathType Leaf)) { throw "fresh venv Python missing: $wheelVenvPython" }
+  foreach ($wheelEnvironmentName in $wheelSanitizedEnvironmentNames) {
+    Remove-Item -LiteralPath "Env:$wheelEnvironmentName" -ErrorAction SilentlyContinue
+  }
+  foreach ($wheelEnvironmentEntry in @(Get-ChildItem Env: | Where-Object { $_.Name.StartsWith('UNIT_TEST_RUNNER_',[StringComparison]::OrdinalIgnoreCase) })) {
+    Remove-Item -LiteralPath "Env:$($wheelEnvironmentEntry.Name)" -ErrorAction SilentlyContinue
+  }
 
-  # This is deliberately a normal dependency-resolving install.
-  & $wheelVenvPython -m pip install --disable-pip-version-check --no-input $projectWheel.FullName
-  if ($LASTEXITCODE -ne 0) { throw "normal fresh wheel install failed: $LASTEXITCODE" }
-  & $wheelVenvPython -m pip check
-  if ($LASTEXITCODE -ne 0) { throw "fresh environment dependency check failed: $LASTEXITCODE" }
+  Push-Location -LiteralPath $wheelGateRoot
+  $wheelLocationPushed = $true
+  try {
+    py -m venv $wheelVenvRoot
+    if ($LASTEXITCODE -ne 0) { throw "fresh venv creation failed: $LASTEXITCODE" }
+    $wheelVenvPython = Join-Path $wheelVenvRoot 'Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $wheelVenvPython -PathType Leaf)) { throw "fresh venv Python missing: $wheelVenvPython" }
+
+    # This is deliberately a normal dependency-resolving install.
+    & $wheelVenvPython -m pip install --disable-pip-version-check --no-input $projectWheel.FullName
+    if ($LASTEXITCODE -ne 0) { throw "normal fresh wheel install failed: $LASTEXITCODE" }
+    & $wheelVenvPython -m pip check
+    if ($LASTEXITCODE -ne 0) { throw "fresh environment dependency check failed: $LASTEXITCODE" }
 
   $installedWheelProbe = @'
 from importlib import resources
@@ -2159,9 +2190,19 @@ from unit_test_runner.contracts import ArtifactKind
 from unit_test_runner.contracts.registry import get_contract, iter_contracts, iter_contract_versions
 from unit_test_runner.contracts.validator import validate_payload_schema
 
-module_path = Path(unit_test_runner.__file__).resolve()
 venv_prefix = Path(sys.prefix).resolve()
-assert module_path.is_relative_to(venv_prefix), (module_path, venv_prefix)
+installed_modules = (unit_test_runner, jsonschema, referencing)
+installed_module_paths = {
+    module.__name__: Path(module.__file__).resolve()
+    for module in installed_modules
+}
+for module_name, installed_module_path in installed_module_paths.items():
+    assert installed_module_path.is_relative_to(venv_prefix), (
+        module_name,
+        installed_module_path,
+        venv_prefix,
+    )
+module_path = installed_module_paths['unit_test_runner']
 kinds = tuple(ArtifactKind)
 current_contracts = tuple(iter_contracts())
 versioned_contracts = tuple(iter_contract_versions())
@@ -2239,12 +2280,15 @@ print(json.dumps({
     "packaged_schema_count": len(documents),
 }, sort_keys=True))
 '@
-  Push-Location -LiteralPath $wheelGateRoot
-  try {
     & $wheelVenvPython -I -c $installedWheelProbe
     if ($LASTEXITCODE -ne 0) { throw "installed wheel runtime/schema probe failed: $LASTEXITCODE" }
   }
-  finally { Pop-Location }
+  finally {
+    if ($wheelLocationPushed) {
+      Pop-Location
+      $wheelLocationPushed = $false
+    }
+  }
 }
 finally {
   if (Test-Path -LiteralPath $wheelGateRoot) {
@@ -2259,6 +2303,22 @@ finally {
       throw "refusing reparse wheel cleanup: $wheelCleanupTarget"
     }
     Remove-Item -LiteralPath $wheelCleanupTarget -Recurse -Force
+  }
+}
+}
+finally {
+  if ($wheelLocationPushed) {
+    Pop-Location
+    $wheelLocationPushed = $false
+  }
+  foreach ($wheelEnvironmentName in $wheelSanitizedEnvironmentNames) {
+    Remove-Item -LiteralPath "Env:$wheelEnvironmentName" -ErrorAction SilentlyContinue
+  }
+  foreach ($wheelEnvironmentEntry in @(Get-ChildItem Env: | Where-Object { $_.Name.StartsWith('UNIT_TEST_RUNNER_',[StringComparison]::OrdinalIgnoreCase) })) {
+    Remove-Item -LiteralPath "Env:$($wheelEnvironmentEntry.Name)" -ErrorAction SilentlyContinue
+  }
+  foreach ($wheelSavedEnvironmentEntry in $wheelSavedEnvironment.GetEnumerator()) {
+    Set-Item -LiteralPath "Env:$($wheelSavedEnvironmentEntry.Key)" -Value $wheelSavedEnvironmentEntry.Value
   }
 }
 ```
