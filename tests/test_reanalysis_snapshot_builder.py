@@ -33,9 +33,41 @@ from unit_test_runner.reanalysis.workflow import (
 )
 from unit_test_runner.test_spec import TestSpecContractError
 from tests.spec_support import raw_v01_provenance_fixtures, valid_test_spec_payload
+from tests.windows_path_alias_support import require_windows_path_alias_pair
 
 
 SOURCE_SHA256 = "1" * 64
+
+
+def _generation_key_for_path(
+    path: Path,
+    generations: dict[Path, tuple[bytes, bytes]],
+) -> Path | None:
+    requested_spelling = os.fspath(path)
+    for generation_key in generations:
+        if os.fspath(generation_key) == requested_spelling:
+            return generation_key
+    try:
+        if not path.is_file():
+            return None
+    except OSError:
+        return None
+
+    matches = []
+    for generation_key in generations:
+        try:
+            if not generation_key.is_file():
+                continue
+            if os.path.samefile(path, generation_key):
+                matches.append(generation_key)
+        except OSError:
+            return None
+    if len(matches) > 1:
+        raise AssertionError(
+            "multiple generation keys name the requested physical file: "
+            f"path={path}; keys={matches}"
+        )
+    return matches[0] if matches else None
 
 
 def _competing_open(
@@ -52,10 +84,15 @@ def _competing_open(
         errors: str | None = None,
         newline: str | None = None,
     ):
-        if path in generations and mode in {"r", "rb"}:
-            count = read_counts.get(path, 0)
-            read_counts[path] = count + 1
-            raw_bytes = generations[path][0 if count == 0 else 1]
+        generation_key = (
+            _generation_key_for_path(path, generations)
+            if mode in {"r", "rb"}
+            else None
+        )
+        if generation_key is not None:
+            count = read_counts.get(generation_key, 0)
+            read_counts[generation_key] = count + 1
+            raw_bytes = generations[generation_key][0 if count == 0 else 1]
             if "b" in mode:
                 return io.BytesIO(raw_bytes)
             return io.StringIO(raw_bytes.decode(encoding or "utf-8"))
@@ -224,6 +261,121 @@ class ReanalysisSnapshotBuilderTests(unittest.TestCase):
         artifact = snapshot.artifacts["source_digest"]
         self.assertEqual("1.0.0", artifact.schema_version)
         self.assertEqual(hashlib.sha256(saved_bytes).hexdigest(), artifact.sha256)
+
+    @unittest.skipUnless(os.name == "nt", "Windows path aliases require Windows.")
+    def test_competing_open_matches_equivalent_windows_generation_keys(self):
+        first_generation = b"first generation"
+        second_generation = b"second generation"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pair = require_windows_path_alias_pair(self, Path(temp_dir))
+            long_path = pair.long / "source_digest.json"
+            long_path.write_bytes(b"disk generation")
+            short_path = pair.short / "source_digest.json"
+
+            for direction, generation_key, open_path in (
+                ("long generation key / short open path", long_path, short_path),
+                ("short generation key / long open path", short_path, long_path),
+            ):
+                with self.subTest(direction=direction):
+                    self.assertTrue(os.path.samefile(generation_key, open_path))
+                    read_counts: dict[Path, int] = {}
+                    competing_open = _competing_open(
+                        {
+                            generation_key: (
+                                first_generation,
+                                second_generation,
+                            )
+                        },
+                        read_counts,
+                    )
+
+                    with competing_open(open_path, "rb") as stream:
+                        self.assertEqual(first_generation, stream.read())
+                    with competing_open(open_path, "rb") as stream:
+                        self.assertEqual(second_generation, stream.read())
+                    self.assertEqual({generation_key: 2}, read_counts)
+
+            exact_generation_key = Path(os.fspath(long_path))
+            exact_request_path = Path(os.fspath(long_path))
+            self.assertIsNot(exact_generation_key, exact_request_path)
+            exact_counts: dict[Path, int] = {}
+            exact_open = _competing_open(
+                {
+                    exact_generation_key: (b"long first", b"long second"),
+                    short_path: (b"short first", b"short second"),
+                },
+                exact_counts,
+            )
+            with exact_open(exact_request_path, "rb") as stream:
+                self.assertEqual(b"long first", stream.read())
+            self.assertEqual(1, len(exact_counts))
+            stored_exact_key = next(iter(exact_counts))
+            self.assertIs(exact_generation_key, stored_exact_key)
+            self.assertEqual(
+                os.fspath(exact_generation_key),
+                os.fspath(stored_exact_key),
+            )
+            self.assertEqual(1, exact_counts[stored_exact_key])
+
+            case_generation_key = Path(
+                r"C:\unitTestRunner\reports\Source_Digest.json"
+            )
+            case_request_path = Path(
+                r"c:\UNITTESTRUNNER\REPORTS\source_digest.JSON"
+            )
+            self.assertNotEqual(
+                os.fspath(case_generation_key),
+                os.fspath(case_request_path),
+            )
+            self.assertEqual(case_generation_key, case_request_path)
+            case_generations = {
+                case_generation_key: (b"case first", b"case second")
+            }
+            for samefile_result in (False, True):
+                with self.subTest(samefile_result=samefile_result):
+                    with mock.patch.object(
+                        Path,
+                        "is_file",
+                        return_value=True,
+                    ) as is_file:
+                        with mock.patch.object(
+                            os.path,
+                            "samefile",
+                            return_value=samefile_result,
+                        ) as samefile:
+                            matched_key = _generation_key_for_path(
+                                case_request_path,
+                                case_generations,
+                            )
+                    if samefile_result:
+                        self.assertIs(case_generation_key, matched_key)
+                    else:
+                        self.assertIsNone(matched_key)
+                    self.assertEqual(2, is_file.call_count)
+                    samefile.assert_called_once_with(
+                        case_request_path,
+                        case_generation_key,
+                    )
+
+            missing_open = _competing_open(
+                {long_path: (first_generation, second_generation)},
+                {},
+            )
+            with self.assertRaises(FileNotFoundError):
+                missing_open(pair.long / "missing.json", "rb")
+
+            redundant = pair.long / "redundant"
+            redundant.mkdir()
+            alternate_path = redundant / ".." / long_path.name
+            ambiguous_open = _competing_open(
+                {
+                    long_path: (b"long first", b"long second"),
+                    short_path: (b"short first", b"short second"),
+                },
+                {},
+            )
+            with self.assertRaisesRegex(AssertionError, "multiple generation keys"):
+                ambiguous_open(alternate_path, "rb").close()
 
     def test_snapshot_raw_v01_payload_version_and_hash_share_saved_bytes(self):
         legacy = raw_v01_provenance_fixtures(
