@@ -2,6 +2,8 @@
 
 > **Execution rule:** Use task-scoped fresh implementers and fresh spec/code-quality reviewers. Only one agent writes the product worktree at a time. Every behavior change starts with an assertion-level RED, then the smallest GREEN, then focused regression and review.
 
+> **Review acceptance rule:** Every future Task 6 slice, reconciliation checkpoint, and final candidate is accepted only when fresh spec and code-quality reviews both report **Critical 0 / Important 0 / Minor 0** (`C0/I0/M0`). Historical review evidence retains its exact recorded counts, but it never weakens this forward gate.
+
 **Goal:** Move the hardening program from **13/38** to **14/38** by delivering one carrier-free Task 6 product pull request that persists exact stale-aware review decisions and reports review, evidence, and test readiness from semantic state rather than file existence or embedded approval flags.
 
 **Architecture:** One public stable review-ID builder is shared by dossier and TestSpec. A lock-protected review-decision repository resolves current review items and their exact subject bytes itself while holding the ledger lock. A separate assessment service derives subject currency, orphan state, and four independent readiness axes. Contract 1.0 remains immutable; current 1.1.0 is explicit and migration is lossless.
@@ -41,9 +43,9 @@ The primary checkout at `C:\Users\stell\source\repos\unitTestRunner` contains us
 
 ---
 
-## 2. PR #16 recovery boundary
+## 2. PR #11-#16 recovery and cleanup boundary
 
-PR #16 (`codex/bootstrap-p1t6-v3`) is a transport carrier, not a merge candidate and not an implementation authority.
+Open draft PRs #11 through #16 are obsolete recovery work. None is a merge candidate or an implementation authority. PR #16 (`codex/bootstrap-p1t6-v3`) is additionally a transport carrier whose recovered bytes may be consulted only under the rules below.
 
 Verified recovery identity:
 
@@ -57,12 +59,14 @@ Verified recovery identity:
 
 Rules:
 
-1. Never merge PR #16.
-2. Never run a bulk `git apply` of the carrier patch in the product worktree.
+1. Never merge any of PRs #11 through #16.
+2. Never run a bulk `git apply` of the PR #16 carrier patch in the product worktree.
 3. Use `git show 363ddb6f86a4508eb5f4dd2a26013b837a5e26d6:<path>` only to inspect individual intended behavior or test wording after the authoritative design has been read.
 4. Recreate each behavior with a new assertion-level RED on the current tree.
-5. Do not copy carrier code that predates PR #19's Windows sharing-denial semantics.
-6. Close PR #16 only after the clean Task 6 PR is merged and its post-merge verification succeeds.
+5. Do not copy PR #16 carrier code that predates PR #19's Windows sharing-denial semantics.
+6. Retain all six open draft PRs until the new carrier-free Task 6 product PR is merged and that exact merge SHA passes both post-merge local checks and the hosted `main` checks.
+7. Only then close PRs #11, #12, #13, #14, #15, and #16 through GitHub and read each one back with `state=CLOSED`.
+8. Do not delete any remote branch as part of this recovery or cleanup sequence.
 
 ---
 
@@ -223,9 +227,11 @@ Do not write a behavior test that fails only because the future module cannot be
 3. Fresh spec reviewer compares the diff to the fixed semantic rules and carrier corrections.
 4. Fresh code-quality reviewer checks atomicity, boundary handling, error typing, regression risk, and test strength.
 5. The implementer or a dedicated fixer resolves findings; reviewers recheck.
-6. Commit only when focused and related tests are GREEN and Critical/Important findings are zero.
+6. Commit only when focused and related tests are GREEN and both fresh reviews report Critical 0 / Important 0 / Minor 0 (`C0/I0/M0`).
 
 Only one writer may modify the worktree at a time. Read-only reconnaissance/review can run in parallel.
+
+Historical review records keep the counts they actually received. They remain evidence for their historical heads only and cannot authorize a future slice or final candidate below `C0/I0/M0`.
 
 ---
 
@@ -1232,6 +1238,130 @@ Review checkpoint: compatibility only; no review-decision persistence yet.
 
 Expected commit: `fix: preserve current consumer and wheel compatibility`
 
+Hosted checkpoint facts for the exact Slice 1 head `9cd9767f2add9406cd48ccf74e72e65ac4bb7bb1`:
+
+- GitHub Actions run `29423972017` completed with 5 of 6 jobs GREEN and `Python tests` RED.
+- The Python job executed 112 isolated modules. The failing modules were `tests.test_build_probe` and `tests.test_reanalysis_snapshot_builder`.
+- The three assertion failures were raw-string or dictionary-key comparisons between a distinct Windows 8.3 short alias and the long spelling of the same physical path.
+- This is historical evidence for that exact head, not an accepted Slice 2 entry gate.
+
+### Slice 1 CI reconciliation — Equivalent Windows temporary-path aliases
+
+**Purpose:** Reconcile the hosted-only alias-sensitive assertions without weakening containment or changing correct product behavior, and restore the exact-head hosted gate before Slice 2.
+
+Execute this slice sequentially before Slice 2:
+
+1. Before changing an assertion, reproduce the three hosted failures in a child Python process. The parent must obtain a real distinct long/8.3-short directory pair through the existing `tests.windows_path_alias_support` helper, prove the pair is textually distinct and `os.path.samefile(...)`-equal, and set that child's `TEMP`, `TMP`, and `TMPDIR` to the short alias plus `UNIT_TEST_RUNNER_REQUIRE_8DOT3_ALIAS=1`. The child runs only `tests.test_build_probe` and `tests.test_reanalysis_snapshot_builder`; the accepted RED is exactly the three hosted raw-string/dictionary-key assertion failures, not an import, setup, alias-unavailable, or unrelated failure.
+2. For every failed operand pair, capture the concrete long and short file spellings while both exist and prove with `os.path.samefile(...)` that they name the same physical file before editing the assertion. Normalization or case-folded string equality alone is not physical-identity evidence.
+3. If the product result names the correct contained physical file, change only `tests/test_build_probe.py` and `tests/test_reanalysis_snapshot_builder.py`. Replace only the alias-sensitive raw-string/dictionary-key expectations with physical-identity comparison and add both long-expected/short-actual and short-expected/long-actual coverage for each affected comparison family. Reuse the existing alias helper without modifying it; do not change product code, workflow files, or any other test module in this reconciliation.
+4. If any product result names a different physical file or escapes containment, stop without a product change and amend and re-review this plan before continuing.
+
+Forced-short-TEMP child command, run first on the pre-fix tree for the exact RED and again after the test-only change for GREEN:
+
+```powershell
+$task6SourceRoot = (Resolve-Path -LiteralPath .\src).Path
+$env:PYTHONPATH = $task6SourceRoot
+@'
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+from tests.windows_path_alias_support import (
+    WINDOWS_8DOT3_PREFIX,
+    windows_path_alias_pair,
+)
+
+repo = Path.cwd().resolve()
+with tempfile.TemporaryDirectory(prefix=WINDOWS_8DOT3_PREFIX) as temp_dir:
+    pair = windows_path_alias_pair(Path(temp_dir))
+    assert os.path.samefile(pair.long, pair.short), pair
+    assert os.path.normcase(os.path.normpath(os.fspath(pair.long))) != os.path.normcase(
+        os.path.normpath(os.fspath(pair.short))
+    ), pair
+    child_env = os.environ.copy()
+    child_env["PYTHONPATH"] = os.fspath(repo / "src")
+    child_env["UNIT_TEST_RUNNER_REQUIRE_8DOT3_ALIAS"] = "1"
+    for name in ("TEMP", "TMP", "TMPDIR"):
+        child_env[name] = os.fspath(pair.short)
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "unittest",
+            "tests.test_build_probe",
+            "tests.test_reanalysis_snapshot_builder",
+            "-v",
+        ],
+        cwd=repo,
+        env=child_env,
+        check=False,
+    )
+    raise SystemExit(completed.returncode)
+'@ | py -
+```
+
+After the test-only change, run the focused modules once in the normal environment and once with the forced-short-TEMP child command above:
+
+```powershell
+$task6SourceRoot = (Resolve-Path -LiteralPath .\src).Path
+$env:PYTHONPATH = $task6SourceRoot
+py -m unittest tests.test_build_probe tests.test_reanalysis_snapshot_builder -v
+if ($LASTEXITCODE -ne 0) { throw 'Slice 1 CI reconciliation normal focused tests failed' }
+```
+
+Then run the authoritative CI-equivalent dynamic inventory with one fresh forced-short-TEMP child process per module and required alias mode:
+
+```powershell
+$task6SourceRoot = (Resolve-Path -LiteralPath .\src).Path
+$env:PYTHONPATH = $task6SourceRoot
+@'
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+from tests.windows_path_alias_support import (
+    WINDOWS_8DOT3_PREFIX,
+    windows_path_alias_pair,
+)
+
+repo = Path.cwd().resolve()
+modules = sorted(f"tests.{path.stem}" for path in (repo / "tests").glob("test_*.py"))
+if not modules:
+    raise SystemExit("isolated Python test discovery returned no modules")
+failed = []
+with tempfile.TemporaryDirectory(prefix=WINDOWS_8DOT3_PREFIX) as temp_dir:
+    pair = windows_path_alias_pair(Path(temp_dir))
+    assert os.path.samefile(pair.long, pair.short), pair
+    assert os.path.normcase(os.path.normpath(os.fspath(pair.long))) != os.path.normcase(
+        os.path.normpath(os.fspath(pair.short))
+    ), pair
+    child_env = os.environ.copy()
+    child_env["PYTHONPATH"] = os.fspath(repo / "src")
+    child_env["UNIT_TEST_RUNNER_REQUIRE_8DOT3_ALIAS"] = "1"
+    for name in ("TEMP", "TMP", "TMPDIR"):
+        child_env[name] = os.fspath(pair.short)
+    for module in modules:
+        completed = subprocess.run(
+            [sys.executable, "-m", "unittest", module, "-v"],
+            cwd=repo,
+            env=child_env,
+            check=False,
+        )
+        if completed.returncode != 0:
+            failed.append(module)
+print(f"isolated_modules={len(modules)} failures={len(failed)}")
+if failed:
+    raise SystemExit("isolated Python failures: " + ", ".join(failed))
+'@ | py -
+if ($LASTEXITCODE -ne 0) { throw 'Slice 1 CI reconciliation isolated required-alias gate failed' }
+```
+
+Obtain fresh spec and code-quality review for the exact reconciliation diff and accept it only at `C0/I0/M0`. Commit exactly as `test: handle equivalent Windows path aliases`, push that coherent checkpoint, and require all six hosted jobs GREEN for its exact pushed head before Slice 2 begins. Record the normal/forced focused exits, dynamic module count, review verdicts, commit/pushed SHA, hosted run ID/head SHA, and 6/6 job readback in the slice handoff.
+
 ### Slice 2 — Stable public review IDs shared by dossier and TestSpec
 
 **Purpose:** Remove ordinal identity and establish one collision-checked semantic identity seam.
@@ -1291,6 +1421,7 @@ Behavior RED:
 - `common_v1_0.schema.json` is the exact published-1.0 definition snapshot needed by known 1.0 fixtures, not a copy made after Task 6-only definitions are added to current common.
 - Adding/changing a current 1.1 definition cannot alter 1.0 validation results.
 - 1.0-to-1.1 migration is lossless, leaves source bytes/objects unchanged, preserves legacy `done` as metadata only, stamps every migrated decision `authority="display_only"` plus its source schema version, and assigns `revision: null` when revision provenance is unprovable. Newly recorded decisions are the only path to `authority="current"`.
+- The migration RED has two independently required layers. `tests.test_contract_migrations` exercises source-tree behavior, and `tests.test_wheel_contract` drives a normally installed wheel from a sanitized repository-external working directory under `python -I`. The installed-wheel matrix must be exact-set equal to `{REVIEW_DECISIONS, FUNCTION_DOSSIER, DOSSIER_MANIFEST}` and must migrate a strict-valid 1.0 fixture for every kind through the installed `contracts.migrations.migrate_payload(...)`; source-only migration tests are insufficient. For every vector, retain canonical input bytes and a deep copy, prove neither changes, validate the 1.1.0 output with the installed validator, and assert the kind-specific fail-closed semantics: legacy decisions are `display_only` with `source_schema_version="1.0.0"` and an unprovable `revision: null`; legacy dossier `done=true` survives only as non-authoritative migration metadata; and a 1.0 manifest cannot acquire a complete review fence. The isolated probe must prove `unit_test_runner`, `contracts.migrations`, `jsonschema`, and `referencing` all import from the fresh venv and no imported project module resolves under the repository.
 - Legacy subject references without a role migrate as `artifact`; `current_selector` is never inferred from an unproven legacy path.
 - Loaded ledger snapshots recursively freeze mapping/list payloads with no retained mutable alias; mutation attempts fail, defensive-copy mutation cannot change `decision_set`, `raw_bytes`, or `sha256`, and canonical persistence still uses the validated exact bytes.
 - A valid DOSSIER_MANIFEST 1.0 migration does not invent a complete review fence; first locked finalization writes `publishing` at 1.1 `manifest_revision=1`, then establishes the complete generation-1 fence with exact current subjects at `manifest_revision=2`. Deterministic REDs inspect both commit points; neither increment may be skipped or reset. Subject writers encountering only 1.0 serialize with the publication lock but cannot confer current review state.
@@ -1304,11 +1435,15 @@ $env:PYTHONPATH = $task6SourceRoot
 $task6SourcePrefix = $task6SourceRoot.TrimEnd('\') + '\'
 $task6ImportedPath = ((& py -c "from pathlib import Path; import unit_test_runner; print(Path(unit_test_runner.__file__).resolve())") -join '').Trim()
 if ($LASTEXITCODE -ne 0 -or -not $task6ImportedPath.StartsWith($task6SourcePrefix,[StringComparison]::OrdinalIgnoreCase)) { throw "wrong Task 6 import root: $task6ImportedPath" }
-py -m unittest tests.test_contract_registry tests.test_contract_validation tests.test_contract_migrations tests.test_public_artifact_schemas tests.test_test_spec_contract tests.test_review_decisions -v
+py -m unittest tests.test_contract_registry tests.test_contract_validation tests.test_contract_migrations tests.test_wheel_contract tests.test_public_artifact_schemas tests.test_test_spec_contract tests.test_review_decisions -v
 if ($LASTEXITCODE -ne 0) { throw 'Slice 3 focused tests failed' }
 ```
 
-GREEN target: explicit immutable/current contracts and typed models with no persistence side effects.
+Mandatory Slice 3 package/migration gate: immediately after the focused command is GREEN and before Slice 3 review, staging, or commit, execute the **entire** `Wheel/METADATA/normal fresh-install gate` block defined in Slice 9 against the same unchanged Slice 3 working-tree candidate. Do not extract only its source-tree tests or packaged-schema enumeration. The full execution must build the wheel, verify METADATA, perform the normal dependency-resolving fresh-venv install and `pip check`, sanitize Python/virtual-environment and `UNIT_TEST_RUNNER_*` variables, change to the repository-external probe directory, and run the installed wheel under `python -I` through the exact three-kind `{REVIEW_DECISIONS, FUNCTION_DOSSIER, DOSSIER_MANIFEST}` migration matrix with its input-immutability, strict-1.0 validation, 1.1.0 output-validation, kind-specific fail-closed, import-origin, and cleanup assertions.
+
+The bytes that pass the focused command and the full wheel block are the bytes submitted for Slice 3 review and commit. Any tracked edit after either gate invalidates both results and requires both commands to be rerun before acceptance. The Slice 9 and Slice 10 executions are mandatory independent revalidations of later candidate heads; they cannot retroactively satisfy, replace, or defer this Slice 3 gate.
+
+GREEN target: explicit immutable/current contracts and typed models with no persistence side effects, plus both the source-tree migration suite and the exact three-kind installed-wheel migration matrix GREEN.
 
 Expected commit: `feat: version review decision contracts`
 
@@ -1347,7 +1482,7 @@ Expected commit: `refactor: share Windows filesystem retry`
 
 #### Mandatory 4B TDD, review, commit, and push decomposition
 
-Do **not** execute the acceptance catalog below as one RED/GREEN cycle or one commit. Execute 4B-A through 4B-E2 strictly in order, with only one product writer active. At the start of each sub-slice capture `$previousHead = git rev-parse HEAD`. Add only that sub-slice's assertion-level REDs and run its focused command to prove the intended missing behavior before changing product code. Implement the smallest coherent GREEN, rerun that focused command plus every already-completed 4B focused command, stage only the reviewed sub-slice paths, run `git diff --cached --check`, and commit with the exact message below. Fresh spec and code-quality reviewers then inspect exactly `$previousHead...HEAD`; resolve findings and repeat until both report Critical 0 / Important 0. Finally run `git diff --check "$previousHead...HEAD"`, require a clean status, and `git push origin HEAD`. A later sub-slice never supplies an earlier sub-slice's GREEN.
+Do **not** execute the acceptance catalog below as one RED/GREEN cycle or one commit. Execute 4B-A through 4B-E2 strictly in order, with only one product writer active. At the start of each sub-slice capture `$previousHead = git rev-parse HEAD`. Add only that sub-slice's assertion-level REDs and run its focused command to prove the intended missing behavior before changing product code. Implement the smallest coherent GREEN, rerun that focused command plus every already-completed 4B focused command, stage only the reviewed sub-slice paths, run `git diff --cached --check`, and commit with the exact message below. Fresh spec and code-quality reviewers then inspect exactly `$previousHead...HEAD`; resolve findings and repeat until both report Critical 0 / Important 0 / Minor 0 (`C0/I0/M0`). Finally run `git diff --check "$previousHead...HEAD"`, require a clean status, and `git push origin HEAD`. A later sub-slice never supplies an earlier sub-slice's GREEN.
 
 ##### Slice 4B-A — Domain-neutral publisher and journal core
 
@@ -1813,6 +1948,7 @@ Related regressions:
 - `py -m unit_test_runner --help` and command-specific help.
 - A real CLI discovery/write smoke in a copied temporary fixture; never modify repository fixtures in place.
 - Wheel build, metadata inspection, normal fresh-venv install, import, registry enumeration, and schema validation.
+- Every schema or migration change requires both `tests.test_contract_migrations` from the source tree and the exact three-kind installed-wheel migration matrix from a sanitized repository-external working directory under `python -I`; neither source-tree tests nor packaged-schema enumeration alone can satisfy this gate.
 - Candidate whitespace gate over committed Task 6 bytes, never an argument-free clean-worktree check:
 
 ```powershell
@@ -2070,7 +2206,7 @@ $task6Summary | ConvertTo-Json -Depth 5
 
 The authoritative CLI evidence records the candidate SHA, every process/envelope exit, selected review ID/fingerprint, revisions 0→1, exact final ledger hash, re-read assessment, copied-source hash set, unchanged Git status, and cleanup result.
 
-Wheel/METADATA/normal fresh-install gate. First run `py -m unittest tests.test_wheel_contract tests.test_contract_registry tests.test_public_artifact_schemas tests.test_contract_validation -v`; then run this independent installed-wheel probe. `--no-deps` is allowed only while building this project's wheel and is forbidden on the fresh-venv install. The source-tree checks intentionally use `PYTHONPATH=src`; before creating the fresh venv, the gate removes Python/virtual-environment and `UNIT_TEST_RUNNER_*` process variables, changes to a repository-external directory, and restores the exact starting environment even if install, probing, or cleanup fails:
+Wheel/METADATA/normal fresh-install gate. First run `py -m unittest tests.test_wheel_contract tests.test_contract_registry tests.test_public_artifact_schemas tests.test_contract_validation tests.test_contract_migrations -v`; then run this independent installed-wheel schema **and exact three-kind migration** probe. `--no-deps` is allowed only while building this project's wheel and is forbidden on the fresh-venv install. The source-tree checks intentionally use `PYTHONPATH=src`; before creating the fresh venv, the gate removes Python/virtual-environment and `UNIT_TEST_RUNNER_*` process variables, changes to a repository-external directory, and restores the exact starting environment even if install, probing, or cleanup fails. A source-tree `tests.test_contract_migrations` pass is necessary but cannot substitute for executing all Task 6 migrations through the normally installed wheel:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
@@ -2095,8 +2231,8 @@ $env:PYTHONPATH = $task6SourceRoot
 $task6SourcePrefix = $task6SourceRoot.TrimEnd('\') + '\'
 $task6ImportedPath = ((& py -c "from pathlib import Path; import unit_test_runner; print(Path(unit_test_runner.__file__).resolve())") -join '').Trim()
 if ($LASTEXITCODE -ne 0 -or -not $task6ImportedPath.StartsWith($task6SourcePrefix,[StringComparison]::OrdinalIgnoreCase)) { throw "wrong Task 6 import root: $task6ImportedPath" }
-py -m unittest tests.test_wheel_contract tests.test_contract_registry tests.test_public_artifact_schemas tests.test_contract_validation -v
-if ($LASTEXITCODE -ne 0) { throw 'wheel/registry/schema source-tree tests failed' }
+py -m unittest tests.test_wheel_contract tests.test_contract_registry tests.test_public_artifact_schemas tests.test_contract_validation tests.test_contract_migrations -v
+if ($LASTEXITCODE -ne 0) { throw 'wheel/registry/schema/migration source-tree tests failed' }
 $wheelRepoRoot = (Resolve-Path -LiteralPath .).Path
 $wheelTempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $wheelTempPrefix = $wheelTempRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
@@ -2179,19 +2315,27 @@ print("METADATA Requires-Dist:", requirements)
   $installedWheelProbe = @'
 from importlib import resources
 from pathlib import Path
+import copy
 import json
 import sys
 
 import jsonschema
 import referencing
 import unit_test_runner
+import unit_test_runner.contracts.migrations as installed_migrations
 from jsonschema import Draft202012Validator
+from referencing import Registry, Resource
 from unit_test_runner.contracts import ArtifactKind
+from unit_test_runner.contracts.migrations import migrate_payload
 from unit_test_runner.contracts.registry import get_contract, iter_contracts, iter_contract_versions
-from unit_test_runner.contracts.validator import validate_payload_schema
+from unit_test_runner.contracts.validator import validate_payload, validate_payload_schema
 
+repo_root = Path(sys.argv[1]).resolve()
+probe_cwd = Path.cwd().resolve()
 venv_prefix = Path(sys.prefix).resolve()
-installed_modules = (unit_test_runner, jsonschema, referencing)
+assert probe_cwd != repo_root and not probe_cwd.is_relative_to(repo_root), (probe_cwd, repo_root)
+assert venv_prefix.is_relative_to(probe_cwd), (venv_prefix, probe_cwd)
+installed_modules = (unit_test_runner, installed_migrations, jsonschema, referencing)
 installed_module_paths = {
     module.__name__: Path(module.__file__).resolve()
     for module in installed_modules
@@ -2202,7 +2346,13 @@ for module_name, installed_module_path in installed_module_paths.items():
         installed_module_path,
         venv_prefix,
     )
+    assert not installed_module_path.is_relative_to(repo_root), (
+        module_name,
+        installed_module_path,
+        repo_root,
+    )
 module_path = installed_module_paths['unit_test_runner']
+migrations_module_path = installed_module_paths['unit_test_runner.contracts.migrations']
 kinds = tuple(ArtifactKind)
 current_contracts = tuple(iter_contracts())
 versioned_contracts = tuple(iter_contract_versions())
@@ -2231,6 +2381,12 @@ for resource_name, document in documents.items():
     schema_ids.append(document["$id"])
 assert len(schema_ids) == len(set(schema_ids)), schema_ids
 documents_by_id = {document["$id"]: document for document in documents.values()}
+schema_registry = Registry()
+for document in documents.values():
+    schema_registry = schema_registry.with_resource(
+        document["$id"],
+        Resource.from_contents(document),
+    )
 
 def references(value):
     if isinstance(value, dict):
@@ -2272,16 +2428,178 @@ for kind in kinds:
     })
     assert isinstance(violations, tuple) and violations, kind.value
 
+task6_migration_kinds = (
+    ArtifactKind.REVIEW_DECISIONS,
+    ArtifactKind.FUNCTION_DOSSIER,
+    ArtifactKind.DOSSIER_MANIFEST,
+)
+assert {kind.value for kind in task6_migration_kinds} == {
+    "review_decisions",
+    "function_dossier",
+    "dossier_manifest",
+}
+assert {get_contract(kind).current_version for kind in task6_migration_kinds} == {"1.1.0"}
+
+sha256 = "7b18e68b2afcf1b0f0a1b857c5d1fcb2cf9db4d1540d778a266dbeaa3aa176a8"
+producer = {
+    "name": "unit-test-runner",
+    "version": "0.1.0",
+    "commit": "installed-wheel-probe",
+}
+subject = {
+    "function_id": "fn_control_update_cdd351ecf31d",
+    "source_path": "src/control.c",
+    "source_sha256": sha256,
+}
+readiness = {
+    "mvp_level": "analysis",
+    "ready_for_review": True,
+    "ready_for_harness_generation": False,
+    "ready_for_build_probe": False,
+    "ready_for_execution": False,
+    "evidence_ready": False,
+    "blocked": False,
+    "blocked_reasons": [],
+    "quality_score": None,
+}
+migration_vectors = {
+    ArtifactKind.REVIEW_DECISIONS: {
+        "artifact_kind": "review_decisions",
+        "schema_version": "1.0.0",
+        "producer": producer,
+        "subject": subject,
+        "data": {
+            "revision": 1,
+            "decisions": [{
+                "review_id": "review-legacy-1",
+                "resolution": "approved",
+                "reviewer": "reviewer01",
+                "rationale": "Reviewed evidence.",
+                "decided_at": "2026-07-12T00:00:00+00:00",
+                "subject_artifacts": [{
+                    "artifact_kind": "test_spec",
+                    "path": "reports/test_spec.json",
+                    "sha256": "a" * 64,
+                }],
+            }],
+        },
+        "extensions": {},
+    },
+    ArtifactKind.FUNCTION_DOSSIER: {
+        "artifact_kind": "function_dossier",
+        "schema_version": "1.0.0",
+        "producer": producer,
+        "subject": subject,
+        "data": {
+            "target": {
+                "source": "src/control.c",
+                "function": "Control_Update",
+                "configuration": "Debug",
+                "project": "Control",
+            },
+            "project_membership": [],
+            "build_context": {},
+            "function": {"name": "Control_Update", "status": "ready"},
+            "test_design": {},
+            "diagnostics": [],
+            "artifact_index": [],
+            "review_items": [{
+                "review_id": "review-legacy-1",
+                "category": "analysis",
+                "title": "Review source digest",
+                "description": "Confirm analysis evidence.",
+                "related_artifacts": [],
+                "related_test_cases": [],
+                "severity": "warning",
+                "suggested_reviewer_role": "unit_test_reviewer",
+                "done": True,
+            }],
+            "readiness": readiness,
+        },
+        "extensions": {},
+    },
+    ArtifactKind.DOSSIER_MANIFEST: {
+        "artifact_kind": "dossier_manifest",
+        "schema_version": "1.0.0",
+        "producer": producer,
+        "subject": subject,
+        "data": {
+            "artifact_index": [],
+            "readiness": readiness,
+        },
+        "extensions": {},
+    },
+}
+assert set(migration_vectors) == set(task6_migration_kinds)
+
+def canonical_bytes(value):
+    return (json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ) + "\n").encode("utf-8")
+
+def key_occurrences(value, key, path="$"):
+    if isinstance(value, dict):
+        for child_key, child in value.items():
+            child_path = f"{path}.{child_key}"
+            if child_key == key:
+                yield child_path, child
+            yield from key_occurrences(child, key, child_path)
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            yield from key_occurrences(child, key, f"{path}[{index}]")
+
+migrated_by_kind = {}
+for kind in task6_migration_kinds:
+    input_bytes = canonical_bytes(migration_vectors[kind])
+    source_payload = json.loads(input_bytes)
+    source_copy = copy.deepcopy(source_payload)
+    source_contract = get_contract(kind, "1.0.0")
+    source_validator = Draft202012Validator(
+        documents[source_contract.schema_resource],
+        registry=schema_registry,
+    )
+    source_schema_errors = tuple(source_validator.iter_errors(source_payload))
+    assert source_schema_errors == (), (kind.value, source_schema_errors)
+    migrated = migrate_payload(kind, source_payload, target_version="1.1.0")
+    assert source_payload == source_copy, kind.value
+    assert canonical_bytes(source_payload) == input_bytes, kind.value
+    assert migrated["artifact_kind"] == kind.value, kind.value
+    assert migrated["schema_version"] == "1.1.0", kind.value
+    violations = validate_payload(kind, migrated)
+    assert violations == (), (kind.value, violations)
+    migrated_by_kind[kind] = migrated
+
+migrated_decision = migrated_by_kind[ArtifactKind.REVIEW_DECISIONS]["data"]["decisions"][0]
+assert migrated_decision["authority"] == "display_only", migrated_decision
+assert migrated_decision["source_schema_version"] == "1.0.0", migrated_decision
+assert migrated_decision["subject_artifacts"][0]["revision"] is None, migrated_decision
+
+migrated_dossier = migrated_by_kind[ArtifactKind.FUNCTION_DOSSIER]
+done_occurrences = tuple(key_occurrences(migrated_dossier, "done"))
+assert len(done_occurrences) == 1, done_occurrences
+done_path, done_value = done_occurrences[0]
+assert done_value is True and done_path.startswith("$.extensions.migration"), done_occurrences
+
+migrated_manifest = migrated_by_kind[ArtifactKind.DOSSIER_MANIFEST]
+assert migrated_manifest["data"].get("review_subject_snapshot") is None, migrated_manifest
+
 print(json.dumps({
     "installed_module": str(module_path),
+    "installed_migrations_module": str(migrations_module_path),
+    "probe_cwd": str(probe_cwd),
     "artifact_kind_count": len(kinds),
     "current_contract_count": len(current_contracts),
     "versioned_contract_count": len(versioned_contracts),
     "packaged_schema_count": len(documents),
+    "task6_migrations_verified": sorted(kind.value for kind in migrated_by_kind),
 }, sort_keys=True))
 '@
-    & $wheelVenvPython -I -c $installedWheelProbe
-    if ($LASTEXITCODE -ne 0) { throw "installed wheel runtime/schema probe failed: $LASTEXITCODE" }
+    & $wheelVenvPython -I -c $installedWheelProbe $wheelRepoRoot
+    if ($LASTEXITCODE -ne 0) { throw "installed wheel runtime/schema/migration probe failed: $LASTEXITCODE" }
   }
   finally {
     if ($wheelLocationPushed) {
@@ -2323,7 +2641,7 @@ finally {
 }
 ```
 
-Record the wheel path/hash, full `Requires-Dist` list, normal install and `pip check` exits, installed module path, artifact-kind/current/versioned-contract counts, packaged-schema count, and cleanup result. The direct dependency is `referencing>=0.28.4,<1`; `typing-extensions` is not a Task 6 direct dependency.
+Record the wheel path/hash, full `Requires-Dist` list, normal install and `pip check` exits, repository-external probe working directory, installed package and migration-module paths, artifact-kind/current/versioned-contract counts, packaged-schema count, the exact three migrated kinds, every input-immutability/output-validation/kind-specific semantic assertion, and cleanup result. The evidence must prove no project import came from the repository. The direct dependency is `referencing>=0.28.4,<1`; `typing-extensions` is not a Task 6 direct dependency.
 
 Authoritative isolated full gate (dynamic inventory, one fresh process per module):
 
@@ -2615,17 +2933,17 @@ After preliminary gates, write `docs/superpowers/plans/2026-07-15-phase1-task6-g
 ### Slice 10 — Formal review, product PR, merge, and post-merge accounting
 
 1. Fetch `origin/main`. Require start anchor `969ce9462a688e94c887d6e77359e40296d8927b` to be its ancestor and require `git merge-base origin/main HEAD` to equal `origin/main`. If main advanced and is not already contained, rebase the Task 6 commits onto the new `origin/main`, refresh the pre-final evidence commit without self-SHA claims, then restart Slice 9 and this slice.
-2. With the pre-final evidence already committed and a clean worktree, run the focused, related, isolated full, package, fixture, source-integrity, VS Code, CLI smoke, compile, diff, and carrier-free gates **again at the unchanged candidate HEAD**. Store raw logs/CSV outside the checkout; do not edit tracked evidence afterward.
+2. With the pre-final evidence already committed and a clean worktree, run the focused, related, isolated full, package/schema/installed-wheel-migration, fixture, source-integrity, VS Code, CLI smoke, compile, diff, and carrier-free gates **again at the unchanged candidate HEAD**. The installed-wheel gate must again execute and validate every exact Task 6 migration from its sanitized repository-external working directory under `python -I`; source-tree migration results cannot stand in for it. Store raw logs/CSV outside the checkout; do not edit tracked evidence afterward.
 3. Fresh spec reviewer checks `origin/main...HEAD` against every fixed semantic decision and carrier correction.
 4. Fresh code-quality reviewer checks the same entire diff, with special focus on the fenced subject snapshot, pre/post-commit outcomes, manual lock recovery, deadlines, exact bytes, immutable schema references, and CLI truthfulness.
-5. Resolve and re-review all Critical/Important findings; target verdict is Critical 0 / Important 0. Keep final verdicts/Minor disposition in the task record and later exact-head PR evidence, not a new product-branch commit.
+5. Resolve and re-review every Critical, Important, and Minor finding. A candidate is accepted only when both fresh reviewers report Critical 0 / Important 0 / Minor 0 (`C0/I0/M0`); no unresolved Minor finding may pass. Keep those final zero-count verdicts in the task record and later exact-head PR evidence, not a new product-branch commit.
 6. If any file changes after the final gates or either review, discard the candidate identity, update only preliminary evidence as appropriate, commit that update, and restart at step 1. Reviews and gates are never carried forward to a different commit.
 7. At the clean accepted commit, capture in the task record/shell variables (not by editing the branch):
    - `start_anchor_sha = 969ce9462a688e94c887d6e77359e40296d8927b`,
    - `reviewed_base_sha = git rev-parse origin/main` (dynamic but fixed for this candidate),
    - `reviewed_head_sha = git rev-parse HEAD`,
    - `reviewed_tree_sha = git show -s --format=%T HEAD`,
-   - both reviewer verdicts and every final local gate/log identity.
+   - both reviewer `C0/I0/M0` verdicts and every final local gate/log identity.
 8. Push exactly `reviewed_head_sha` and open one Task 6 product PR against `main`. The PR must contain neither `.github/bootstrap/**` nor `.github/workflows/materialize-p1t6-v3.yml`, and its branch history must pass the carrier ancestry/history/allowlist gate. Put the captured base/head/tree, final local log/CSV identities, totals, and reviewer verdicts in the PR body or an exact-head PR comment without changing the branch.
 9. Require all hosted jobs GREEN **for `reviewed_head_sha`**. Parse job logs for actual Python module/test totals, writer-snapshot outcome, Windows alias checks, real compiler path, and non-skipped E2E. Record the check-suite/run head SHA, not only the run URL.
 10. Immediately before merge:
@@ -2641,13 +2959,13 @@ After preliminary gates, write `docs/superpowers/plans/2026-07-15-phase1-task6-g
    - merge tree equals `reviewed_tree_sha`,
    - the carrier-free ancestry/history/path gate passes again.
 13. In a clean post-merge worktree at that exact merge SHA, run focused tests, compileall, CLI help/smoke, diff/status checks, and then monitor the `main` push workflow to all GREEN for the exact merge SHA.
-14. After the clean product merge and post-merge verification, close obsolete carrier PR #16 through GitHub and read it back to require `state=CLOSED`. This is an external action, not an effect of a Git documentation commit.
+14. After the clean product merge and both the exact-merge-SHA local and hosted `main` verification, close obsolete open draft PRs #11, #12, #13, #14, #15, and #16 through GitHub. Read each PR back and require `state=CLOSED`; if any close or readback fails, stop the closeout. Do not delete any remote branch. These are external actions, not effects of a Git documentation commit.
 15. From the verified product merge SHA, create a post-merge closeout documentation branch/commit that:
    - first re-reads these four exact paths from the then-current verified `main`; if any path was renamed or its authority changed, stop and amend/review the closeout allowlist before writing:
      - `docs/superpowers/plans/2026-07-11-unit-test-runner-phase-1-contract-execution-evidence.md` — phase plan; check off only Task 6 requirements proven by the product merge evidence;
      - `docs/superpowers/plans/preflight/phase1-task-6-preflight.md` — Task 6 preflight; replace `not started` with the exact approved/merged/verified identities and handoff;
      - `docs/superpowers/plans/preflight/README.md` — restart handoff; advance the durable integrated boundary to 14/38 and make Task 7 the next task without rewriting historical Task 5 evidence;
-     - `docs/superpowers/plans/2026-07-15-phase1-task6-completion.md` — new completion record containing product PR, product merge SHA/tree, hosted run IDs/head SHAs, dynamic local totals/log hashes, limitations, both reviewer verdicts, post-merge gates, PR #16 closed-state proof, and the closeout base SHA;
+     - `docs/superpowers/plans/2026-07-15-phase1-task6-completion.md` — new completion record containing product PR, product merge SHA/tree, hosted run IDs/head SHAs, dynamic local totals/log hashes, limitations, both reviewer `C0/I0/M0` verdicts, post-merge gates, individual GitHub closed-state readback proof for PRs #11 through #16, confirmation that no remote branch was deleted, and the closeout base SHA;
    - permits no fifth path in the documentation-only diff and does not rewrite the pre-final self-SHA-free gate evidence;
    - updates progress from 13/38 to 14/38 and marks Task 6 complete only in those exact documents after all referenced evidence has been read back.
 16. Push the closeout documentation branch, open a documentation-only PR, require its exact-head checks GREEN, merge it, and verify the resulting `main` SHA. Progress is not durably **14/38** until this documentation PR is merged and verified.
@@ -2676,9 +2994,12 @@ Stop the active slice without committing product code if any of these occurs:
 - TestSpec PR #19 writer regressions fail after retry-helper work.
 - Task 6 requires unexpected VS Code changes or Phase 2 generation policy.
 - Full isolated failures are dismissed as aggregate-run contamination without module-level reproduction and resolution.
-- Formal review has unresolved Critical or Important findings.
+- The Slice 1 forced-short-TEMP reproduction shows a different physical file or containment escape and product changes are proposed before this plan is amended and re-reviewed.
+- Slice 2 is started before the reconciliation commit is pushed and all six hosted jobs are read back GREEN for that exact head.
+- Formal review has any unresolved Critical, Important, or Minor finding, or either fresh review is not `C0/I0/M0` for the exact candidate.
 - Hosted CI has an unexpected skip, missing real compiler, or non-GREEN job.
 - The carrier head/path/materializer appears in ancestry or branch history, an unreviewed path is outside the allowlist, or reviewed base/head/tree/check identities do not match the merge target.
+- Any obsolete PR #11 through #16 is treated as a merge candidate or implementation authority, is closed before the verified product-merge boundary, cannot be read back as `state=CLOSED` after closure, or any remote branch deletion is proposed.
 
 Do not mark the goal blocked merely because a slice is difficult. Preserve the RED and diagnostic evidence, investigate within scope, and resume from the last clean commit.
 
@@ -2693,9 +3014,11 @@ Each slice handoff records only durable, reviewable facts:
 - assertion-level RED command and failure reason,
 - GREEN commands and counts,
 - related regressions and counts,
-- reviewer verdict/findings/disposition,
+- reviewer verdict/findings/disposition and exact `C0/I0/M0` acceptance proof,
 - known limitations,
 - next slice and its entry condition,
 - clean/dirty status.
+
+The Slice 1 reconciliation handoff additionally records physical-identity proof for the long/short failure operands, normal and forced-short-TEMP focused results, the required-alias isolated module total, exact commit/pushed/head SHA, hosted run ID, and 6/6 GREEN readback. The post-merge closeout handoff records each of PRs #11 through #16 individually as `state=CLOSED` and confirms that no remote branch was deleted.
 
 Push at the plan checkpoint and at coherent reviewed product boundaries. Do not push transient RED-only or known-broken states unless recovery from the remote checkpoint is explicitly needed and the branch/commit is clearly marked non-mergeable.
