@@ -14,6 +14,7 @@ from unit_test_runner.contracts import (
     validate_payload_schema,
 )
 from unit_test_runner.contracts.registry import get_contract
+from unit_test_runner.review_ids import build_function_id
 
 from .models import ArtifactReference, CurrentArtifactContext, TestSpec
 from .path_safety import assert_no_reparse_components, lexical_absolute
@@ -786,15 +787,7 @@ def signature_sha256(payload: Mapping[str, Any]) -> str:
 
 
 def stable_function_id(source_path: str, function_name: str) -> str:
-    normalized_path = _relative_path(source_path)
-    name = str(function_name).strip()
-    if not name:
-        raise ValueError("Function name is required for stable identity.")
-    suffix = hashlib.sha256(
-        f"{normalized_path}\0{name}".encode("utf-8")
-    ).hexdigest()[:12]
-    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
-    return f"fn_{slug or 'function'}_{suffix}"
+    return build_function_id(source_path, function_name)
 
 
 def build_current_artifact_context(
