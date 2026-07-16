@@ -11,6 +11,8 @@ const REPOSITORY = process.env.GITHUB_REPOSITORY || 'katamor1/unitTestRunner';
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const EXTENSION_ROOT = path.join(REPO_ROOT, 'vscode', 'extension');
 const FAILURE_LOG = path.join(REPO_ROOT, '.github', 'apply-japanese-gui-copy.log');
+const EXPORTED_PATCH_PATH = path.join(REPO_ROOT, '.github', 'japanese-gui-copy.patch.py');
+const EXPORT_WORKFLOW_PATH = path.join(REPO_ROOT, '.github', 'workflows', 'export-japanese-gui-copy-patch.yml');
 const RUNNER_PATH = path.join(EXTENSION_ROOT, 'scripts', 'run-unit-tests.cjs');
 const SELF_PATH = __filename;
 
@@ -133,9 +135,15 @@ async function prepare() {
   runGit(['fetch', '--no-tags', 'origin', `refs/heads/${TARGET_BRANCH}:refs/remotes/origin/${TARGET_BRANCH}`]);
   runGit(['checkout', '-B', TARGET_BRANCH, `refs/remotes/origin/${TARGET_BRANCH}`]);
 
-  const script = await downloadPatchBlob();
+  let script = (await downloadPatchBlob()).toString('utf8');
+  const oldExpectation = `expected = 2 if old == "label: '最後のCLIをコピー'" else 1`;
+  const newExpectation = `expected = 3 if old == "label: '最後のCLIをコピー'" else 1`;
+  if (!script.includes(oldExpectation)) {
+    throw new Error('Unable to locate the workflow-state replacement expectation in the GUI-copy patch.');
+  }
+  script = script.replace(oldExpectation, newExpectation);
   const scriptPath = path.join(os.tmpdir(), `apply-japanese-gui-copy-${process.pid}.py`);
-  fs.writeFileSync(scriptPath, script);
+  fs.writeFileSync(scriptPath, script, 'utf8');
   try {
     runPython(scriptPath);
   } finally {
@@ -164,6 +172,8 @@ function finalize() {
   restoreOriginalRunner();
   fs.rmSync(SELF_PATH, { force: true });
   fs.rmSync(FAILURE_LOG, { force: true });
+  fs.rmSync(EXPORTED_PATCH_PATH, { force: true });
+  fs.rmSync(EXPORT_WORKFLOW_PATH, { force: true });
   configureGitIdentity();
   runGit(['add', '-A']);
   const diff = spawnSync('git', ['diff', '--cached', '--quiet'], { cwd: REPO_ROOT });
