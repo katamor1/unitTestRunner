@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime
 from functools import lru_cache
 from importlib import resources
@@ -12,6 +12,11 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 from referencing import Registry, Resource
+
+from unit_test_runner.review_ids import (
+    semantic_case_id_token,
+    semantic_review_subject_token,
+)
 
 from .kinds import ArtifactKind, ContractMode, RunOutcome
 from .migrations import migrate_payload
@@ -24,10 +29,15 @@ def validate_payload(
     kind: ArtifactKind,
     payload: Mapping[str, Any],
 ) -> tuple[ContractViolation, ...]:
-    violations = list(validate_payload_schema(kind, payload))
     contract = get_contract(kind)
+    common_payload = (
+        _test_spec_validation_shadow(payload)
+        if kind is ArtifactKind.TEST_SPEC
+        else payload
+    )
+    violations = list(validate_payload_schema(kind, payload))
     if not any(item.code == "unsupported_version" for item in violations):
-        violations.extend(_common_semantic_violations(kind, payload))
+        violations.extend(_common_semantic_violations(kind, common_payload))
         violations.extend(
             _artifact_semantic_violations(
                 contract.semantic_validator,
@@ -42,8 +52,20 @@ def validate_payload_schema(
     payload: Mapping[str, Any],
 ) -> tuple[ContractViolation, ...]:
     contract = get_contract(kind)
-    version = str(payload.get("schema_version") or "")
     violations: list[ContractViolation] = []
+    raw_version = payload.get("schema_version")
+    if "schema_version" in payload and type(raw_version) is not str:
+        violations.append(
+            ContractViolation(
+                "schema_error",
+                "$.schema_version",
+                f"{kind.value} schema_version must be an exact string.",
+                "blocking",
+            )
+        )
+        version = contract.current_version
+    else:
+        version = raw_version if type(raw_version) is str else ""
     if version != contract.current_version:
         violations.append(
             ContractViolation(
@@ -55,11 +77,38 @@ def validate_payload_schema(
         if version:
             return tuple(violations)
 
+    validation_payload = (
+        _test_spec_validation_shadow(payload)
+        if kind is ArtifactKind.TEST_SPEC
+        else payload
+    )
     validator = _validator_for(contract)
-    for error in sorted(validator.iter_errors(dict(payload)), key=_error_sort_key):
+    for error in sorted(
+        validator.iter_errors(dict(validation_payload)),
+        key=_error_sort_key,
+    ):
         violations.append(_schema_violation(error))
 
     return _deduplicate_violations(violations)
+
+
+def _test_spec_validation_shadow(value: Any) -> Any:
+    if isinstance(value, dict):
+        shadow: dict[str, Any] = {}
+        for index, (key, child) in enumerate(dict.items(value)):
+            shadow_key = (
+                key if type(key) is str else f"__invalid_key_{index}__"
+            )
+            shadow[shadow_key] = _test_spec_validation_shadow(child)
+        return shadow
+    if isinstance(value, list):
+        return [
+            _test_spec_validation_shadow(child)
+            for child in list.__iter__(value)
+        ]
+    if value is None or type(value) in {str, int, float, bool}:
+        return value
+    return None
 
 
 def load_artifact(
@@ -264,7 +313,17 @@ def _common_semantic_violations(
         if isinstance(cli_data, Mapping):
             cli_data = {key: value for key, value in cli_data.items() if key != "details"}
             semantic_payload = {**builtin_payload, "data": cli_data}
-    violations.extend(_duplicate_id_violations(semantic_payload))
+    exact_string_identifier_keys = (
+        _TEST_SPEC_DUPLICATE_EXACT_STRING_KEYS
+        if kind is ArtifactKind.TEST_SPEC
+        else frozenset()
+    )
+    violations.extend(
+        _duplicate_id_violations(
+            semantic_payload,
+            exact_string_identifier_keys=exact_string_identifier_keys,
+        )
+    )
     violations.extend(_provenance_violations(kind, payload))
     violations.extend(_nested_path_violations(kind, semantic_payload))
     violations.extend(_nested_hash_violations(semantic_payload))
@@ -475,11 +534,27 @@ def _subject_consistency_violations(
     return violations
 
 
-def _duplicate_id_violations(value: Any, path: str = "$") -> list[ContractViolation]:
+_TEST_SPEC_DUPLICATE_EXACT_STRING_KEYS = frozenset(
+    {"test_case_id", "review_item_id"}
+)
+
+
+def _duplicate_id_violations(
+    value: Any,
+    path: str = "$",
+    *,
+    exact_string_identifier_keys: frozenset[str] = frozenset(),
+) -> list[ContractViolation]:
     violations: list[ContractViolation] = []
     if isinstance(value, Mapping):
         for key, child in value.items():
-            violations.extend(_duplicate_id_violations(child, f"{path}.{key}"))
+            violations.extend(
+                _duplicate_id_violations(
+                    child,
+                    f"{path}.{key}",
+                    exact_string_identifier_keys=exact_string_identifier_keys,
+                )
+            )
         return violations
     if not isinstance(value, list):
         return violations
@@ -527,6 +602,11 @@ def _duplicate_id_violations(value: Any, path: str = "$") -> list[ContractViolat
         for identifier in identifiers:
             if isinstance(identifier, (Mapping, list, set)):
                 continue
+            if (
+                primary_key in exact_string_identifier_keys
+                and type(identifier) is not str
+            ):
+                continue
             if identifier in seen:
                 violations.append(
                     ContractViolation(
@@ -537,7 +617,13 @@ def _duplicate_id_violations(value: Any, path: str = "$") -> list[ContractViolat
                 )
             seen.add(identifier)
     for index, child in enumerate(value):
-        violations.extend(_duplicate_id_violations(child, f"{path}[{index}]"))
+        violations.extend(
+            _duplicate_id_violations(
+                child,
+                f"{path}[{index}]",
+                exact_string_identifier_keys=exact_string_identifier_keys,
+            )
+        )
     return violations
 
 
@@ -1181,18 +1267,87 @@ def _evidence_manifest_semantic_violations(
     return violations
 
 
+def _test_spec_exact_string(
+    value: Any,
+    json_path: str,
+    field_name: str,
+    violation_code: str,
+    violations: list[ContractViolation],
+) -> str | None:
+    reason: str | None = None
+    if type(value) is not str:
+        reason = "must be an exact string"
+    elif not value:
+        reason = "must not be empty"
+    elif "\x00" in value:
+        reason = "must not contain NUL"
+    else:
+        try:
+            value.encode("utf-8", errors="strict")
+        except UnicodeEncodeError:
+            reason = "must be strict UTF-8"
+    if reason is not None:
+        violations.append(
+            ContractViolation(
+                violation_code,
+                json_path,
+                f"TestSpec {field_name} {reason}.",
+                "blocking",
+            )
+        )
+        return None
+    return value
+
+
+def _test_spec_list_items(value: Any) -> list[Any] | None:
+    if not isinstance(value, list):
+        return None
+    return list(list.__iter__(value))
+
+
 def _test_spec_semantic_violations(
     payload: Mapping[str, Any],
 ) -> list[ContractViolation]:
+    violations: list[ContractViolation] = []
     data = payload.get("data")
     if not isinstance(data, Mapping):
-        return []
-    violations: list[ContractViolation] = []
+        return violations
+
+    _test_spec_exact_string(
+        data.get("spec_id"),
+        "$.data.spec_id",
+        "spec_id",
+        "invalid_spec_id",
+        violations,
+    )
+    if type(data.get("revision")) is not int:
+        violations.append(
+            ContractViolation(
+                "invalid_revision",
+                "$.data.revision",
+                "TestSpec revision must be an exact integer.",
+                "blocking",
+            )
+        )
 
     source = data.get("source")
+    source_path: str | None = None
     if isinstance(source, Mapping):
-        source_path = source.get("path")
-        if isinstance(source_path, str) and not _is_relative_contract_path(source_path):
+        source_path = _test_spec_exact_string(
+            source.get("path"),
+            "$.data.source.path",
+            "source path",
+            "invalid_source_identity",
+            violations,
+        )
+        _test_spec_exact_string(
+            source.get("sha256"),
+            "$.data.source.sha256",
+            "source sha256",
+            "invalid_source_identity",
+            violations,
+        )
+        if source_path is not None and not _is_relative_contract_path(source_path):
             violations.append(
                 ContractViolation(
                     "invalid_relative_path",
@@ -1200,12 +1355,51 @@ def _test_spec_semantic_violations(
                     "Test spec source path must be relative.",
                 )
             )
-    generated_from = data.get("generated_from")
-    if isinstance(generated_from, list):
+
+    function = data.get("function")
+    function_name: str | None = None
+    if isinstance(function, Mapping):
+        _test_spec_exact_string(
+            function.get("function_id"),
+            "$.data.function.function_id",
+            "function_id",
+            "invalid_function_identity",
+            violations,
+        )
+        function_name = _test_spec_exact_string(
+            function.get("name"),
+            "$.data.function.name",
+            "function name",
+            "invalid_function_identity",
+            violations,
+        )
+        _test_spec_exact_string(
+            function.get("signature_sha256"),
+            "$.data.function.signature_sha256",
+            "function signature sha256",
+            "invalid_function_identity",
+            violations,
+        )
+
+    generated_from = _test_spec_list_items(data.get("generated_from"))
+    if generated_from is not None:
         for index, reference in enumerate(generated_from):
             if isinstance(reference, Mapping):
-                reference_path = reference.get("path")
-                if isinstance(reference_path, str) and not _is_relative_contract_path(reference_path):
+                reference_path: str | None = None
+                for field_name in ("artifact_kind", "path", "sha256"):
+                    value = _test_spec_exact_string(
+                        reference.get(field_name),
+                        f"$.data.generated_from[{index}].{field_name}",
+                        f"generated artifact {field_name}",
+                        "invalid_generated_reference",
+                        violations,
+                    )
+                    if field_name == "path":
+                        reference_path = value
+                if (
+                    reference_path is not None
+                    and not _is_relative_contract_path(reference_path)
+                ):
                     violations.append(
                         ContractViolation(
                             "invalid_relative_path",
@@ -1215,126 +1409,393 @@ def _test_spec_semantic_violations(
                     )
 
     violations.extend(_test_spec_authority_violations(data))
+    case_collections: dict[str, list[Any]] = {}
+    for collection in ("test_cases", "additional_case_candidates"):
+        raw_cases = _test_spec_list_items(data.get(collection))
+        case_collections[collection] = raw_cases if raw_cases is not None else []
     cases = [
         (collection, index, case)
-        for collection in ("test_cases", "additional_case_candidates")
-        for index, case in enumerate(data.get(collection) or [])
+        for collection, raw_cases in case_collections.items()
+        for index, case in enumerate(raw_cases)
         if isinstance(case, Mapping)
     ]
-    case_ids = [
-        str(case["test_case_id"])
-        for _collection, _index, case in cases
-        if case.get("test_case_id")
-    ]
     seen_case_ids: set[str] = set()
+    semantic_case_ids: dict[str, tuple[str, str]] = {}
+    semantic_case_tokens: dict[tuple[str, int], str] = {}
     for collection, index, case in cases:
-        case_id = str(case.get("test_case_id") or "")
-        if case_id and case_id in seen_case_ids:
+        raw_case_id = case.get("test_case_id")
+        case_path = f"$.data.{collection}[{index}].test_case_id"
+        if type(raw_case_id) is not str:
+            violations.append(
+                ContractViolation(
+                    "invalid_case_id",
+                    case_path,
+                    "Invalid test_case_id: test_case_id must be an exact string.",
+                    "blocking",
+                )
+            )
+            continue
+        try:
+            semantic_token = semantic_case_id_token(raw_case_id)
+        except (TypeError, ValueError, UnicodeError) as error:
+            violations.append(
+                ContractViolation(
+                    "invalid_case_id",
+                    case_path,
+                    f"Invalid test_case_id: {error}",
+                    "blocking",
+                )
+            )
+            continue
+        if raw_case_id in seen_case_ids:
             violations.append(
                 ContractViolation(
                     "duplicate_id",
-                    f"$.data.{collection}[{index}].test_case_id",
-                    f"Duplicate test_case_id: {case_id}",
+                    case_path,
+                    f"Duplicate test_case_id: {raw_case_id}",
                 )
             )
-        seen_case_ids.add(case_id)
-    known_case_ids = set(case_ids)
+        seen_case_ids.add(raw_case_id)
+        semantic_case_tokens[(collection, index)] = semantic_token
+        existing = semantic_case_ids.get(semantic_token)
+        if existing is not None and existing[1] != raw_case_id:
+            violations.append(
+                ContractViolation(
+                    "duplicate_semantic_case_id",
+                    case_path,
+                    "test_case_id semantically aliases another case: "
+                    f"{raw_case_id!r} aliases {existing[1]!r} at {existing[0]}",
+                    "blocking",
+                )
+            )
+        else:
+            semantic_case_ids[semantic_token] = (case_path, raw_case_id)
+    known_case_ids = set(seen_case_ids)
     coverage_summary = data.get("coverage_summary")
     coverage_ids: set[str] = set()
     if isinstance(coverage_summary, Mapping):
         mapping = coverage_summary.get("coverage_to_test_cases")
         if isinstance(mapping, Mapping):
-            coverage_ids.update(str(item) for item in mapping)
             for coverage_id, references in mapping.items():
-                if isinstance(references, Sequence) and not isinstance(references, str):
+                if type(coverage_id) is not str:
+                    violations.append(
+                        ContractViolation(
+                            "invalid_coverage_id",
+                            "$.data.coverage_summary.coverage_to_test_cases",
+                            "Coverage map keys must be exact strings.",
+                            "blocking",
+                        )
+                    )
+                    continue
+                coverage_ids.add(coverage_id)
+                references = _test_spec_list_items(references)
+                if references is not None:
                     for reference in references:
-                        if str(reference) not in known_case_ids:
+                        reference_path = (
+                            "$.data.coverage_summary.coverage_to_test_cases."
+                            f"{coverage_id}"
+                        )
+                        if type(reference) is not str:
                             violations.append(
                                 ContractViolation(
                                     "invalid_case_reference",
-                                    f"$.data.coverage_summary.coverage_to_test_cases.{coverage_id}",
+                                    reference_path,
+                                    "Coverage test_case_id references must be exact strings.",
+                                    "blocking",
+                                )
+                            )
+                        elif reference not in known_case_ids:
+                            violations.append(
+                                ContractViolation(
+                                    "invalid_case_reference",
+                                    reference_path,
                                     f"Unknown test_case_id reference: {reference}",
                                 )
                             )
-        uncovered = coverage_summary.get("uncovered_coverage_ids")
-        if isinstance(uncovered, list):
-            coverage_ids.update(str(item) for item in uncovered)
+        uncovered = _test_spec_list_items(
+            coverage_summary.get("uncovered_coverage_ids")
+        )
+        if uncovered is not None:
+            for index, coverage_id in enumerate(uncovered):
+                exact_coverage_id = _test_spec_exact_string(
+                    coverage_id,
+                    f"$.data.coverage_summary.uncovered_coverage_ids[{index}]",
+                    "uncovered coverage_id",
+                    "invalid_coverage_id",
+                    violations,
+                )
+                if exact_coverage_id is not None:
+                    coverage_ids.add(exact_coverage_id)
 
-    function = data.get("function")
-    function_name = (
-        str(function.get("name") or "") if isinstance(function, Mapping) else ""
+    review_item_ids = _test_spec_list_items(data.get("review_item_ids"))
+    known_reviews: set[str] = set()
+    if review_item_ids is not None:
+        for index, review_id in enumerate(review_item_ids):
+            exact_review_id = _test_spec_exact_string(
+                review_id,
+                f"$.data.review_item_ids[{index}]",
+                "review_item_id",
+                "invalid_review_id",
+                violations,
+            )
+            if exact_review_id is not None:
+                known_reviews.add(exact_review_id)
+    generation_policy = data.get("generation_policy")
+    raw_dependency_ids = (
+        generation_policy.get("dependency_ids")
+        if isinstance(generation_policy, Mapping)
+        else None
     )
-    known_reviews = {str(item) for item in data.get("review_item_ids") or []}
-    known_dependencies = {
-        str(item)
-        for item in (data.get("generation_policy") or {}).get("dependency_ids", [])
-    }
+    dependency_ids = _test_spec_list_items(raw_dependency_ids)
+    known_dependencies: set[str] = set()
+    if dependency_ids is not None:
+        for index, dependency_id in enumerate(dependency_ids):
+            exact_dependency_id = _test_spec_exact_string(
+                dependency_id,
+                f"$.data.generation_policy.dependency_ids[{index}]",
+                "dependency_id",
+                "invalid_dependency_id",
+                violations,
+            )
+            if exact_dependency_id is not None:
+                known_dependencies.add(exact_dependency_id)
     for json_path, key, reference in _test_spec_reference_values(data):
-        if key in {"review_item_id", "review_item_ids"} and reference not in known_reviews:
-            violations.append(
-                ContractViolation(
-                    "invalid_review_reference",
-                    json_path,
-                    f"Unknown review_item_id reference: {reference}",
+        if key in {"review_item_id", "review_item_ids"}:
+            if type(reference) is not str:
+                violations.append(
+                    ContractViolation(
+                        "invalid_review_reference",
+                        json_path,
+                        "Review-item references must be exact strings.",
+                        "blocking",
+                    )
                 )
-            )
-        if key in {"dependency_id", "dependency_ids", "related_dependency_id"} and reference not in known_dependencies:
-            violations.append(
-                ContractViolation(
-                    "invalid_dependency_reference",
-                    json_path,
-                    f"Unknown dependency_id reference: {reference}",
+            elif reference and reference not in known_reviews:
+                violations.append(
+                    ContractViolation(
+                        "invalid_review_reference",
+                        json_path,
+                        f"Unknown review_item_id reference: {reference}",
+                    )
                 )
-            )
+        if key in {"dependency_id", "dependency_ids", "related_dependency_id"}:
+            if type(reference) is not str:
+                violations.append(
+                    ContractViolation(
+                        "invalid_dependency_reference",
+                        json_path,
+                        "Dependency references must be exact strings.",
+                        "blocking",
+                    )
+                )
+            elif reference and reference not in known_dependencies:
+                violations.append(
+                    ContractViolation(
+                        "invalid_dependency_reference",
+                        json_path,
+                        f"Unknown dependency_id reference: {reference}",
+                    )
+                )
 
-    executable_ids = {
-        str(case.get("test_case_id") or "")
-        for collection, _index, case in cases
+    executable_case_tokens = {
+        semantic_case_tokens[(collection, index)]
+        for collection, index, _case in cases
         if collection == "test_cases"
+        and (collection, index) in semantic_case_tokens
     }
-    for unresolved_index, unresolved in enumerate(data.get("unresolved_items") or []):
-        if not isinstance(unresolved, Mapping) or not _blocking_unresolved_item(unresolved):
+    unresolved_items = _test_spec_list_items(data.get("unresolved_items"))
+    if unresolved_items is None:
+        unresolved_items = []
+    for unresolved_index, unresolved in enumerate(unresolved_items):
+        if not isinstance(unresolved, Mapping):
             continue
-        for reference_index, reference in enumerate(
-            unresolved.get("related_test_case_ids") or []
-        ):
-            if str(reference) in executable_ids:
+        unresolved_path = f"$.data.unresolved_items[{unresolved_index}]"
+        item_kind_path = f"{unresolved_path}.item_kind"
+        if "item_kind" not in unresolved:
+            violations.append(
+                ContractViolation(
+                    "required_property",
+                    item_kind_path,
+                    "TestSpec unresolved item requires item_kind.",
+                    "blocking",
+                )
+            )
+        else:
+            try:
+                semantic_review_subject_token(unresolved["item_kind"])
+            except (TypeError, ValueError, UnicodeError) as error:
+                violations.append(
+                    ContractViolation(
+                        "invalid_unresolved_item_kind",
+                        item_kind_path,
+                        f"Invalid unresolved item_kind: {error}",
+                        "blocking",
+                    )
+                )
+
+        references_path = f"{unresolved_path}.related_test_case_ids"
+        if "related_test_case_ids" not in unresolved:
+            references: list[Any] = []
+        else:
+            raw_references = unresolved["related_test_case_ids"]
+            if type(raw_references) is not list:
+                violations.append(
+                    ContractViolation(
+                        "invalid_unresolved_case_references",
+                        references_path,
+                        "related_test_case_ids must be an exact list when present.",
+                        "blocking",
+                    )
+                )
+                references = []
+            else:
+                references = raw_references
+
+        severity = unresolved.get("severity")
+        if severity is not None:
+            _test_spec_exact_string(
+                severity,
+                f"{unresolved_path}.severity",
+                "unresolved severity",
+                "invalid_unresolved_severity",
+                violations,
+            )
+        is_blocking = _blocking_unresolved_item(unresolved)
+        for reference_index, reference in enumerate(references):
+            reference_path = (
+                f"{references_path}[{reference_index}]"
+            )
+            try:
+                reference_token = semantic_case_id_token(reference)
+            except (TypeError, ValueError, UnicodeError) as error:
+                violations.append(
+                    ContractViolation(
+                        "invalid_case_reference",
+                        reference_path,
+                        f"Invalid related test_case_id: {error}",
+                        "blocking",
+                    )
+                )
+                continue
+            if is_blocking and reference_token in executable_case_tokens:
                 violations.append(
                     ContractViolation(
                         "blocking_unresolved_executable",
-                        f"$.data.unresolved_items[{unresolved_index}].related_test_case_ids[{reference_index}]",
+                        reference_path,
                         f"Blocking unresolved item references executable test case: {reference}",
                         "blocking",
                     )
                 )
 
     for collection, case_index, case in cases:
-        target_function = case.get("target_function")
-        if target_function is not None and str(target_function) != function_name:
-            violations.append(
-                ContractViolation(
-                    "target_function_mismatch",
-                    f"$.data.{collection}[{case_index}].target_function",
-                    "Case target_function must match the top-level function name.",
-                    "blocking",
-                )
+        violations.extend(
+            _test_spec_case_scalar_violations(
+                case,
+                collection,
+                case_index,
             )
-        links = case.get("coverage_links")
-        if isinstance(links, list):
+        )
+        target_function = case.get("target_function")
+        target_path = f"$.data.{collection}[{case_index}].target_function"
+        if target_function is not None:
+            exact_target_function = _test_spec_exact_string(
+                target_function,
+                target_path,
+                "target_function",
+                "invalid_target_function",
+                violations,
+            )
+            if (
+                exact_target_function is not None
+                and function_name is not None
+                and exact_target_function != function_name
+            ):
+                violations.append(
+                    ContractViolation(
+                        "target_function_mismatch",
+                        target_path,
+                        "Case target_function must match the top-level function name.",
+                        "blocking",
+                    )
+                )
+        links = _test_spec_list_items(case.get("coverage_links"))
+        if links is not None:
             for link_index, link in enumerate(links):
-                if not isinstance(link, Mapping) or not link.get("coverage_id"):
+                if not isinstance(link, Mapping):
                     continue
-                coverage_id = str(link["coverage_id"])
-                if coverage_id not in coverage_ids:
+                coverage_path = (
+                    f"$.data.{collection}[{case_index}]"
+                    f".coverage_links[{link_index}].coverage_id"
+                )
+                coverage_id = link.get("coverage_id")
+                exact_coverage_id = _test_spec_exact_string(
+                    coverage_id,
+                    coverage_path,
+                    "coverage_id",
+                    "invalid_coverage_id",
+                    violations,
+                )
+                if (
+                    exact_coverage_id is not None
+                    and exact_coverage_id not in coverage_ids
+                ):
                     violations.append(
                         ContractViolation(
                             "invalid_coverage_reference",
-                            f"$.data.{collection}[{case_index}].coverage_links[{link_index}].coverage_id",
-                            f"Unknown coverage_id reference: {coverage_id}",
+                            coverage_path,
+                            f"Unknown coverage_id reference: {exact_coverage_id}",
                         )
                     )
         if collection == "test_cases":
             violations.extend(_test_spec_executable_violations(case, case_index))
+    return violations
+
+
+def _test_spec_case_scalar_violations(
+    case: Mapping[str, Any],
+    collection_name: str,
+    case_index: int,
+) -> list[ContractViolation]:
+    violations: list[ContractViolation] = []
+    for item_collection, value_field in (
+        ("input_assignments", "value_expression"),
+        ("state_setups", "value_expression"),
+        ("stub_setups", "value_expression"),
+        ("expected_observations", "expected_expression"),
+    ):
+        items = _test_spec_list_items(case.get(item_collection))
+        if items is None:
+            continue
+        for item_index, item in enumerate(items):
+            if not isinstance(item, Mapping):
+                continue
+            item_path = (
+                f"$.data.{collection_name}[{case_index}]"
+                f".{item_collection}[{item_index}]"
+            )
+            if item_collection == "stub_setups" and "setup_kind" in item:
+                _test_spec_exact_string(
+                    item["setup_kind"],
+                    f"{item_path}.setup_kind",
+                    "stub setup_kind",
+                    "invalid_setup_kind",
+                    violations,
+                )
+            value = item.get(value_field)
+            if (
+                collection_name != "test_cases"
+                and value is not None
+                and isinstance(value, str)
+                and type(value) is not str
+            ):
+                violations.append(
+                    ContractViolation(
+                        "unresolved_executable_value",
+                        f"{item_path}.{value_field}",
+                        "Candidate values and oracles must be exact strings or null.",
+                        "blocking",
+                    )
+                )
     return violations
 
 
@@ -1356,8 +1817,10 @@ def _test_spec_authority_violations(
     violations: list[ContractViolation] = []
     if isinstance(value, Mapping):
         for key, child in value.items():
+            if type(key) is not str:
+                continue
             child_path = f"{path}.{key}"
-            if str(key).lower() in _TEST_SPEC_AUTHORITY_FIELDS:
+            if key.lower() in _TEST_SPEC_AUTHORITY_FIELDS:
                 violations.append(
                     ContractViolation(
                         "embedded_review_authority",
@@ -1366,8 +1829,11 @@ def _test_spec_authority_violations(
                     )
                 )
             violations.extend(_test_spec_authority_violations(child, child_path))
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
+    else:
+        items = _test_spec_list_items(value)
+        if items is None:
+            return violations
+        for index, child in enumerate(items):
             violations.extend(
                 _test_spec_authority_violations(child, f"{path}[{index}]")
             )
@@ -1377,6 +1843,8 @@ def _test_spec_authority_violations(
 def _test_spec_reference_values(value: Any, path: str = "$.data"):
     if isinstance(value, Mapping):
         for key, child in value.items():
+            if type(key) is not str:
+                continue
             child_path = f"{path}.{key}"
             if key in {
                 "review_item_id",
@@ -1385,21 +1853,30 @@ def _test_spec_reference_values(value: Any, path: str = "$.data"):
                 "dependency_ids",
                 "related_dependency_id",
             }:
-                values = child if isinstance(child, list) else [child]
+                list_values = _test_spec_list_items(child)
+                values = list_values if list_values is not None else [child]
                 for index, item in enumerate(values):
-                    if item is not None and str(item):
-                        suffix = f"[{index}]" if isinstance(child, list) else ""
-                        yield child_path + suffix, key, str(item)
+                    if item is not None:
+                        suffix = f"[{index}]" if list_values is not None else ""
+                        yield child_path + suffix, key, item
             yield from _test_spec_reference_values(child, child_path)
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
+    else:
+        items = _test_spec_list_items(value)
+        if items is None:
+            return
+        for index, child in enumerate(items):
             yield from _test_spec_reference_values(child, f"{path}[{index}]")
 
 
 def _blocking_unresolved_item(item: Mapping[str, Any]) -> bool:
     if item.get("blocking") is False:
         return False
-    severity = str(item.get("severity") or "blocking").lower()
+    severity = item.get("severity")
+    if severity is None:
+        severity = "blocking"
+    if type(severity) is not str:
+        return True
+    severity = severity.lower()
     return severity not in {"info", "warning", "non_blocking"}
 
 
@@ -1408,15 +1885,16 @@ def _test_spec_executable_violations(
     case_index: int,
 ) -> list[ContractViolation]:
     violations: list[ContractViolation] = []
-    observations = case.get("expected_observations")
+    observations = _test_spec_list_items(case.get("expected_observations"))
+    if observations is None:
+        observations = []
     resolved_oracles = 0
-    if isinstance(observations, list):
-        for observation in observations:
-            if not isinstance(observation, Mapping):
-                continue
-            value = observation.get("expected_expression")
-            if not _unresolved_test_spec_value(value):
-                resolved_oracles += 1
+    for observation in observations:
+        if not isinstance(observation, Mapping):
+            continue
+        value = observation.get("expected_expression")
+        if not _unresolved_test_spec_value(value):
+            resolved_oracles += 1
     if resolved_oracles == 0:
         violations.append(
             ContractViolation(
@@ -1432,14 +1910,19 @@ def _test_spec_executable_violations(
         ("stub_setups", "value_expression"),
         ("expected_observations", "expected_expression"),
     ):
-        for item_index, item in enumerate(case.get(collection) or []):
+        items = _test_spec_list_items(case.get(collection))
+        if items is None:
+            continue
+        for item_index, item in enumerate(items):
             if not isinstance(item, Mapping):
                 continue
-            if collection == "stub_setups" and item.get("setup_kind") in {
-                "call_count_observation",
-                "argument_capture",
-            }:
-                continue
+            if collection == "stub_setups":
+                setup_kind = item.get("setup_kind")
+                if type(setup_kind) is str and setup_kind in {
+                    "call_count_observation",
+                    "argument_capture",
+                }:
+                    continue
             if _unresolved_test_spec_value(item.get(field_name)):
                 violations.append(
                     ContractViolation(
@@ -1453,7 +1936,9 @@ def _test_spec_executable_violations(
 
 
 def _unresolved_test_spec_value(value: Any) -> bool:
-    normalized = str(value or "").strip().upper()
+    if type(value) is not str:
+        return True
+    normalized = value.strip().upper()
     return not normalized or normalized.startswith(_TEST_SPEC_PLACEHOLDER_PREFIXES)
 
 

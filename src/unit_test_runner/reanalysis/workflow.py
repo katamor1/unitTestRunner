@@ -3,16 +3,22 @@ from __future__ import annotations
 import json
 import hashlib
 import copy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from unit_test_runner.contracts import ContractMode
+from unit_test_runner.contracts import (
+    ArtifactKind,
+    ContractMode,
+    normalize_consumer_data,
+)
 from unit_test_runner.test_spec import (
     artifact_reference,
     build_current_artifact_context,
     create_test_spec_from_design,
     export_test_spec_snapshot_views,
     load_test_spec,
+    load_test_spec_snapshot,
     load_legacy_test_case_design_view,
     save_test_spec_snapshot,
     TestSpecContractError,
@@ -38,6 +44,28 @@ from .regression_selector import select_regression_tests
 from .signature_diff import compare_signatures
 from .snapshot_builder import build_analysis_snapshot
 from .test_case_reconciler import PROTECTED_FIELDS, reconcile_test_cases
+
+
+_CORE_CONSUMER_KINDS = {
+    "source_digest": ArtifactKind.SOURCE_DIGEST,
+    "function_location": ArtifactKind.FUNCTION_LOCATION,
+    "function_signature": ArtifactKind.FUNCTION_SIGNATURE,
+}
+
+
+@dataclass(frozen=True)
+class _ArtifactGeneration:
+    raw_bytes: bytes
+    decoded: dict[str, Any]
+    schema_version: str | None
+    sha256: str
+
+
+class _ArtifactPaths(dict[str, Path]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.generations: dict[str, _ArtifactGeneration] = {}
+        self.test_specs: dict[str, Any] = {}
 
 
 def reanalyze_function_workflow(
@@ -68,9 +96,9 @@ def reanalyze_function_workflow(
             / "function_signature.json",
         )
     else:
-        previous_spec = load_test_spec(
+        previous_spec = _previous_test_spec(
             previous_test_case_design_path,
-            mode=ContractMode.COMPATIBLE,
+            dossier_artifact_paths,
         )
         previous_design = test_spec_consumer_payload(previous_spec)
     current_payloads = build_current_reanalysis(workspace_root, dsw_path, source, function_name, configuration, out_dir, project_name)
@@ -82,10 +110,24 @@ def reanalyze_function_workflow(
         revision=(previous_spec.revision if previous_spec is not None else 1),
     )
     current_design = test_spec_consumer_payload(current_spec)
-    previous_snapshot, previous_warnings, previous_payloads = build_analysis_snapshot("previous", out_dir, function_name)
+    dossier_snapshot_kinds = set(dossier_artifact_paths)
+    if "build_context" in dossier_payloads:
+        dossier_snapshot_kinds.add("build_context")
+    previous_snapshot, previous_warnings, previous_payloads = build_analysis_snapshot(
+        "previous",
+        out_dir,
+        function_name,
+        exclude_kinds=dossier_snapshot_kinds,
+    )
     if dossier_payloads:
         previous_payloads.update(dossier_payloads)
-        previous_snapshot = _snapshot_from_previous_dossier(function_name, previous_dossier_payload, dossier_payloads, dossier_artifact_paths)
+        previous_snapshot = _snapshot_from_previous_dossier(
+            function_name,
+            previous_dossier_payload,
+            dossier_payloads,
+            dossier_artifact_paths,
+            fallback_snapshot=previous_snapshot,
+        )
     current_snapshot, current_warnings, current_snapshot_payloads = build_analysis_snapshot(
         "current",
         out_dir,
@@ -601,10 +643,40 @@ def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _read_artifact_generation(path: Path) -> _ArtifactGeneration:
+    raw_bytes = path.read_bytes()
+    decoded = json.loads(raw_bytes.decode("utf-8"))
+    if not isinstance(decoded, dict):
+        raise ValueError(f"Artifact root must be an object: {path}")
+    version = decoded.get("schema_version")
+    return _ArtifactGeneration(
+        raw_bytes=raw_bytes,
+        decoded=decoded,
+        schema_version=version if isinstance(version, str) else None,
+        sha256=hashlib.sha256(raw_bytes).hexdigest(),
+    )
+
+
+def _previous_test_spec(
+    path: Path,
+    artifact_paths: dict[str, Path],
+):
+    if (
+        isinstance(artifact_paths, _ArtifactPaths)
+        and artifact_paths.get("test_spec") == path
+        and "test_spec" in artifact_paths.test_specs
+    ):
+        return artifact_paths.test_specs["test_spec"]
+    return load_test_spec_snapshot(
+        path,
+        mode=ContractMode.COMPATIBLE,
+    ).spec
+
+
 def _payloads_from_previous_dossier(dossier_path: Path) -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[str, Path]]:
     dossier = _read_json(dossier_path)
     payloads: dict[str, dict[str, Any]] = {}
-    paths: dict[str, Path] = {}
+    paths = _ArtifactPaths()
     for key in (
         "source_digest",
         "function_location",
@@ -619,12 +691,34 @@ def _payloads_from_previous_dossier(dossier_path: Path) -> tuple[dict[str, Any],
         if path is None:
             continue
         paths[key] = path
-        raw_payload = _read_json(path)
         if key == "test_spec":
-            spec = load_test_spec(path, mode=ContractMode.COMPATIBLE)
+            snapshot = load_test_spec_snapshot(
+                path,
+                mode=ContractMode.COMPATIBLE,
+            )
+            decoded = json.loads(snapshot.raw_bytes.decode("utf-8-sig"))
+            version = decoded.get("schema_version")
+            generation = _ArtifactGeneration(
+                raw_bytes=snapshot.raw_bytes,
+                decoded=decoded,
+                schema_version=version if isinstance(version, str) else None,
+                sha256=snapshot.sha256,
+            )
+            paths.generations[key] = generation
+            spec = snapshot.spec
+            paths.test_specs[key] = spec
             payloads["test_case_design"] = test_spec_consumer_payload(spec)
+            continue
+        generation = _read_artifact_generation(path)
+        paths.generations[key] = generation
+        if key in _CORE_CONSUMER_KINDS:
+            payloads[key] = normalize_consumer_data(
+                generation.decoded,
+                expected_kind=_CORE_CONSUMER_KINDS[key],
+                allow_legacy_v01=True,
+            )
         else:
-            payloads[key] = raw_payload
+            payloads[key] = generation.decoded
     if "build_context" in dossier:
         payloads["build_context"] = {"schema_version": "0.1", "build_context": dossier["build_context"]}
     return dossier, payloads, paths
@@ -672,40 +766,58 @@ def _snapshot_from_previous_dossier(
     dossier: dict[str, Any],
     payloads: dict[str, dict[str, Any]],
     artifact_paths: dict[str, Path],
+    *,
+    fallback_snapshot: AnalysisSnapshot | None = None,
 ) -> AnalysisSnapshot:
-    artifacts = {
+    generations = (
+        artifact_paths.generations
+        if isinstance(artifact_paths, _ArtifactPaths)
+        else {
+            key: _read_artifact_generation(path)
+            for key, path in artifact_paths.items()
+        }
+    )
+    artifacts = dict(fallback_snapshot.artifacts) if fallback_snapshot is not None else {}
+    artifacts.update({
         key: SnapshotArtifact(
             artifact_kind=key,
             path=path,
-            sha256=_sha256_file(path),
-            schema_version=payloads.get(key, {}).get("schema_version"),
-            exists=path.exists(),
+            sha256=generations[key].sha256,
+            schema_version=generations[key].schema_version,
+            exists=True,
         )
         for key, path in artifact_paths.items()
-    }
+    })
     source_payload = payloads.get("source_digest", {}).get("source", {})
-    source_path = Path(source_payload["path"]) if isinstance(source_payload.get("path"), str) else None
-    source_sha256 = source_payload.get("sha256") if isinstance(source_payload.get("sha256"), str) else None
+    source_path = (
+        Path(source_payload["path"])
+        if isinstance(source_payload.get("path"), str)
+        else fallback_snapshot.source_path if fallback_snapshot is not None else None
+    )
+    source_sha256 = (
+        source_payload.get("sha256")
+        if isinstance(source_payload.get("sha256"), str)
+        else fallback_snapshot.source_sha256 if fallback_snapshot is not None else None
+    )
+    build_context_hash = (
+        _payload_hash(dossier["build_context"])
+        if "build_context" in dossier
+        else fallback_snapshot.build_context_hash if fallback_snapshot is not None else None
+    )
+    created_at = (
+        dossier.get("created_at")
+        if isinstance(dossier.get("created_at"), str)
+        else fallback_snapshot.created_at if fallback_snapshot is not None else None
+    )
     return AnalysisSnapshot(
         snapshot_id="previous",
         function_name=function_name,
         source_path=source_path,
         source_sha256=source_sha256,
-        build_context_hash=_payload_hash(dossier.get("build_context")),
-        created_at=dossier.get("created_at") if isinstance(dossier.get("created_at"), str) else None,
+        build_context_hash=build_context_hash,
+        created_at=created_at,
         artifacts=artifacts,
     )
-
-
-def _sha256_file(path: Path) -> str | None:
-    try:
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
-    except OSError:
-        return None
 
 
 def _payload_hash(payload: Any) -> str | None:

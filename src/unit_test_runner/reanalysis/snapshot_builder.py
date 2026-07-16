@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Collection
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ..contracts import ArtifactKind, ConsumerContractError, normalize_consumer_data
 from .reanalysis_models import AnalysisSnapshot, ReanalysisWarning, SnapshotArtifact
 
 
@@ -21,34 +23,67 @@ STANDARD_ARTIFACTS = {
     "build_context": "build_context.json",
 }
 
+CORE_CONSUMER_KINDS = {
+    "source_digest": ArtifactKind.SOURCE_DIGEST,
+    "function_location": ArtifactKind.FUNCTION_LOCATION,
+    "function_signature": ArtifactKind.FUNCTION_SIGNATURE,
+}
+
 
 def build_analysis_snapshot(
     snapshot_id: str,
     workspace: Path | str,
     function_name: str,
     report_subdir: Path | str = Path("reports"),
+    *,
+    exclude_kinds: Collection[str] = (),
 ) -> tuple[AnalysisSnapshot, list[ReanalysisWarning], dict[str, dict[str, Any]]]:
     workspace = Path(workspace).resolve()
     report_root = workspace / report_subdir
     warnings: list[ReanalysisWarning] = []
     payloads: dict[str, dict[str, Any]] = {}
     artifacts: dict[str, SnapshotArtifact] = {}
+    excluded = set(exclude_kinds)
     for kind, filename in STANDARD_ARTIFACTS.items():
+        if kind in excluded:
+            continue
         path = report_root / filename
         relative = _relative_or_absolute(path, workspace)
         exists = path.exists()
         schema_version = None
-        sha256 = _sha256(path) if exists else None
+        sha256 = None
         if exists:
             try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
+                raw_bytes = path.read_bytes()
+                sha256 = hashlib.sha256(raw_bytes).hexdigest()
+                decoded = json.loads(raw_bytes.decode("utf-8"))
+                if not isinstance(decoded, dict):
+                    raise ConsumerContractError("Artifact root must be an object.")
+                schema_version = decoded.get("schema_version")
+                expected_kind = CORE_CONSUMER_KINDS.get(kind)
+                payload = (
+                    normalize_consumer_data(
+                        decoded,
+                        expected_kind=expected_kind,
+                        allow_legacy_v01=True,
+                    )
+                    if expected_kind is not None
+                    else decoded
+                )
                 payloads[kind] = payload
-                schema_version = payload.get("schema_version")
-            except (OSError, json.JSONDecodeError) as exc:
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
                 warnings.append(
                     ReanalysisWarning(
                         "artifact_parse_failed",
                         f"Failed to parse artifact {relative.as_posix()}: {exc}",
+                        related_artifact=kind,
+                    )
+                )
+            except ConsumerContractError as exc:
+                warnings.append(
+                    ReanalysisWarning(
+                        "artifact_contract_invalid",
+                        f"Invalid artifact {relative.as_posix()}: {exc}",
                         related_artifact=kind,
                     )
                 )
@@ -75,17 +110,6 @@ def build_analysis_snapshot(
         artifacts=artifacts,
     )
     return snapshot, warnings, payloads
-
-
-def _sha256(path: Path) -> str | None:
-    try:
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
-    except OSError:
-        return None
 
 
 def _payload_hash(payload: dict[str, Any] | None) -> str | None:

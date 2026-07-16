@@ -40,7 +40,14 @@ def finalize_function_dossier(
     source_path = source_path or _existing_source_path(analysis_dossier)
     summaries = build_summaries(payloads)
     traceability = build_traceability(payloads)
-    review_items, unresolved_items = build_review_items(payloads)
+    review_items, unresolved_items = build_review_items(
+        payloads,
+        artifacts=artifacts,
+    )
+    if not review_items:
+        reason = "No eligible decisionable review subject is available."
+        if reason not in blocked_reasons:
+            blocked_reasons.append(reason)
     readiness = assess_readiness(artifacts, blocked_reasons, unresolved_items)
     if mvp_level != "auto" and not readiness.blocked:
         readiness.mvp_level = mvp_level
