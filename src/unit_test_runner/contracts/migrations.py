@@ -7,6 +7,7 @@ from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, Mapping
 
 from unit_test_runner import __version__
+from unit_test_runner.review_ids import subject_fingerprint
 
 from .kinds import ArtifactKind
 from .path_policy import (
@@ -61,6 +62,13 @@ def migrate_payload(
             return _migrate_test_spec_v1_0(source, target_version)
         return _migrate_test_spec_v0_1(source, target_version)
 
+    if source_version == "1.0.0" and kind in {
+        ArtifactKind.REVIEW_DECISIONS,
+        ArtifactKind.FUNCTION_DOSSIER,
+        ArtifactKind.DOSSIER_MANIFEST,
+    }:
+        return _migrate_task6_v1_0(kind, source, target_version)
+
     subject = _legacy_subject(source)
     if kind is ArtifactKind.TEST_SPEC:
         data = _migrate_test_spec_data(source, subject)
@@ -77,10 +85,24 @@ def migrate_payload(
     else:
         data = _migrate_generic_data(source)
 
+    if kind is ArtifactKind.FUNCTION_DOSSIER:
+        _upgrade_function_dossier_data(data)
+    elif kind is ArtifactKind.DOSSIER_MANIFEST:
+        _upgrade_dossier_manifest_data(data)
+    elif kind is ArtifactKind.REVIEW_DECISIONS:
+        _upgrade_review_decisions_data(data, subject)
+
     migration_metadata = {
         "source_version": source_version,
         "source_artifact_kind": source.get("artifact_kind"),
     }
+    if kind in {
+        ArtifactKind.REVIEW_DECISIONS,
+        ArtifactKind.FUNCTION_DOSSIER,
+        ArtifactKind.DOSSIER_MANIFEST,
+    }:
+        migration_metadata["display_only"] = True
+        migration_metadata["in_memory_only"] = True
     path_migrations = _migrate_contract_paths(kind, source, data, subject)
     if path_migrations:
         migration_metadata["path_migrations"] = path_migrations
@@ -95,6 +117,147 @@ def migrate_payload(
         "data": data,
         "extensions": {"migration": migration_metadata},
     }
+
+
+def _migrate_task6_v1_0(
+    kind: ArtifactKind,
+    payload: Mapping[str, Any],
+    target_version: str,
+) -> dict[str, Any]:
+    migrated = copy.deepcopy(dict(payload))
+    data = migrated.get("data")
+    if not isinstance(data, Mapping):
+        raise ValueError(f"{kind.value} v1.0 data must be an object.")
+    normalized_data = copy.deepcopy(dict(data))
+    subject = migrated.get("subject")
+    subject_info = subject if isinstance(subject, Mapping) else {}
+    legacy_done: list[dict[str, Any]] = []
+    if kind is ArtifactKind.REVIEW_DECISIONS:
+        _upgrade_review_decisions_data(normalized_data, subject_info)
+    elif kind is ArtifactKind.FUNCTION_DOSSIER:
+        legacy_done = _upgrade_function_dossier_data(normalized_data)
+    elif kind is ArtifactKind.DOSSIER_MANIFEST:
+        _upgrade_dossier_manifest_data(normalized_data)
+    migrated["schema_version"] = target_version
+    migrated["data"] = normalized_data
+    migrated["extensions"] = _task6_migration_extensions(
+        migrated.get("extensions"),
+        source_version="1.0.0",
+        source_artifact_kind=kind.value,
+        legacy_done=legacy_done,
+    )
+    return migrated
+
+
+def _task6_migration_extensions(
+    extensions: Any,
+    *,
+    source_version: str,
+    source_artifact_kind: Any,
+    legacy_done: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if extensions is None:
+        normalized: dict[str, Any] = {}
+    elif isinstance(extensions, Mapping):
+        normalized = copy.deepcopy(dict(extensions))
+    else:
+        raise ValueError("Task 6 migration requires extensions to be an object.")
+    if "migration" in normalized:
+        raise ValueError(
+            "Task 6 migration cannot overwrite existing extensions.migration metadata."
+        )
+    migration: dict[str, Any] = {
+        "source_version": source_version,
+        "source_artifact_kind": source_artifact_kind,
+        "in_memory_only": True,
+        "display_only": True,
+    }
+    if legacy_done:
+        migration["legacy_review_done"] = legacy_done
+    normalized["migration"] = migration
+    return normalized
+
+
+def _upgrade_review_decisions_data(
+    data: dict[str, Any],
+    subject: Mapping[str, Any],
+) -> None:
+    decisions = data.get("decisions")
+    if not isinstance(decisions, list):
+        return
+    upgraded: list[Any] = []
+    for decision in decisions:
+        if not isinstance(decision, Mapping):
+            upgraded.append(copy.deepcopy(decision))
+            continue
+        normalized = copy.deepcopy(dict(decision))
+        references = normalized.get("subject_artifacts")
+        upgraded_references: list[Any] = []
+        if isinstance(references, list):
+            for reference in references:
+                if not isinstance(reference, Mapping):
+                    upgraded_references.append(copy.deepcopy(reference))
+                    continue
+                upgraded_reference = copy.deepcopy(dict(reference))
+                upgraded_reference.setdefault("revision", None)
+                upgraded_reference.setdefault("source_path", subject.get("source_path"))
+                upgraded_reference.setdefault(
+                    "source_sha256", subject.get("source_sha256")
+                )
+                upgraded_reference.setdefault("function_id", subject.get("function_id"))
+                upgraded_reference.setdefault("semantic_subject_key", None)
+                upgraded_references.append(upgraded_reference)
+        normalized["subject_artifacts"] = upgraded_references
+        normalized["subject_fingerprint"] = subject_fingerprint(upgraded_references)
+        upgraded.append(normalized)
+    data["decisions"] = upgraded
+
+
+
+def _upgrade_function_dossier_data(data: dict[str, Any]) -> list[dict[str, Any]]:
+    legacy_done: list[dict[str, Any]] = []
+    review_items = data.get("review_items")
+    if isinstance(review_items, list):
+        upgraded_items: list[Any] = []
+        for item in review_items:
+            if not isinstance(item, Mapping):
+                upgraded_items.append(copy.deepcopy(item))
+                continue
+            normalized = copy.deepcopy(dict(item))
+            if "done" in normalized:
+                legacy_done.append(
+                    {
+                        "review_id": normalized.get("review_id"),
+                        "done": bool(normalized.pop("done")),
+                    }
+                )
+            related_cases = normalized.get("related_test_cases")
+            first_case = (
+                related_cases[0]
+                if isinstance(related_cases, list) and related_cases
+                else None
+            )
+            normalized.setdefault("case_id", first_case)
+            normalized.setdefault("semantic_subject_key", None)
+            normalized.setdefault("subject_artifacts", [])
+            upgraded_items.append(normalized)
+        data["review_items"] = upgraded_items
+    readiness = data.get("readiness")
+    if isinstance(readiness, Mapping):
+        normalized_readiness = copy.deepcopy(dict(readiness))
+        normalized_readiness.setdefault("review_complete", False)
+        normalized_readiness.setdefault("test_green", False)
+        data["readiness"] = normalized_readiness
+    return legacy_done
+
+
+def _upgrade_dossier_manifest_data(data: dict[str, Any]) -> None:
+    readiness = data.get("readiness")
+    if isinstance(readiness, Mapping):
+        normalized = copy.deepcopy(dict(readiness))
+        normalized.setdefault("review_complete", False)
+        normalized.setdefault("test_green", False)
+        data["readiness"] = normalized
 
 
 def _legacy_subject(payload: Mapping[str, Any]) -> dict[str, str]:

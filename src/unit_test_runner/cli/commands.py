@@ -49,6 +49,17 @@ from unit_test_runner.dossier import (
     generate_test_design_from_reports_result,
     prepare_review_from_dossier,
 )
+from unit_test_runner.dossier.review_assessment import (
+    assess_review_decisions,
+    discover_review_snapshot,
+)
+from unit_test_runner.dossier.review_decision_models import ReviewResolution
+from unit_test_runner.dossier.review_decision_repository import (
+    InvalidReviewDecisionLedgerError,
+    ReviewDecisionRepository,
+    ReviewDecisionWriteStatus,
+)
+from unit_test_runner.execution.test_result_writer import current_producer_commit
 from unit_test_runner.reports.dsw_markdown import render_dsw_discovery_markdown
 from unit_test_runner.reports.source_membership_markdown import render_source_membership_markdown
 from unit_test_runner.vc6 import discover_workspace, map_source_to_projects
@@ -115,6 +126,8 @@ def dispatch(args: argparse.Namespace) -> CLIResult:
         "generate-test-design": handle_generate_test_design,
         "get-test-spec": handle_get_test_spec,
         "update-test-spec": handle_update_test_spec,
+        "get-review-status": handle_get_review_status,
+        "record-review-decision": handle_record_review_decision,
         "reconcile-test-cases": handle_reconcile_test_cases,
         "select-regression-tests": handle_select_regression_tests,
         "suite-register": handle_suite_register,
@@ -1133,6 +1146,161 @@ def handle_update_test_spec(args: argparse.Namespace) -> CLIResult:
             else []
         ),
     )
+
+
+def handle_get_review_status(args: argparse.Namespace) -> CLIResult:
+    workspace = _existing_dir(args.workspace, "workspace", args.command)
+    try:
+        snapshot = discover_review_snapshot(workspace)
+        repository = _review_decision_repository(workspace, snapshot.items)
+        decision_set = (
+            repository.load().decision_set
+            if repository.path.exists()
+            else None
+        )
+        assessment = assess_review_decisions(
+            snapshot.items,
+            decision_set,
+            workspace=workspace,
+        )
+        readiness = _review_readiness(workspace, assessment.review_complete)
+    except (
+        InvalidReviewDecisionLedgerError,
+        OSError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as error:
+        raise CLIError(str(error), EXIT_INPUT_ERROR, args.command) from error
+
+    decisions_by_id = {
+        decision.review_id: decision
+        for decision in (decision_set.decisions if decision_set is not None else ())
+    }
+    assessments_by_id = {item.review_id: item for item in assessment.items}
+    items: list[dict[str, Any]] = []
+    for current_item in snapshot.items.items:
+        item_assessment = assessments_by_id[current_item.review_id]
+        decision = decisions_by_id.get(current_item.review_id)
+        items.append(
+            {
+                "review_id": current_item.review_id,
+                "category": current_item.category,
+                "function_id": current_item.function_id,
+                "case_id": current_item.case_id,
+                "semantic_subject_key": current_item.semantic_subject_key,
+                "subject_fingerprint": current_item.subject_fingerprint,
+                "subject_artifacts": [
+                    subject.to_dict()
+                    for subject in current_item.subject_artifacts
+                ],
+                "status": item_assessment.status.value,
+                "resolution": (
+                    decision.resolution.value if decision is not None else None
+                ),
+                "reviewer": decision.reviewer if decision is not None else "",
+                "rationale": decision.rationale if decision is not None else "",
+                "decided_at": decision.decided_at if decision is not None else None,
+                "current": not item_assessment.reasons,
+                "blocked_reasons": list(item_assessment.reasons),
+            }
+        )
+
+    return CLIResult(
+        status="review_status_loaded",
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Current review items, exact guards, decisions, and readiness loaded.",
+        data={
+            "workspace": str(workspace),
+            "ledger_path": "reports/review_decisions.json",
+            "ledger_revision": decision_set.revision if decision_set is not None else 0,
+            "function_id": snapshot.function_id,
+            "source_path": snapshot.source_path,
+            "source_sha256": snapshot.source_sha256,
+            "items": items,
+            "orphaned_decision_ids": list(assessment.orphan_review_ids),
+            "review_complete": assessment.review_complete,
+            "readiness": readiness,
+        },
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
+    )
+
+
+def handle_record_review_decision(args: argparse.Namespace) -> CLIResult:
+    workspace = _existing_dir(args.workspace, "workspace", args.command)
+    try:
+        snapshot = discover_review_snapshot(workspace)
+        repository = _review_decision_repository(workspace, snapshot.items)
+        result = repository.record(
+            review_id=args.review_id,
+            resolution=ReviewResolution(args.resolution),
+            reviewer=args.reviewer,
+            rationale=args.rationale,
+            decided_at=args.decided_at,
+            expected_revision=args.expected_revision,
+            expected_subject_fingerprint=args.expected_subject_fingerprint,
+        )
+    except (
+        InvalidReviewDecisionLedgerError,
+        OSError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as error:
+        raise CLIError(str(error), EXIT_INPUT_ERROR, args.command) from error
+
+    if result.status is not ReviewDecisionWriteStatus.WRITTEN:
+        raise CLIError(
+            result.message or f"Review decision was not written: {result.status.value}",
+            EXIT_INPUT_ERROR,
+            args.command,
+        )
+    if result.artifact is None or result.snapshot is None:
+        raise CLIError(
+            "Review decision write completed without an exact artifact snapshot.",
+            EXIT_INTERNAL_ERROR,
+            args.command,
+        )
+
+    return CLIResult(
+        status="review_decision_recorded",
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Review decision recorded against the current exact subjects.",
+        data={
+            "workspace": str(workspace),
+            "ledger_path": result.artifact.path,
+            "ledger_revision": result.current_revision,
+            "review_id": args.review_id,
+            "subject_fingerprint": args.expected_subject_fingerprint,
+        },
+        artifacts=[result.artifact],
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
+    )
+
+
+def _review_decision_repository(workspace: Path, current_items) -> ReviewDecisionRepository:
+    return ReviewDecisionRepository(
+        workspace,
+        current_items=current_items,
+        producer_version=__version__,
+        producer_commit=current_producer_commit(),
+    )
+
+
+def _review_readiness(workspace: Path, review_complete: bool) -> dict[str, bool]:
+    payload = _read_json(workspace / "reports" / "function_dossier.json")
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise ValueError("Current function dossier is missing its data object")
+    serialized = data.get("readiness")
+    if not isinstance(serialized, dict):
+        raise ValueError("Current function dossier is missing semantic readiness")
+    return {
+        "ready_for_review": bool(serialized.get("ready_for_review")),
+        "review_complete": review_complete,
+        "evidence_ready": bool(serialized.get("evidence_ready")),
+        "test_green": bool(serialized.get("test_green")),
+    }
 
 
 def handle_reconcile_test_cases(args: argparse.Namespace) -> CLIResult:

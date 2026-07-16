@@ -18,6 +18,7 @@ from .migrations import migrate_payload
 from .models import ContractViolation, LoadedArtifact
 from .path_policy import iter_contract_path_values, path_policy_for
 from .registry import ContractDefinition, get_contract
+from unit_test_runner.review_ids import subject_fingerprint
 
 
 def validate_payload(
@@ -494,6 +495,8 @@ def _duplicate_id_violations(value: Any, path: str = "$") -> list[ContractViolat
         "group_id",
         "condition_id",
         "branch_id",
+        "review_id",
+        "review_item_id",
         "case_id",
         "switch_id",
         "loop_id",
@@ -502,13 +505,11 @@ def _duplicate_id_violations(value: Any, path: str = "$") -> list[ContractViolat
         "placeholder_id",
         "hint_id",
         "command_id",
-        "review_id",
         "call_id",
         "edge_id",
         "link_id",
         "test_case_id",
         "coverage_id",
-        "review_item_id",
         "item_id",
         "id",
     )
@@ -1492,6 +1493,19 @@ def _review_decisions_semantic_violations(
                         f"$.data.decisions[{index}].decided_at",
                     )
                 )
+                references = decision.get("subject_artifacts")
+                declared = decision.get("subject_fingerprint")
+                if isinstance(references, list) and isinstance(declared, str):
+                    actual = subject_fingerprint(references)
+                    if declared != actual:
+                        violations.append(
+                            ContractViolation(
+                                "invalid_subject_fingerprint",
+                                f"$.data.decisions[{index}].subject_fingerprint",
+                                "subject_fingerprint must match the exact canonical subject references.",
+                                "blocking",
+                            )
+                        )
     return violations
 
 

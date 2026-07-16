@@ -5,7 +5,12 @@ from pathlib import Path
 
 from unit_test_runner.contracts import ArtifactKind
 from unit_test_runner.contracts.migrations import migrate_payload
+from unit_test_runner.contracts.registry import get_contract
 from unit_test_runner.contracts.validator import validate_payload
+from unit_test_runner.dossier.review_decision_models import (
+    ReviewSubjectReference,
+    subject_fingerprint,
+)
 from unit_test_runner.dsw_parser import discover_dsw_workspaces
 
 
@@ -93,7 +98,7 @@ def valid_cli_result() -> dict:
 def artifact_payload(kind: ArtifactKind, data: dict) -> dict:
     payload = valid_test_spec()
     payload["artifact_kind"] = kind.value
-    payload["schema_version"] = "1.0.0"
+    payload["schema_version"] = get_contract(kind).current_version
     payload["data"] = data
     return payload
 
@@ -246,7 +251,20 @@ def valid_function_dossier() -> dict:
                     "related_test_cases": [],
                     "severity": "warning",
                     "suggested_reviewer_role": "unit_test_reviewer",
-                    "done": False,
+                    "case_id": None,
+                    "semantic_subject_key": "analysis/source-digest",
+                    "subject_artifacts": [
+                        {
+                            "artifact_kind": "source_digest",
+                            "path": "reports/source_digest.json",
+                            "sha256": SHA256,
+                            "revision": None,
+                            "source_path": "src/control.c",
+                            "source_sha256": SHA256,
+                            "function_id": "fn_control_update_7a32c11d",
+                            "semantic_subject_key": "analysis/source-digest",
+                        }
+                    ],
                 }
             ],
             "unresolved_items": [],
@@ -258,6 +276,8 @@ def valid_function_dossier() -> dict:
                 "ready_for_build_probe": False,
                 "ready_for_execution": False,
                 "evidence_ready": False,
+                "review_complete": False,
+                "test_green": False,
                 "blocked": False,
                 "blocked_reasons": [],
                 "quality_score": None,
@@ -348,6 +368,19 @@ def artifact_reference(kind: str, path: str) -> dict:
     }
 
 
+def review_subject_reference(kind: str, path: str) -> dict:
+    return ReviewSubjectReference(
+        artifact_kind=kind,
+        path=path,
+        sha256=SHA256,
+        revision=1,
+        source_path="src/control.c",
+        source_sha256=SHA256,
+        function_id="fn_control_update_7a32c11d",
+        semantic_subject_key="review/function-dossier",
+    ).to_dict()
+
+
 def resolved_contract_payloads() -> dict[ArtifactKind, dict]:
     function = {
         "function_id": "fn_control_update_7a32c11d",
@@ -366,11 +399,21 @@ def resolved_contract_payloads() -> dict[ArtifactKind, dict]:
                         "rationale": "Evidence is complete.",
                         "decided_at": "2026-07-12T00:00:00+00:00",
                         "subject_artifacts": [
-                            artifact_reference(
+                            review_subject_reference(
                                 "function_dossier",
                                 "reports/function_dossier.json",
                             )
                         ],
+                        "subject_fingerprint": subject_fingerprint(
+                            (
+                                ReviewSubjectReference.from_dict(
+                                    review_subject_reference(
+                                        "function_dossier",
+                                        "reports/function_dossier.json",
+                                    )
+                                ),
+                            )
+                        ),
                     }
                 ],
             },
@@ -541,6 +584,27 @@ class ContractValidationTests(unittest.TestCase):
         payload["data"]["test_cases"].append(duplicate)
 
         self.assertIn("duplicate_id", violation_codes(ArtifactKind.TEST_SPEC, payload))
+
+    def test_dossier_review_items_may_share_case_id_when_review_ids_are_unique(self):
+        payload = valid_function_dossier()
+        first = payload["data"]["review_items"][0]
+        first["case_id"] = "TC-01"
+        first["related_test_cases"] = ["TC-01"]
+        second = copy.deepcopy(first)
+        second["review_id"] = "review-002"
+        second["semantic_subject_key"] = "analysis/source-digest-secondary"
+        second["subject_artifacts"][0]["semantic_subject_key"] = (
+            "analysis/source-digest-secondary"
+        )
+        payload["data"]["review_items"].append(second)
+
+        violations = validate_payload(ArtifactKind.FUNCTION_DOSSIER, payload)
+
+        self.assertNotIn(
+            "duplicate_id",
+            {item.code for item in violations},
+            violations,
+        )
 
     def test_repeated_reference_id_is_allowed_when_entity_primary_ids_are_unique(self):
         payload = valid_test_spec()

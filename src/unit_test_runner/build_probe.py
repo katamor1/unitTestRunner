@@ -37,7 +37,8 @@ def _resolve_extracted_include(root: Path, include_dir: str) -> str:
 
 def build_probe(dossier_path: Path | str, vc6_bin: Path | str | None = None, dry_run: bool = False, vcvars: Path | str | None = None) -> dict[str, Any]:
     dossier_path = Path(dossier_path)
-    dossier = json.loads(dossier_path.read_text(encoding="utf-8"))
+    dossier_payload = json.loads(dossier_path.read_text(encoding="utf-8"))
+    dossier = _dossier_data(dossier_payload)
     root = dossier_path.parents[1]
     build_dir = root / "generated" / "build"
     build_dir.mkdir(parents=True, exist_ok=True)
@@ -64,6 +65,17 @@ def build_probe(dossier_path: Path | str, vc6_bin: Path | str | None = None, dry
     log_text = _decode_process_output(completed.stdout)
     log_path.write_text(log_text, encoding="utf-8")
     return {"command": command, "dry_run": False, "returncode": completed.returncode, "diagnostics": parse_build_log(log_text)}
+
+
+def _dossier_data(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("Function dossier root must be a JSON object.")
+    if payload.get("artifact_kind") != "function_dossier":
+        return payload
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise ValueError("Current function dossier is missing its data object.")
+    return data
 
 
 def _decode_process_output(output: bytes | str | None) -> str:

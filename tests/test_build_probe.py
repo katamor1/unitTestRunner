@@ -27,6 +27,42 @@ LINK : fatal error LNK2019: unresolved external symbol _WriteOutput referenced i
         self.assertTrue(diagnostics["pch_warnings"])
         self.assertEqual(["ReadSensor", "WriteOutput"], diagnostics["unresolved_symbols"])
 
+    def test_current_dossier_envelope_uses_nested_data(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            reports = root / "reports"
+            reports.mkdir()
+            (root / "extracted" / "src").mkdir(parents=True)
+            (root / "extracted" / "src" / "control.c").write_text(
+                "int Target(void) { return 0; }\n", encoding="ascii"
+            )
+            dossier = {
+                "artifact_kind": "function_dossier",
+                "schema_version": "1.1.0",
+                "producer": {
+                    "name": "unit-test-runner",
+                    "version": "0.1.0",
+                    "commit": "b66790165a2d4f82943cd199b3b499e1f1725fc3",
+                },
+                "subject": {
+                    "function_id": "fn_target",
+                    "source_path": "src/control.c",
+                    "source_sha256": "a" * 64,
+                },
+                "data": {
+                    "target": {"source": "src/control.c", "function": "Target"},
+                    "build_context": {"include_dirs": [], "defines": []},
+                },
+                "extensions": {},
+            }
+            dossier_path = reports / "function_dossier.json"
+            dossier_path.write_text(json.dumps(dossier), encoding="utf-8")
+
+            payload = build_probe(dossier_path, dry_run=True)
+
+            self.assertTrue(payload["dry_run"])
+            self.assertIn("control.c", payload["command"])
+
     def test_legacy_dossier_probe_uses_vcvars_without_requiring_vc6_bin(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

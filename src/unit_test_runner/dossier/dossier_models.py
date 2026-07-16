@@ -70,6 +70,9 @@ class DossierArtifact:
         "stale",
     ]
     contract_violations: list[ContractViolation]
+    compatible_migrated: bool = False
+    contract_subject: dict[str, Any] = field(default_factory=dict)
+    contract_revision: int | None = None
     stale_candidate: bool = False
     modified_at: str | None = None
     warnings: list[DossierWarning] = field(default_factory=list)
@@ -145,9 +148,12 @@ class DossierReviewItem:
     severity: str = "warning"
     suggested_reviewer_role: str = "unit_test_reviewer"
     done: bool = False
+    case_id: str | None = None
+    semantic_subject_key: str | None = None
+    subject_artifacts: list[Any] = field(default_factory=list)
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
+    def to_dict(self, *, current: bool = True) -> dict[str, Any]:
+        payload = {
             "review_id": self.review_id,
             "category": self.category,
             "title": self.title,
@@ -156,8 +162,19 @@ class DossierReviewItem:
             "related_test_cases": self.related_test_cases,
             "severity": self.severity,
             "suggested_reviewer_role": self.suggested_reviewer_role,
-            "done": self.done,
+            "case_id": self.case_id,
+            "semantic_subject_key": self.semantic_subject_key,
+            "subject_artifacts": [
+                item.to_dict() if hasattr(item, "to_dict") else dict(item)
+                for item in self.subject_artifacts
+            ],
         }
+        if not current:
+            payload.pop("case_id", None)
+            payload.pop("semantic_subject_key", None)
+            payload.pop("subject_artifacts", None)
+            payload["done"] = self.done
+        return payload
 
 
 @dataclass
@@ -219,6 +236,8 @@ class DossierReadiness:
     ready_for_execution: bool
     evidence_ready: bool
     blocked: bool
+    review_complete: bool = False
+    test_green: bool = False
     blocked_reasons: list[str] = field(default_factory=list)
     quality_score: int | None = None
 
@@ -231,6 +250,8 @@ class DossierReadiness:
             "ready_for_execution": self.ready_for_execution,
             "evidence_ready": self.evidence_ready,
             "blocked": self.blocked,
+            "review_complete": self.review_complete,
+            "test_green": self.test_green,
             "blocked_reasons": self.blocked_reasons,
             "quality_score": self.quality_score,
         }
@@ -257,15 +278,21 @@ class FunctionDossier:
     function: dict[str, Any] = field(default_factory=dict)
     test_design: dict[str, Any] = field(default_factory=dict)
     diagnostics: list[Any] = field(default_factory=list)
+    function_id: str | None = None
+    source_sha256: str | None = None
     schema_version: str = "0.1"
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, current: bool | None = None) -> dict[str, Any]:
+        if current is None:
+            current = self.schema_version == "1.1.0"
         target = dict(self.target)
         target.setdefault("source", _path_text(self.source_path) or "")
         target.setdefault("function", self.function_name)
         function = dict(self.function)
         function.setdefault("name", self.function_name)
         function.setdefault("source_path", _path_text(self.source_path))
+        if self.function_id:
+            function.setdefault("function_id", self.function_id)
         function["status"] = self.status
         return {
             "schema_version": self.schema_version,
@@ -275,12 +302,14 @@ class FunctionDossier:
             "function": function,
             "test_design": self.test_design,
             "diagnostics": self.diagnostics,
-            "workspace_root": _path_text(self.workspace_root),
+            "workspace_root": "." if current else _path_text(self.workspace_root),
             "created_at": self.created_at,
             "artifact_index": [item.to_dict() for item in self.artifact_index],
             "summaries": self.summaries,
             "traceability": [item.to_dict() for item in self.traceability],
-            "review_items": [item.to_dict() for item in self.review_items],
+            "review_items": [
+                item.to_dict(current=current) for item in self.review_items
+            ],
             "unresolved_items": [item.to_dict() for item in self.unresolved_items],
             "next_actions": [item.to_dict() for item in self.next_actions],
             "readiness": self.readiness.to_dict(),
