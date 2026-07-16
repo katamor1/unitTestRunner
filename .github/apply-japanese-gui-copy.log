@@ -1,10 +1,43 @@
-=== patch ===
+stage: prepare
+branch: chore/japanese-gui-copy
+
+Error: Python patch script could not be executed successfully.
+    at runPython (D:\a\unitTestRunner\unitTestRunner\vscode\extension\scripts\apply-japanese-gui-copy.cjs:100:17)
+    at prepare (D:\a\unitTestRunner\unitTestRunner\vscode\extension\scripts\apply-japanese-gui-copy.cjs:140:5)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async main (D:\a\unitTestRunner\unitTestRunner\vscode\extension\scripts\apply-japanese-gui-copy.cjs:180:7)
+
+python: exit 1
+
 Traceback (most recent call last):
-  File "D:\a\_temp\apply_japanese_gui_copy.py", line 729, in <module>
+  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-4184.py", line 729, in <module>
     main()
-  File "D:\a\_temp\apply_japanese_gui_copy.py", line 385, in main
+  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-4184.py", line 385, in main
     replace_exact("vscode/extension/src/workflow/workflowState.ts", old, new, expected)
-  File "D:\a\_temp\apply_japanese_gui_copy.py", line 14, in replace_exact
+  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-4184.py", line 14, in replace_exact
     raise AssertionError(
 AssertionError: vscode/extension/src/workflow/workflowState.ts: expected 2 occurrence(s) of "label: '\u6700\u5f8c\u306eCLI\u3092\u30b3\u30d4\u30fc'", found 3
-=== verification ===
+
+---
+py: exit 1
+
+Traceback (most recent call last):
+  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-4184.py", line 729, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-4184.py", line 119, in main
+        replace_exact(
+        ~~~~~~~~~~~~~^
+            "vscode/extension/src/config/settingsViewModel.ts",
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+    """,
+    ^^^^
+        )
+        ^
+  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-4184.py", line 14, in replace_exact
+    raise AssertionError(
+        f"{relative_path}: expected {expected} occurrence(s) of {old!r}, found {actual}"
+    )
+AssertionError: vscode/extension/src/config/settingsViewModel.ts: expected 1 occurrence(s) of "      label: '\u30d7\u30ed\u30b8\u30a7\u30af\u30c8\u30eb\u30fc\u30c8',\n      settingKey: 'unitTestRunner.sourceRoot',\n      description: '\u672c\u756a\u30bd\u30fc\u30b9\u3092\u8aad\u3080\u30eb\u30fc\u30c8\u30d5\u30a9\u30eb\u30c0\u3067\u3059\u3002\u672a\u8a2d\u5b9a\u6642\u306fVS Code\u3067\u958b\u3044\u305f\u5148\u982d\u30d5\u30a9\u30eb\u30c0\u3092\u4f7f\u3044\u307e\u3059\u3002',\n", found 0
+
