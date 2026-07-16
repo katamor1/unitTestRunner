@@ -35,10 +35,9 @@ jobs:
           git fetch --no-tags origin \
             +refs/heads/codex/bootstrap-integrate-all-plans:refs/remotes/origin/codex/bootstrap-integrate-all-plans \
             +refs/heads/codex/bootstrap-p1t6-v3:refs/remotes/origin/codex/bootstrap-p1t6-v3 \
-            +refs/heads/codex/p1t6-review-decisions-readiness-clean:refs/remotes/origin/codex/p1t6-review-decisions-readiness-clean \
             +refs/heads/main:refs/remotes/origin/main
           test "$(git rev-parse origin/main)" = "969ce9462a688e94c887d6e77359e40296d8927b"
-          test "$(git rev-parse origin/codex/p1t6-review-decisions-readiness-clean)" = "a204f3aec3015fdb6eea26cf7e566cc9523ba046"
+          git cat-file -e "a204f3aec3015fdb6eea26cf7e566cc9523ba046^{commit}"
 
           carrier=origin/codex/bootstrap-p1t6-v3
           git ls-tree -r --name-only "$carrier" .github/bootstrap/p1t6-v3-b64 \
@@ -64,7 +63,7 @@ jobs:
           task6_commit=$(git rev-parse HEAD)
 
           git switch -C codex/integrate-all-plans \
-            origin/codex/p1t6-review-decisions-readiness-clean
+            a204f3aec3015fdb6eea26cf7e566cc9523ba046
           set +e
           git merge --no-ff --no-commit "$task6_commit"
           merge_status=$?
