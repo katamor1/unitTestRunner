@@ -1,10 +1,692 @@
-stage: prepare
+stage: tests
 branch: chore/japanese-gui-copy
 
-Error: spawnSync npm.cmd EINVAL
-    at Object.spawnSync (node:internal/child_process:1123:20)
-    at spawnSync (node:child_process:877:24)
-    at run (D:\a\unitTestRunner\unitTestRunner\vscode\extension\scripts\apply-japanese-gui-copy.cjs:20:21)
-    at prepare (D:\a\unitTestRunner\unitTestRunner\vscode\extension\scripts\apply-japanese-gui-copy.cjs:152:3)
-    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
-    at async main (D:\a\unitTestRunner\unitTestRunner\vscode\extension\scripts\apply-japanese-gui-copy.cjs:190:7)
+TAP version 13
+# Subtest: UnitTestRunner VS Code thin adapter core
+    # Subtest: reads settings and warns when outputRoot is inside sourceRoot
+    ok 1 - reads settings and warns when outputRoot is inside sourceRoot
+      ---
+      duration_ms: 2.7096
+      ...
+    # Subtest: uses the first VS Code workspace folder as the sourceRoot default
+    ok 2 - uses the first VS Code workspace folder as the sourceRoot default
+      ---
+      duration_ms: 0.3857
+      ...
+    # Subtest: builds the settings panel model with defaults, missing fields, and warnings
+    ok 3 - builds the settings panel model with defaults, missing fields, and warnings
+      ---
+      duration_ms: 1.046
+      ...
+    # Subtest: collapses the settings panel by default only when required workspace settings are ready
+    not ok 4 - collapses the settings panel by default only when required workspace settings are ready
+      ---
+      duration_ms: 4.8534
+      location: 'D:\\a\\unitTestRunner\\unitTestRunner\\vscode\\extension\\dist\\test\\adapter.test.js:115:24'
+      failureType: 'testCodeFailure'
+      error: |-
+        The input did not match the regular expression /本番リポジトリへ生成物が混入/. Input:
+        
+        '<details id="unitTestRunnerSettings" class="settings" open>\n' +
+          '  <summary class="settings-summary">\n' +
+          '    <h2>設定</h2>\n' +
+          '    <span class="settings-toggle settings-collapsed-label">設定を表示</span>\n' +
+          '    <span class="settings-toggle settings-expanded-label">設定を閉じる</span>\n' +
+          '  </summary>\n' +
+          '  <p class="settings-ready">必須項目はすべて設定されています。</p>\n' +
+          '  <section class="setting-field configured">\n' +
+          '  <div class="setting-title">\n' +
+          '    <h3>ソースのルートフォルダー</h3>\n' +
+          '    <span class="setting-status">設定済み</span>\n' +
+          '  </div>\n' +
+          '  <p>テスト対象のソースコードを読み込むルートフォルダーです。未設定の場合は、VS Codeで最初に開いたフォルダーを使用します。</p>\n' +
+          '  <div class="setting-value">C:\\work\\product</div>\n' +
+          '  \n' +
+          '  \n' +
+          '  <div class="actions"><button class="primary" data-setting-kind="pickFolder" data-field-id="sourceRoot">フォルダーを選択</button><button class="" data-setting-kind="inputText" data-field-id="sourceRoot">フォルダーのパスを入力</button><button class="" data-setting-kind="reset" data-field-id="sourceRoot">既定値に戻す</button></div>\n' +
+          '</section><section class="setting-field configured">\n' +
+          '  <div class="setting-title">\n' +
+          '    <h3>VC6ワークスペースファイル（.dsw）</h3>\n' +
+          '    <span class="setting-status">設定済み</span>\n' +
+          '  </div>\n' +
+          '  <p>テスト対象プロジェクトのVisual C++ 6.0ワークスペースファイルです。</p>\n' +
+          '  <div class="setting-value">C:\\work\\product\\Product.dsw</div>\n' +
+          '  \n' +
+          '  \n' +
+          '  <div class="actions"><button class="primary" data-setting-kind="pickFile" data-field-id="dswPath">.dswファイルを選択</button><button class="" data-setting-kind="inputText" data-field-id="dswPath">ファイルのパスを入力</button></div>\n' +
+          '</section><section class="setting-field warning">\n' +
+          '  <div class="setting-title">\n' +
+          '    <h3>出力先フォルダー</h3>\n' +
+          '    <span class="setting-status">要確認</span>\n' +
+          '  </div>\n' +
+          '  <p>関数分析レポートやテスト設計などの生成物を保存する出力先フォルダーです。ソースのルートフォルダーとは別の場所を指定してください。</p>\n' +
+          '  <div class="setting-value">C:\\work\\product\\generated</div>\n' +
+          '  \n' +
+          '  <div class="setting-message">出力先フォルダーがソースのルートフォルダー内にあります。生成物が本番ソースへ混在する可能性があります。別のフォルダーを指定してください。</div>\n' +
+          '  <div class="actions"><button class="primary" data-setting-kind="pickFolder" data-field-id="outputRoot">出力先フォルダーを選択</button><button class="" data-setting-kind="inputText" data-field-id="outputRoot">フォルダーのパスを入力</button></div>\n' +
+          '</section><section class="setting-field default">\n' +
+          '  <div class="setting-title">\n' +
+          '    <h3>スイート定義ファイル</h3>\n' +
+          '    <span class="setting-status">既定値</span>\n' +
+          '  </div>\n' +
+          '  <p>複数の関数をまとめて実行するテストスイートの定義ファイルです。未設定の場合は、出力先フォルダー配下のsuites\\default\\suite_manifest.jsonを使用します。</p>\n' +
+          '  <div class="setting-value">C:\\work\\product\\generated\\suites\\default\\suite_manifest.json</div>\n' +
+          '  \n' +
+          '  \n' +
+          '  <div class="actions"><button class="" data-setting-kind="pickFile" data-field-id="suiteManifestPath">定義ファイルを選択</button><button class="" data-setting-kind="inputText" data-field-id="suiteManifestPath">ファイルのパスを入力</button><button class="" data-setting-kind="reset" data-field-id="suiteManifestPath">既定値に戻す</button></div>\n' +
+          '</section><section class="setting-field configured">\n' +
+          '  <div class="setting-title">\n' +
+          '    <h3>既定のビルド構成</h3>\n' +
+          '    <span class="setting-status">設定済み</span>\n' +
+          '  </div>\n' +
+          '  <p>関数解析とビルドで既定として使用するVisual C++ 6.0のビルド構成名です。</p>\n' +
+          '  <div class="setting-value">Win32 Debug</div>\n' +
+          '  \n' +
+          '  \n' +
+          '  <div class="actions"><button class="primary" data-setting-kind="inputText" data-field-id="defaultConfiguration">ビルド構成名を入力</button><button class="" data-setting-kind="reset" data-field-id="defaultConfiguration">既定値に戻す</button></div>\n' +
+          '</section><section class="setting-field optional">\n' +
+          '  <div class="setting-title">\n' +
+          '    <h3>既定のVC6プロジェクト</h3>\n' +
+          '    <span class="setting-status">任意</span>\n' +
+          '  </div>\n' +
+          '  <p>ソースファイルが複数のVisual C++ 6.0プロジェクトに含まれる場合に使用する既定のプロジェクト名です。</p>\n' +
+          '  <div class="setting-value">未設定</div>\n' +
+          '  \n' +
+          '  \n' +
+          '  <div class="actions"><button class="primary" data-setting-kind="inputText" data-field-id="defaultProject">プロジェクト名を入力</button><button class="" data-setting-kind="reset" data-field-id="defaultProject">設定をクリア</button></div>\n' +
+          '</section><section class="setting-field optional">\n' +
+          '  <div class="setting-title">\n' +
+          '    <h3>VC6環境設定ファイル</h3>\n' +
+          '    <span class="setting-status">任意</span>\n' +
+          '  </div>\n' +
+          '  <p>ビルド前に実行するVisual C++ 6.0の環境設定バッチファイルです。nmakeまたはclがPATHにない場合に指定します。</p>\n' +
+          '  <div class="setting-value">未設定</div>\n' +
+          '  \n' +
+          '  \n' +
+          '  <div class="actions"><button class="primary" data-setting-kind="pickFile" data-field-id="vcvarsPath">バッチファイルを選択</button><button class="" data-setting-kind="inputText" data-field-id="vcvarsPath">ファイルのパスを入力</button><button class="" data-setting-kind="reset" data-field-id="vcvarsPath">設定をクリア</button></div>\n' +
+          '</section><section class="setting-field configured">\n' +
+          '  <div class="setting-title">\n' +
+          '    <h3>UnitTestRunnerの実行ファイル</h3>\n' +
+          '    <span class="setting-status">設定済み</span>\n' +
+          '  </div>\n' +
+          '  <p>通常は同梱のCLIを使用します。外部の実行ファイルを使用する場合だけ指定してください。</p>\n' +
+          '  <div class="setting-value">unit-test-runner</div>\n' +
+          '  \n' +
+          '  \n' +
+          '  <div class="actions"><button class="" data-setting-kind="pickFile" data-field-id="cliPath">実行ファイルを選択</button><button class="" data-setting-kind="inputText" data-field-id="cliPath">実行ファイルのパスを入力</button><button class="" data-setting-kind="reset" data-field-id="cliPath">既定値に戻す</button></div>\n' +
+          '</section>\n' +
+          '</details>'
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected:
+      actual: |-
+        <details id="unitTestRunnerSettings" class="settings" open>
+          <summary class="settings-summary">
+            <h2>設定</h2>
+            <span class="settings-toggle settings-collapsed-label">設定を表示</span>
+            <span class="settings-toggle settings-expanded-label">設定を閉じる</span>
+          </summary>
+          <p class="settings-ready">必須項目はすべて設定されています。</p>
+          <section class="setting-field configured">
+          <div class="setting-title">
+            <h3>ソースのルートフォルダー</h3>
+            <span class="setting-status">設定済み</span>
+          </div>
+          <p>テスト対象のソースコードを読み込むルートフォルダーです。未設定の場合は、VS Codeで最初に開いたフォルダーを使用します。</p>
+          <div class="setting-value">C:\work\product</div>
+          
+          
+          <div class="actions"><button class="primary" data-setting-kind="pickFolder" data-field-id="sourceRoot">フォルダーを選択</button><button class="" data-setting-kind="inputText" data-field-id="sourceRoot">フォルダーのパスを入力</button><button class="" data-setting-kind="reset" data-field-id="sourceRoot">既定値に戻す</button></div>
+        </section><section class="setting-field configured">
+          <div class="setting-title">
+            <h3>VC6ワークスペースファイル（.dsw）</h3>
+            <span class="setting-status">設定済み</span>
+          </div>
+          <p>テスト対象プロジェクトのVisual C++ 6.0ワークスペースファイルです。</p>
+          <div class="setting-value">C:\work\product\Product.dsw</div>
+          
+          
+          <div class="actions"><button class="primary" data-setting-kind="pickFile" data-field-id="dswPath">.dswファイルを選択</button><button class="" data-setting-kind="inputText" data-field-id="dswPath">ファイルのパスを入力</button></div>
+        </section><section class="setting-field warning">
+          <div class="setting-title">
+            <h3>出力先フォルダー</h3>
+            <span class="setting-status">要確認</span>
+          </div>
+          <p>関数分析レポートやテスト設計などの生成物を保存する出力先フォルダーです。ソースのルートフォルダーとは別の場所を指定してください。</p>
+          <div class="setting-value">C:\work\product\generated</div>
+          
+          <div class="setting-message">出力先フォルダーがソースのルートフォルダー内にあります。生成物が本番ソースへ混在する可能性があります。別のフォルダーを指定してください。</div>
+          <div class="actions"><button class="primary" data-setting-kind="pickFolder" data-field-id="outputRoot">出力先フォルダーを選択</button><button class="" data-setting-kind="inputText" data-field-id="outputRoot">フォルダーのパスを入力</button></div>
+        </section><section class="setting-field default">
+          <div class="setting-title">
+            <h3>スイート定義ファイル</h3>
+            <span class="setting-status">既定値</span>
+          </div>
+          <p>複数の関数をまとめて実行するテストスイートの定義ファイルです。未設定の場合は、出力先フォルダー配下のsuites\default\suite_manifest.jsonを使用します。</p>
+          <div class="setting-value">C:\work\product\generated\suites\default\suite_manifest.json</div>
+          
+          
+          <div class="actions"><button class="" data-setting-kind="pickFile" data-field-id="suiteManifestPath">定義ファイルを選択</button><button class="" data-setting-kind="inputText" data-field-id="suiteManifestPath">ファイルのパスを入力</button><button class="" data-setting-kind="reset" data-field-id="suiteManifestPath">既定値に戻す</button></div>
+        </section><section class="setting-field configured">
+          <div class="setting-title">
+            <h3>既定のビルド構成</h3>
+            <span class="setting-status">設定済み</span>
+          </div>
+          <p>関数解析とビルドで既定として使用するVisual C++ 6.0のビルド構成名です。</p>
+          <div class="setting-value">Win32 Debug</div>
+          
+          
+          <div class="actions"><button class="primary" data-setting-kind="inputText" data-field-id="defaultConfiguration">ビルド構成名を入力</button><button class="" data-setting-kind="reset" data-field-id="defaultConfiguration">既定値に戻す</button></div>
+        </section><section class="setting-field optional">
+          <div class="setting-title">
+            <h3>既定のVC6プロジェクト</h3>
+            <span class="setting-status">任意</span>
+          </div>
+          <p>ソースファイルが複数のVisual C++ 6.0プロジェクトに含まれる場合に使用する既定のプロジェクト名です。</p>
+          <div class="setting-value">未設定</div>
+          
+          
+          <div class="actions"><button class="primary" data-setting-kind="inputText" data-field-id="defaultProject">プロジェクト名を入力</button><button class="" data-setting-kind="reset" data-field-id="defaultProject">設定をクリア</button></div>
+        </section><section class="setting-field optional">
+          <div class="setting-title">
+            <h3>VC6環境設定ファイル</h3>
+            <span class="setting-status">任意</span>
+          </div>
+          <p>ビルド前に実行するVisual C++ 6.0の環境設定バッチファイルです。nmakeまたはclがPATHにない場合に指定します。</p>
+          <div class="setting-value">未設定</div>
+          
+          
+          <div class="actions"><button class="primary" data-setting-kind="pickFile" data-field-id="vcvarsPath">バッチファイルを選択</button><button class="" data-setting-kind="inputText" data-field-id="vcvarsPath">ファイルのパスを入力</button><button class="" data-setting-kind="reset" data-field-id="vcvarsPath">設定をクリア</button></div>
+        </section><section class="setting-field configured">
+          <div class="setting-title">
+            <h3>UnitTestRunnerの実行ファイル</h3>
+            <span class="setting-status">設定済み</span>
+          </div>
+          <p>通常は同梱のCLIを使用します。外部の実行ファイルを使用する場合だけ指定してください。</p>
+          <div class="setting-value">unit-test-runner</div>
+          
+          
+          <div class="actions"><button class="" data-setting-kind="pickFile" data-field-id="cliPath">実行ファイルを選択</button><button class="" data-setting-kind="inputText" data-field-id="cliPath">実行ファイルのパスを入力</button><button class="" data-setting-kind="reset" data-field-id="cliPath">既定値に戻す</button></div>
+        </section>
+        </details>
+      operator: 'match'
+      stack: |-
+        TestContext.<anonymous> (D:\a\unitTestRunner\unitTestRunner\vscode\extension\dist\test\adapter.test.js:152:16)
+        Test.runInAsyncScope (node:async_hooks:206:9)
+        Test.run (node:internal/test_runner/test:796:25)
+        Suite.processPendingSubtests (node:internal/test_runner/test:526:18)
+        Test.postRun (node:internal/test_runner/test:889:19)
+        Test.run (node:internal/test_runner/test:835:12)
+        async Suite.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+    # Subtest: resolves selected and cursor function names without parsing C in VS Code
+    ok 5 - resolves selected and cursor function names without parsing C in VS Code
+      ---
+      duration_ms: 0.6215
+      ...
+    # Subtest: builds analyze/finalize/run invocations with Windows paths as argv items
+    ok 6 - builds analyze/finalize/run invocations with Windows paths as argv items
+      ---
+      duration_ms: 2.029
+      ...
+    # Subtest: builds suite manifest, register, and run invocations from VS Code settings
+    ok 7 - builds suite manifest, register, and run invocations from VS Code settings
+      ---
+      duration_ms: 1.6655
+      ...
+    # Subtest: uses an explicit suiteManifestPath setting when present
+    ok 8 - uses an explicit suiteManifestPath setting when present
+      ---
+      duration_ms: 0.2564
+      ...
+    # Subtest: exposes vcvarsPath as an optional advanced setting for build execution
+    ok 9 - exposes vcvarsPath as an optional advanced setting for build execution
+      ---
+      duration_ms: 0.5883
+      ...
+    # Subtest: prefers bundled CLI only when cliPath is default or empty
+    ok 10 - prefers bundled CLI only when cliPath is default or empty
+      ---
+      duration_ms: 0.4802
+      ...
+    # Subtest: parses only explicit legacy CLI report paths and does not infer reports
+    ok 11 - parses only explicit legacy CLI report paths and does not infer reports
+      ---
+      duration_ms: 1.4406
+      ...
+    # Subtest: warns when a genuine v0.1 envelope omits report paths without fabricating them
+    ok 12 - warns when a genuine v0.1 envelope omits report paths without fabricating them
+      ---
+      duration_ms: 0.2509
+      ...
+    # Subtest: formats nonzero CLI JSON with environment diagnostics for panel errors
+    not ok 13 - formats nonzero CLI JSON with environment diagnostics for panel errors
+      ---
+      duration_ms: 0.7679
+      location: 'D:\\a\\unitTestRunner\\unitTestRunner\\vscode\\extension\\dist\\test\\adapter.test.js:354:24'
+      failureType: 'testCodeFailure'
+      error: |-
+        The input did not match the regular expression /終了コード 30/. Input:
+        
+        'UnitTestRunner CLIが終了コード30で終了しました。 build-probe / build_probe_environment_missing: VC6 build tools were not found on PATH.: Build probe could not run because the VC6 environment is missing.'
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected:
+      actual: 'UnitTestRunner CLIが終了コード30で終了しました。 build-probe / build_probe_environment_missing: VC6 build tools were not found on PATH.: Build probe could not run because the VC6 environment is missing.'
+      operator: 'match'
+      stack: |-
+        TestContext.<anonymous> (D:\a\unitTestRunner\unitTestRunner\vscode\extension\dist\test\adapter.test.js:365:16)
+        Test.runInAsyncScope (node:async_hooks:206:9)
+        Test.run (node:internal/test_runner/test:796:25)
+        Suite.processPendingSubtests (node:internal/test_runner/test:526:18)
+        Test.postRun (node:internal/test_runner/test:889:19)
+        Test.run (node:internal/test_runner/test:835:12)
+        async Suite.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+    # Subtest: formats suite require-green failures with a clear non-green summary
+    ok 14 - formats suite require-green failures with a clear non-green summary
+      ---
+      duration_ms: 0.3168
+      ...
+    # Subtest: requires confirmation only for explicit build and test execution commands
+    ok 15 - requires confirmation only for explicit build and test execution commands
+      ---
+      duration_ms: 0.3357
+      ...
+    # Subtest: returns a timedOut result when the CLI process exceeds the configured timeout
+    ok 16 - returns a timedOut result when the CLI process exceeds the configured timeout
+      ---
+      duration_ms: 210.1126
+      ...
+    # Subtest: declares command palette activation and copy-last-command contribution
+    ok 17 - declares command palette activation and copy-last-command contribution
+      ---
+      duration_ms: 1.1942
+      ...
+    # Subtest: declares editor context menu and workflow view contributions
+    ok 18 - declares editor context menu and workflow view contributions
+      ---
+      duration_ms: 0.9436
+      ...
+    # Subtest: combines suite manifest entries with the latest suite run report for dashboard rows
+    ok 19 - combines suite manifest entries with the latest suite run report for dashboard rows
+      ---
+      duration_ms: 4.6524
+      ...
+    # Subtest: packages a VS Code extension README for the details view
+    ok 20 - packages a VS Code extension README for the details view
+      ---
+      duration_ms: 0.8985
+      ...
+    # Subtest: derives the current workflow step from generated artifacts
+    ok 21 - derives the current workflow step from generated artifacts
+      ---
+      duration_ms: 0.6549
+      ...
+    # Subtest: shows harness generation as the required bridge from reviewed design to build probe
+    ok 22 - shows harness generation as the required bridge from reviewed design to build probe
+      ---
+      duration_ms: 0.2402
+      ...
+    # Subtest: exposes markdown and json reports from the test design review step
+    ok 23 - exposes markdown and json reports from the test design review step
+      ---
+      duration_ms: 0.2538
+      ...
+    # Subtest: completes an awaiting-save workflow step only for the matching file
+    ok 24 - completes an awaiting-save workflow step only for the matching file
+      ---
+      duration_ms: 1.2773
+      ...
+    # Subtest: does not advance workflow recommendation after a CLI failure
+    ok 25 - does not advance workflow recommendation after a CLI failure
+      ---
+      duration_ms: 0.3612
+      ...
+    # Subtest: projects workflow state to legacy global state keys
+    ok 26 - projects workflow state to legacy global state keys
+      ---
+      duration_ms: 0.2028
+      ...
+    # Subtest: opens markdown reports with preview but plain files without markdown preview
+    ok 27 - opens markdown reports with preview but plain files without markdown preview
+      ---
+      duration_ms: 0.3118
+      ...
+    1..27
+not ok 1 - UnitTestRunner VS Code thin adapter core
+  ---
+  duration_ms: 242.2291
+  type: 'suite'
+  location: 'D:\\a\\unitTestRunner\\unitTestRunner\\vscode\\extension\\dist\\test\\adapter.test.js:59:26'
+  failureType: 'subtestsFailed'
+  error: '2 subtests failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: CLI envelope compatibility boundary
+    # Subtest: accepts a fully shaped v1 envelope
+    ok 1 - accepts a fully shaped v1 envelope
+      ---
+      duration_ms: 4.4618
+      ...
+    # Subtest: rejects malformed v1 instead of falling back to legacy parsing
+    ok 2 - rejects malformed v1 instead of falling back to legacy parsing
+      ---
+      duration_ms: 0.7851
+      ...
+    # Subtest: rejects an unsupported v1-family version
+    ok 3 - rejects an unsupported v1-family version
+      ---
+      duration_ms: 0.3068
+      ...
+    # Subtest: rejects versionless JSON instead of assuming legacy v0.1
+    ok 4 - rejects versionless JSON instead of assuming legacy v0.1
+      ---
+      duration_ms: 0.1978
+      ...
+    # Subtest: reads a genuine v0.1 envelope with a migration warning and explicit paths only
+    ok 5 - reads a genuine v0.1 envelope with a migration warning and explicit paths only
+      ---
+      duration_ms: 0.4079
+      ...
+    # Subtest: does not fabricate produced reports from a legacy dossier path
+    ok 6 - does not fabricate produced reports from a legacy dossier path
+      ---
+      duration_ms: 0.1953
+      ...
+    # Subtest: uses only validated v1 produced artifacts in the adapter report view
+    ok 7 - uses only validated v1 produced artifacts in the adapter report view
+      ---
+      duration_ms: 1.0414
+      ...
+    # Subtest: propagates malformed v1 as an adapter error
+    ok 8 - propagates malformed v1 as an adapter error
+      ---
+      duration_ms: 0.4477
+      ...
+    # Subtest: does not turn a legacy dossier path into conventional report paths
+    ok 9 - does not turn a legacy dossier path into conventional report paths
+      ---
+      duration_ms: 0.5753
+      ...
+    # Subtest: does not infer report paths from non-JSON output
+    not ok 10 - does not infer report paths from non-JSON output
+      ---
+      duration_ms: 20.238
+      location: 'D:\\a\\unitTestRunner\\unitTestRunner\\vscode\\extension\\dist\\test\\cliEnvelope.test.js:196:24'
+      failureType: 'testCodeFailure'
+      error: |-
+        The expression evaluated to a falsy value:
+        
+          assert.ok(parsed.warnings.some((warning) => warning.includes('JSON envelope')))
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: true
+      actual: false
+      operator: '=='
+      stack: |-
+        TestContext.<anonymous> (D:\a\unitTestRunner\unitTestRunner\vscode\extension\dist\test\cliEnvelope.test.js:199:16)
+        Test.runInAsyncScope (node:async_hooks:206:9)
+        Test.run (node:internal/test_runner/test:796:25)
+        Suite.processPendingSubtests (node:internal/test_runner/test:526:18)
+        Test.postRun (node:internal/test_runner/test:889:19)
+        Test.run (node:internal/test_runner/test:835:12)
+        async Suite.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+    # Subtest: formats validated v1 failures from nested machine fields
+    not ok 11 - formats validated v1 failures from nested machine fields
+      ---
+      duration_ms: 14.9461
+      location: 'D:\\a\\unitTestRunner\\unitTestRunner\\vscode\\extension\\dist\\test\\cliEnvelope.test.js:201:24'
+      failureType: 'testCodeFailure'
+      error: |-
+        The input did not match the regular expression /全件GREENではありません/. Input:
+        
+        'UnitTestRunner CLIが終了コード32で終了しました。 suite-run / failed: 全件の合格条件を満たしていません。合計2件 / 合格1件 / 不合格1件: Control_Update failed.: One selected entry is not GREEN.: Suite run completed.'
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected:
+      actual: 'UnitTestRunner CLIが終了コード32で終了しました。 suite-run / failed: 全件の合格条件を満たしていません。合計2件 / 合格1件 / 不合格1件: Control_Update failed.: One selected entry is not GREEN.: Suite run completed.'
+      operator: 'match'
+      stack: |-
+        TestContext.<anonymous> (D:\a\unitTestRunner\unitTestRunner\vscode\extension\dist\test\cliEnvelope.test.js:221:16)
+        Test.runInAsyncScope (node:async_hooks:206:9)
+        Test.run (node:internal/test_runner/test:796:25)
+        Suite.processPendingSubtests (node:internal/test_runner/test:526:18)
+        Test.postRun (node:internal/test_runner/test:889:19)
+        Test.run (node:internal/test_runner/test:835:12)
+        async Suite.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+    1..11
+not ok 2 - CLI envelope compatibility boundary
+  ---
+  duration_ms: 46.4557
+  type: 'suite'
+  location: 'D:\\a\\unitTestRunner\\unitTestRunner\\vscode\\extension\\dist\\test\\cliEnvelope.test.js:81:26'
+  failureType: 'subtestsFailed'
+  error: '2 subtests failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: extension command registry
+    # Subtest: registers every manifest command exactly once and no undeclared command
+    ok 1 - registers every manifest command exactly once and no undeclared command
+      ---
+      duration_ms: 4.3596
+      ...
+    # Subtest: preserves the selected design Quick profile in the actual command handler
+    ok 2 - preserves the selected design Quick profile in the actual command handler
+      ---
+      duration_ms: 0.4978
+      ...
+    # Subtest: preserves the selected harness Quick profile in the actual command handler
+    ok 3 - preserves the selected harness Quick profile in the actual command handler
+      ---
+      duration_ms: 0.2385
+      ...
+    # Subtest: preserves the selected build-dry-run Quick profile in the actual command handler
+    ok 4 - preserves the selected build-dry-run Quick profile in the actual command handler
+      ---
+      duration_ms: 0.206
+      ...
+    1..4
+ok 3 - extension command registry
+  ---
+  duration_ms: 8.0309
+  type: 'suite'
+  ...
+# Subtest: platform-independent path dialects
+    # Subtest: selects Windows semantics for drive, UNC, and mixed Windows paths
+    ok 1 - selects Windows semantics for drive, UNC, and mixed Windows paths
+      ---
+      duration_ms: 1.6193
+      ...
+    # Subtest: selects POSIX semantics for rooted POSIX paths
+    ok 2 - selects POSIX semantics for rooted POSIX paths
+      ---
+      duration_ms: 0.3703
+      ...
+    # Subtest: checks containment using the path value rather than the host OS
+    ok 3 - checks containment using the path value rather than the host OS
+      ---
+      duration_ms: 1.211
+      ...
+    # Subtest: resolves relative report paths and retains absolute paths in either dialect
+    ok 4 - resolves relative report paths and retains absolute paths in either dialect
+      ---
+      duration_ms: 0.3272
+      ...
+    1..4
+ok 4 - platform-independent path dialects
+  ---
+  duration_ms: 5.4282
+  type: 'suite'
+  ...
+# Subtest: terminates the CLI process tree before returning a timeout result
+ok 5 - terminates the CLI process tree before returning a timeout result
+  ---
+  duration_ms: 589.1834
+  ...
+# Subtest: UnitTestRunner quick check adapter core
+    # Subtest: reads quick check settings with safe defaults
+    ok 1 - reads quick check settings with safe defaults
+      ---
+      duration_ms: 1.4781
+      ...
+    # Subtest: warns when quickOutputRoot points inside sourceRoot
+    ok 2 - warns when quickOutputRoot points inside sourceRoot
+      ---
+      duration_ms: 0.9724
+      ...
+    # Subtest: normalizes quick check profiles to generated-design CLI phases
+    ok 3 - normalizes quick check profiles to generated-design CLI phases
+      ---
+      duration_ms: 0.338
+      ...
+    # Subtest: builds quick check analyze invocation without dossier finalization
+    ok 4 - builds quick check analyze invocation without dossier finalization
+      ---
+      duration_ms: 2.2216
+      ...
+    # Subtest: builds full gate analyze invocation with forced dossier finalization
+    ok 5 - builds full gate analyze invocation with forced dossier finalization
+      ---
+      duration_ms: 0.3922
+      ...
+    # Subtest: resolves quick summary report paths from fallback and CLI JSON
+    ok 6 - resolves quick summary report paths from fallback and CLI JSON
+      ---
+      duration_ms: 1.3882
+      ...
+    1..6
+ok 6 - UnitTestRunner quick check adapter core
+  ---
+  duration_ms: 8.695
+  type: 'suite'
+  ...
+# Subtest: restores settingsOpen and preserves it when panelMode changes
+ok 7 - restores settingsOpen and preserves it when panelMode changes
+  ---
+  duration_ms: 9.347
+  ...
+# Subtest: Japanese GUI copy contract
+    # Subtest: uses clear Japanese labels and descriptions in the settings panel
+    not ok 1 - uses clear Japanese labels and descriptions in the settings panel
+      ---
+      duration_ms: 9.9676
+      location: 'D:\\a\\unitTestRunner\\unitTestRunner\\vscode\\extension\\dist\\test\\uiCopy.test.js:63:24'
+      failureType: 'testCodeFailure'
+      error: |-
+        The input did not match the regular expression /スイート定義ファイル/. Input:
+        
+        '複数の関数をまとめて実行するテストスイートの定義ファイルです。未設定の場合は、出力先フォルダー配下のsuites\\default\\suite_manifest.jsonを使用します。'
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected:
+      actual: '複数の関数をまとめて実行するテストスイートの定義ファイルです。未設定の場合は、出力先フォルダー配下のsuites\\default\\suite_manifest.jsonを使用します。'
+      operator: 'match'
+      stack: |-
+        TestContext.<anonymous> (D:\a\unitTestRunner\unitTestRunner\vscode\extension\dist\test\uiCopy.test.js:71:16)
+        Test.runInAsyncScope (node:async_hooks:206:9)
+        Test.run (node:internal/test_runner/test:796:25)
+        Test.start (node:internal/test_runner/test:702:17)
+        node:internal/test_runner/test:1133:71
+        node:internal/per_context/primordials:482:82
+        new Promise (<anonymous>)
+        new SafePromise (node:internal/per_context/primordials:450:29)
+        node:internal/per_context/primordials:482:9
+        Array.map (<anonymous>)
+      ...
+    # Subtest: uses Japanese workflow terminology without changing report file names
+    ok 2 - uses Japanese workflow terminology without changing report file names
+      ---
+      duration_ms: 2.5907
+      ...
+    # Subtest: uses concrete Japanese actions and result labels in both suite views
+    ok 3 - uses concrete Japanese actions and result labels in both suite views
+      ---
+      duration_ms: 1.0203
+      ...
+    # Subtest: uses Japanese command palette, view, setting, dialog, and notification copy
+    ok 4 - uses Japanese command palette, view, setting, dialog, and notification copy
+      ---
+      duration_ms: 1.3398
+      ...
+    1..4
+not ok 8 - Japanese GUI copy contract
+  ---
+  duration_ms: 17.019
+  type: 'suite'
+  location: 'D:\\a\\unitTestRunner\\unitTestRunner\\vscode\\extension\\dist\\test\\uiCopy.test.js:62:26'
+  failureType: 'subtestsFailed'
+  error: '1 subtest failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: workflow action presentation
+    # Subtest: uses the repeat label for completed command actions
+    ok 1 - uses the repeat label for completed command actions
+      ---
+      duration_ms: 1.5204
+      ...
+    # Subtest: only applies primary emphasis to the current action
+    ok 2 - only applies primary emphasis to the current action
+      ---
+      duration_ms: 0.2542
+      ...
+    # Subtest: hides a completed confirmation action
+    ok 3 - hides a completed confirmation action
+      ---
+      duration_ms: 0.2765
+      ...
+    # Subtest: uses the same status labels in both panel modes
+    ok 4 - uses the same status labels in both panel modes
+      ---
+      duration_ms: 0.2734
+      ...
+    1..4
+ok 9 - workflow action presentation
+  ---
+  duration_ms: 4.476
+  type: 'suite'
+  ...
+# Subtest: UnitTestRunner workflow panel view modes
+    # Subtest: renders the simple panel with consistent headings and completed action labels
+    ok 1 - renders the simple panel with consistent headings and completed action labels
+      ---
+      duration_ms: 6.3412
+      ...
+    # Subtest: emphasizes only the current simple workflow action
+    ok 2 - emphasizes only the current simple workflow action
+      ---
+      duration_ms: 2.5897
+      ...
+    # Subtest: applies the same status and repeat-label policy to the detailed panel
+    ok 3 - applies the same status and repeat-label policy to the detailed panel
+      ---
+      duration_ms: 2.3796
+      ...
+    # Subtest: renders the approved display terminology and keeps data labels aligned
+    ok 4 - renders the approved display terminology and keeps data labels aligned
+      ---
+      duration_ms: 1.1638
+      ...
+    1..4
+ok 10 - UnitTestRunner workflow panel view modes
+  ---
+  duration_ms: 13.1667
+  type: 'suite'
+  ...
+1..10
+# tests 66
+# suites 8
+# pass 61
+# fail 5
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 922.8261
+
