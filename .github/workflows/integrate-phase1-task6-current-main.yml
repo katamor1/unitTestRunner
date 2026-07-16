@@ -1,0 +1,187 @@
+name: Integrate Phase 1 Task 6 on current main
+
+on:
+  push:
+    branches:
+      - codex/task6-integration-orchestrator
+
+permissions:
+  contents: write
+
+concurrency:
+  group: integrate-phase1-task6-current-main
+  cancel-in-progress: false
+
+jobs:
+  integrate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    steps:
+      - name: Checkout orchestrator
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Reconstruct, verify, and publish Task 6
+        shell: bash
+        env:
+          PRODUCT_BRANCH: codex/p1t6-review-decisions-main-integration
+          TARGET_TREE: 363ddb6f86a4508eb5f4dd2a26013b837a5e26d6
+          PR20_HEAD: a204f3aec3015fdb6eea26cf7e566cc9523ba046
+          WRITER_RETRY_MERGE: 969ce9462a688e94c887d6e77359e40296d8927b
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+
+          git merge-base --is-ancestor "$PR20_HEAD" origin/main || {
+            echo 'PR #20 head is not yet integrated into main' >&2
+            exit 31
+          }
+          git merge-base --is-ancestor "$WRITER_RETRY_MERGE" origin/main || {
+            echo 'writer retry merge is not an ancestor of main' >&2
+            exit 32
+          }
+
+          mapfile -t targets < <(git log --all --pretty='%H %T' | awk -v tree="$TARGET_TREE" '$2 == tree { print $1 }' | sort -u)
+          if [ "${#targets[@]}" -ne 1 ]; then
+            printf 'expected exactly one commit for tree %s; found %s\n' "$TARGET_TREE" "${#targets[@]}" >&2
+            printf '%s\n' "${targets[@]}" >&2
+            exit 33
+          fi
+          target="${targets[0]}"
+          merge_base="$(git merge-base origin/main "$target")"
+          echo "target=$target"
+          echo "merge_base=$merge_base"
+
+          python -m pip install --upgrade pip build
+          python -m pip install -e .
+
+          git switch --force-create "$PRODUCT_BRANCH" origin/main
+          git merge --no-ff --no-edit -X ours "$target"
+          merged_head="$(git rev-parse HEAD)"
+
+          mapfile -t focused_modules < <(
+            git diff --name-only "$merge_base" "$target" -- 'tests/test_*.py' |
+              sort -u |
+              sed -E 's#^tests/(test_[^/]+)\.py$#tests.\1#'
+          )
+          if [ "${#focused_modules[@]}" -eq 0 ]; then
+            echo 'Task 6 changed-test discovery returned zero modules' >&2
+            exit 34
+          fi
+
+          run_modules() {
+            local log="$1"
+            shift
+            : > "$log"
+            local module
+            for module in "$@"; do
+              echo "===== $module =====" | tee -a "$log"
+              if ! timeout --signal=TERM --kill-after=20s 360s \
+                  env PYTHONPATH="$PWD/src" python -X faulthandler -m unittest "$module" -v \
+                  2>&1 | tee -a "$log"; then
+                echo "FAILED_OR_TIMED_OUT=$module" | tee -a "$log"
+                return 1
+              fi
+            done
+          }
+
+          selected_file=''
+          if ! run_modules /tmp/task6-focused-initial.log "${focused_modules[@]}"; then
+            git reset --hard "$merged_head"
+            mapfile -t candidate_files < <(
+              git diff --name-only "${WRITER_RETRY_MERGE}^1" "$WRITER_RETRY_MERGE" -- |
+                grep -Ev '^(docs/|tests/|\.github/)' || true
+            )
+            if [ "${#candidate_files[@]}" -eq 0 ]; then
+              echo 'no product files found in writer-retry merge' >&2
+              exit 35
+            fi
+
+            passing_candidates=()
+            for candidate in "${candidate_files[@]}"; do
+              echo "Trying writer-retry reversal for $candidate"
+              git reset --hard "$merged_head"
+              git revert --no-commit -m 1 "$WRITER_RETRY_MERGE"
+              temp="$(mktemp)"
+              cp "$candidate" "$temp"
+              git reset --hard "$merged_head"
+              mkdir -p "$(dirname "$candidate")"
+              cp "$temp" "$candidate"
+              rm -f "$temp"
+              if run_modules "/tmp/task6-focused-$(basename "$candidate").log" "${focused_modules[@]}"; then
+                passing_candidates+=("$candidate")
+              fi
+            done
+
+            if [ "${#passing_candidates[@]}" -ne 1 ]; then
+              printf 'expected exactly one compatible writer-retry file candidate; found %s\n' "${#passing_candidates[@]}" >&2
+              printf '%s\n' "${passing_candidates[@]}" >&2
+              exit 36
+            fi
+            selected_file="${passing_candidates[0]}"
+
+            git reset --hard "$merged_head"
+            git revert --no-commit -m 1 "$WRITER_RETRY_MERGE"
+            temp="$(mktemp)"
+            cp "$selected_file" "$temp"
+            git reset --hard "$merged_head"
+            mkdir -p "$(dirname "$selected_file")"
+            cp "$temp" "$selected_file"
+            rm -f "$temp"
+            git add "$selected_file"
+            git commit -m 'fix: reconcile Task 6 write guard with current writer locking'
+          fi
+
+          run_modules /tmp/task6-focused-final.log "${focused_modules[@]}"
+
+          mapfile -t all_modules < <(
+            find tests -maxdepth 1 -type f -name 'test_*.py' -printf '%f\n' |
+              sort |
+              sed -E 's#^(test_[^/]+)\.py$#tests.\1#'
+          )
+          if [ "${#all_modules[@]}" -eq 0 ]; then
+            echo 'repository test discovery returned zero modules' >&2
+            exit 37
+          fi
+          run_modules /tmp/task6-full-isolated.log "${all_modules[@]}"
+
+          env PYTHONPATH="$PWD/src" python -m compileall -q src tests
+          env PYTHONPATH="$PWD/src" python -m unit_test_runner --help >/tmp/task6-cli-help.txt
+          git diff --check origin/main...HEAD
+
+          rm -rf /tmp/task6-dist /tmp/task6-wheel-venv
+          python -m build --wheel --outdir /tmp/task6-dist
+          python -m venv /tmp/task6-wheel-venv
+          /tmp/task6-wheel-venv/bin/python -m pip install --upgrade pip
+          /tmp/task6-wheel-venv/bin/python -m pip install /tmp/task6-dist/*.whl
+          /tmp/task6-wheel-venv/bin/python -m unit_test_runner --help >/tmp/task6-wheel-help.txt
+          /tmp/task6-wheel-venv/bin/python - <<'PY'
+          import json
+          from importlib.resources import files
+          root = files('unit_test_runner.schemas')
+          schemas = list(root.iterdir())
+          json_files = [path for path in schemas if path.name.endswith('.json')]
+          if not json_files:
+              raise SystemExit('installed wheel contains no JSON schemas')
+          for path in json_files:
+              json.loads(path.read_text(encoding='utf-8'))
+          print(f'loaded {len(json_files)} installed schemas')
+          PY
+
+          final_head="$(git rev-parse HEAD)"
+          final_tree="$(git rev-parse HEAD^{tree})"
+          echo "selected_file=${selected_file:-none}"
+          echo "modules=${#all_modules[@]}"
+          echo "final_head=$final_head"
+          echo "final_tree=$final_tree"
+          git status --short
+          test -z "$(git status --porcelain)"
+          git push --force-with-lease origin "HEAD:refs/heads/$PRODUCT_BRANCH"
