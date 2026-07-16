@@ -1,0 +1,95 @@
+name: Audit planned change sets integrated
+
+on:
+  push:
+    branches:
+      - codex/task6-integration-orchestrator
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: audit-planned-changes-integrated
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 115
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: katamor1/unitTestRunner
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Wait for verified merges and audit branch completeness
+        shell: bash
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 6600))
+          main_sha=''
+          while (( SECONDS < deadline )); do
+            pr20_merged="$(gh pr view 20 --repo "$REPO" --json mergedAt --jq '.mergedAt // empty' 2>/dev/null || true)"
+            pr21_merged="$(gh pr view 21 --repo "$REPO" --json mergedAt --jq '.mergedAt // empty' 2>/dev/null || true)"
+            main_sha="$(gh api "repos/$REPO/branches/main" --jq '.commit.sha')"
+            runs="$(gh api "repos/$REPO/actions/runs?head_sha=$main_sha&event=push&per_page=100")"
+            ci_success="$(jq '[.workflow_runs[] | select(.name == "CI" and .status == "completed" and .conclusion == "success")] | length' <<<"$runs")"
+            ci_pending="$(jq '[.workflow_runs[] | select(.name == "CI" and .status != "completed")] | length' <<<"$runs")"
+            ci_failed="$(jq '[.workflow_runs[] | select(.name == "CI" and .status == "completed" and .conclusion != "success")] | length' <<<"$runs")"
+            echo "pr20=${pr20_merged:-open} pr21=${pr21_merged:-open} main=$main_sha ci_success=$ci_success ci_pending=$ci_pending ci_failed=$ci_failed"
+            [ "$ci_failed" -eq 0 ] || exit 51
+            if [ -n "$pr20_merged" ] && [ -n "$pr21_merged" ] && [ "$ci_success" -gt 0 ] && [ "$ci_pending" -eq 0 ]; then
+              break
+            fi
+            sleep 30
+          done
+          (( SECONDS < deadline )) || { echo 'verified main state did not arrive before timeout' >&2; exit 52; }
+
+          for stale in 11 12 13 14 15 16; do
+            state="$(gh pr view "$stale" --repo "$REPO" --json state --jq '.state' 2>/dev/null || true)"
+            if [ "$state" = OPEN ]; then
+              gh pr comment "$stale" --repo "$REPO" --body 'Superseded by the verified current-main integrations in PR #20 and PR #21. This recovery/carrier PR is intentionally closed without merge.'
+              gh pr close "$stale" --repo "$REPO"
+            fi
+          done
+
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+          git switch --detach origin/main
+
+          excluded="$(mktemp)"
+          printf '%s\n' 'origin/codex/task6-integration-orchestrator' > "$excluded"
+          for stale in 11 12 13 14 15 16; do
+            head="$(gh pr view "$stale" --repo "$REPO" --json headRefName --jq '.headRefName' 2>/dev/null || true)"
+            [ -z "$head" ] || printf 'origin/%s\n' "$head" >> "$excluded"
+          done
+
+          unresolved=0
+          while IFS= read -r ref; do
+            [ "$ref" = origin/HEAD ] && continue
+            [ "$ref" = origin/main ] && continue
+            if grep -Fxq "$ref" "$excluded"; then
+              echo "excluded carrier/orchestrator: $ref"
+              continue
+            fi
+            ahead="$(git rev-list --count origin/main.."$ref")"
+            [ "$ahead" -gt 0 ] || continue
+            echo "UNINTEGRATED_BRANCH $ref ahead=$ahead"
+            git log --oneline --decorate --no-merges origin/main.."$ref" | head -50
+            git diff --name-status origin/main..."$ref" | head -200
+            unresolved=$((unresolved + 1))
+          done < <(git for-each-ref --format='%(refname:short)' refs/remotes/origin | sort)
+
+          [ "$unresolved" -eq 0 ] || {
+            echo "$unresolved non-carrier branches still contain commits not integrated into main" >&2
+            exit 53
+          }
+
+          open_prs="$(gh pr list --repo "$REPO" --state open --limit 100 --json number,title,headRefName)"
+          echo "$open_prs" | jq .
+          echo "AUDIT_OK main=$main_sha"
