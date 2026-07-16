@@ -674,7 +674,7 @@ def _previous_test_spec(
 
 
 def _payloads_from_previous_dossier(dossier_path: Path) -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[str, Path]]:
-    dossier = _read_json(dossier_path)
+    dossier = _previous_dossier_consumer_payload(_read_json(dossier_path))
     payloads: dict[str, dict[str, Any]] = {}
     paths = _ArtifactPaths()
     for key in (
@@ -724,6 +724,19 @@ def _payloads_from_previous_dossier(dossier_path: Path) -> tuple[dict[str, Any],
     return dossier, payloads, paths
 
 
+def _previous_dossier_consumer_payload(document: dict[str, Any]) -> dict[str, Any]:
+    current_envelope_shape = any(
+        key in document for key in ("producer", "subject", "data", "extensions")
+    )
+    if not current_envelope_shape:
+        return copy.deepcopy(document)
+    return normalize_consumer_data(
+        document,
+        expected_kind=ArtifactKind.FUNCTION_DOSSIER,
+        allow_legacy_v01=True,
+    )
+
+
 def _artifact_json_path(dossier: dict[str, Any], key: str, dossier_path: Path) -> Path | None:
     value = dossier.get(key)
     if isinstance(value, dict) and isinstance(value.get("json"), str):
@@ -753,12 +766,18 @@ def _artifact_index_json_path(dossier: dict[str, Any], key: str, dossier_path: P
 
 
 def _artifact_index_root(dossier: dict[str, Any], dossier_path: Path) -> Path:
+    default_root = (
+        dossier_path.parent.parent
+        if dossier_path.parent.name == "reports"
+        else dossier_path.parent
+    ).resolve()
     workspace_root = dossier.get("workspace_root")
     if isinstance(workspace_root, str) and workspace_root:
-        return Path(workspace_root).expanduser().resolve()
-    if dossier_path.parent.name == "reports":
-        return dossier_path.parent.parent.resolve()
-    return dossier_path.parent.resolve()
+        declared_root = Path(workspace_root).expanduser()
+        if declared_root.is_absolute():
+            return declared_root.resolve()
+        return (default_root / declared_root).resolve()
+    return default_root
 
 
 def _snapshot_from_previous_dossier(
