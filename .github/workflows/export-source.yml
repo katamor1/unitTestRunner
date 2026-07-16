@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - codex/execute-hardening-task38
+  pull_request:
   workflow_dispatch:
 
 permissions:
