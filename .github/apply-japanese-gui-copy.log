@@ -10,11 +10,11 @@ Error: Python patch script could not be executed successfully.
 python: exit 1
 
 Traceback (most recent call last):
-  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-4184.py", line 729, in <module>
+  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-3064.py", line 729, in <module>
     main()
-  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-4184.py", line 385, in main
+  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-3064.py", line 385, in main
     replace_exact("vscode/extension/src/workflow/workflowState.ts", old, new, expected)
-  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-4184.py", line 14, in replace_exact
+  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-3064.py", line 14, in replace_exact
     raise AssertionError(
 AssertionError: vscode/extension/src/workflow/workflowState.ts: expected 2 occurrence(s) of "label: '\u6700\u5f8c\u306eCLI\u3092\u30b3\u30d4\u30fc'", found 3
 
@@ -22,10 +22,10 @@ AssertionError: vscode/extension/src/workflow/workflowState.ts: expected 2 occur
 py: exit 1
 
 Traceback (most recent call last):
-  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-4184.py", line 729, in <module>
+  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-3064.py", line 729, in <module>
     main()
     ~~~~^^
-  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-4184.py", line 119, in main
+  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-3064.py", line 119, in main
         replace_exact(
         ~~~~~~~~~~~~~^
             "vscode/extension/src/config/settingsViewModel.ts",
@@ -35,7 +35,7 @@ Traceback (most recent call last):
     ^^^^
         )
         ^
-  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-4184.py", line 14, in replace_exact
+  File "C:\Users\RUNNER~1\AppData\Local\Temp\apply-japanese-gui-copy-3064.py", line 14, in replace_exact
     raise AssertionError(
         f"{relative_path}: expected {expected} occurrence(s) of {old!r}, found {actual}"
     )
