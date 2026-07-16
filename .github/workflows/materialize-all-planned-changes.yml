@@ -1,0 +1,145 @@
+name: Materialize all planned changes
+
+on:
+  push:
+    branches:
+      - codex/bootstrap-integrate-all-plans
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: materialize-all-planned-changes
+  cancel-in-progress: true
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bootstrap branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct through current-dossier compatibility fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch --no-tags origin \
+            +refs/heads/codex/bootstrap-integrate-all-plans:refs/remotes/origin/codex/bootstrap-integrate-all-plans \
+            +refs/heads/codex/bootstrap-p1t6-v3:refs/remotes/origin/codex/bootstrap-p1t6-v3 \
+            +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse origin/main)" = "969ce9462a688e94c887d6e77359e40296d8927b"
+          git cat-file -e "a204f3aec3015fdb6eea26cf7e566cc9523ba046^{commit}"
+
+          carrier=origin/codex/bootstrap-p1t6-v3
+          git ls-tree -r --name-only "$carrier" .github/bootstrap/p1t6-v3-b64 \
+            | sort \
+            | while IFS= read -r path; do git show "$carrier:$path"; done \
+            | tr -d '\r\n' \
+            | base64 --decode > "$RUNNER_TEMP/p1t6.patch.gz"
+          test "$(stat -c%s "$RUNNER_TEMP/p1t6.patch.gz")" = "41476"
+          test "$(sha256sum "$RUNNER_TEMP/p1t6.patch.gz" | awk '{print $1}')" = \
+            "121bfc6fdcbb6e8728402997f291a0ef3af000d775d3c8bca791e0de28d13123"
+          gzip -t "$RUNNER_TEMP/p1t6.patch.gz"
+          gzip -dc "$RUNNER_TEMP/p1t6.patch.gz" > "$RUNNER_TEMP/p1t6.patch"
+          test "$(sha256sum "$RUNNER_TEMP/p1t6.patch" | awk '{print $1}')" = \
+            "8aaa74a87b2e1ea64087726bbcbfd8c998d5940c458d04768b63f969fe461ef0"
+
+          git switch -C task6-exact b66790165a2d4f82943cd199b3b499e1f1725fc3
+          git apply --check "$RUNNER_TEMP/p1t6.patch"
+          git apply "$RUNNER_TEMP/p1t6.patch"
+          git add -A
+          test "$(git write-tree)" = "363ddb6f86a4508eb5f4dd2a26013b837a5e26d6"
+          git diff --cached --check
+          git commit -m "feat: complete phase 1 task 6 review decisions"
+          task6_commit=$(git rev-parse HEAD)
+
+          git switch -C codex/integrate-all-plans \
+            a204f3aec3015fdb6eea26cf7e566cc9523ba046
+          set +e
+          git merge --no-ff --no-commit "$task6_commit"
+          merge_status=$?
+          set -e
+          test "$merge_status" = "1"
+          test "$(git diff --name-only --diff-filter=U)" = \
+            "src/unit_test_runner/build_probe.py"
+          git checkout --ours -- src/unit_test_runner/build_probe.py
+          git add src/unit_test_runner/build_probe.py
+          git diff --cached --check
+          git commit -m "merge: integrate Phase 1 Task 6 implementation"
+
+          git show \
+            origin/codex/bootstrap-integrate-all-plans:.github/bootstrap/merged-current-dossier-fix.patch.b64 \
+            | tr -d '\r\n' \
+            | base64 --decode > "$RUNNER_TEMP/integration-fix.patch"
+          test "$(sha256sum "$RUNNER_TEMP/integration-fix.patch" | awk '{print $1}')" = \
+            "aef4c6392879d09f2c2e26fa8f78ce2a4a3b5a07055acca7e366d61c2c42d4e7"
+          git apply --check "$RUNNER_TEMP/integration-fix.patch"
+          git apply "$RUNNER_TEMP/integration-fix.patch"
+          git add src/unit_test_runner/build_probe.py tests/test_build_probe.py
+          git diff --cached --check
+          git commit -m "fix: validate merged current dossier contract"
+          actual_tree=$(git rev-parse HEAD^{tree})
+          echo "Intermediate product tree: $actual_tree"
+          test "$actual_tree" = "eab459fc47683c9e8129426ebc27029ccde4805e"
+
+      - name: Apply finalized-dossier reanalysis fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show \
+            origin/codex/bootstrap-integrate-all-plans:.github/bootstrap/finalized-dossier-reanalysis-fix.patch.b64 \
+            | tr -d '\r\n' \
+            | base64 --decode > "$RUNNER_TEMP/reanalysis-fix.patch"
+          actual_patch_hash=$(sha256sum "$RUNNER_TEMP/reanalysis-fix.patch" | awk '{print $1}')
+          echo "Reanalysis fix hash: $actual_patch_hash"
+          test "$actual_patch_hash" = "d55022a69c921fab4af3adbd216846ac6b336d2b47df307412cb9533747ce359"
+          git apply --check "$RUNNER_TEMP/reanalysis-fix.patch"
+          git apply "$RUNNER_TEMP/reanalysis-fix.patch"
+          git add src/unit_test_runner/reanalysis/workflow.py
+          git diff --cached --check
+          git commit -m "fix: consume finalized dossier envelopes during reanalysis"
+          actual_tree=$(git rev-parse HEAD^{tree})
+          echo "Final product tree: $actual_tree"
+          test "$actual_tree" = "812c6334d5894decfd76103f0d32b97f3495d8e1"
+
+      - name: Run integration-focused verification
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+          OPENBLAS_NUM_THREADS: "1"
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
+        run: |
+          set -euo pipefail
+          python -m pip install "setuptools>=61" wheel
+          python -m pip install -e .
+          python -m unittest \
+            tests.test_build_probe \
+            tests.test_contract_registry \
+            tests.test_contract_validation \
+            tests.test_review_decisions \
+            tests.test_review_decision_staleness \
+            tests.test_review_decision_integration \
+            tests.test_review_decision_cli \
+            tests.test_reanalysis_cli \
+            tests.test_reanalysis_snapshot_builder \
+            -v
+          python -m compileall -q src tests
+          python -m unit_test_runner --help >/dev/null
+          git diff --check origin/main...HEAD
+
+      - name: Publish verified product branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push --force origin HEAD:refs/heads/codex/integrate-all-plans
