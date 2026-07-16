@@ -1,0 +1,198 @@
+name: Idempotent finalize all planned changes
+
+on:
+  push:
+    branches:
+      - codex/all-plans-idempotent-finalizer
+
+permissions:
+  actions: read
+  contents: write
+  issues: write
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: idempotent-finalize-all-plans
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 170
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: katamor1/unitTestRunner
+      FINAL_BRANCH: codex/all-plans-main-integration-final-v2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: vscode/extension/package-lock.json
+
+      - name: Validate exact final tree, merge if needed, and certify main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+
+          head_sha="$(gh api "repos/$REPO/branches/${FINAL_BRANCH//\//%2F}" --jq '.commit.sha')"
+          [ -n "$head_sha" ] || exit 111
+          audit_sha=''
+          status() {
+            local state="$1" description="$2"
+            [ -n "$audit_sha" ] || return 0
+            gh api --method POST "repos/$REPO/statuses/$audit_sha" \
+              -f state="$state" -f context='all-plans/idempotent-final-audit' \
+              -f description="$description" >/dev/null || true
+          }
+          cleanup() {
+            rc=$?
+            if [ "$rc" -ne 0 ]; then status failure 'Idempotent all-plans final audit failed'; fi
+            exit "$rc"
+          }
+          trap cleanup EXIT
+
+          validate_tree() {
+            python -m pip install --upgrade pip build
+            python -m pip install -e .
+            mapfile -t modules < <(
+              find tests -maxdepth 1 -type f -name 'test_*.py' -printf '%f\n' |
+                sort | sed -E 's#^(test_[^/]+)\.py$#tests.\1#'
+            )
+            [ "${#modules[@]}" -gt 0 ] || return 112
+            : > /tmp/idempotent-python.log
+            for module in "${modules[@]}"; do
+              echo "===== $module =====" | tee -a /tmp/idempotent-python.log
+              timeout --signal=TERM --kill-after=20s 360s \
+                env PYTHONPATH="$PWD/src" python -X faulthandler -m unittest "$module" -v \
+                2>&1 | tee -a /tmp/idempotent-python.log
+            done
+            env PYTHONPATH="$PWD/src" python -m compileall -q src tests
+            env PYTHONPATH="$PWD/src" python -m unit_test_runner --help >/tmp/idempotent-cli-help.txt
+            git diff --check HEAD^
+
+            rm -rf /tmp/idempotent-dist /tmp/idempotent-venv
+            python -m build --wheel --outdir /tmp/idempotent-dist
+            python -m venv /tmp/idempotent-venv
+            /tmp/idempotent-venv/bin/python -m pip install --upgrade pip
+            /tmp/idempotent-venv/bin/python -m pip install /tmp/idempotent-dist/*.whl
+            /tmp/idempotent-venv/bin/python -m unit_test_runner --help >/tmp/idempotent-wheel-help.txt
+            /tmp/idempotent-venv/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+          import unit_test_runner
+          root = Path(unit_test_runner.__file__).resolve().parent / 'schemas'
+          schemas = sorted(root.glob('*.json'))
+          if not schemas:
+              raise SystemExit(f'No installed schemas in {root}')
+          for path in schemas:
+              json.loads(path.read_text(encoding='utf-8'))
+          print(f'Loaded {len(schemas)} schemas')
+          PY
+
+            if [ -f vscode/extension/package-lock.json ]; then
+              pushd vscode/extension >/dev/null
+              npm ci
+              node - <<'NODE' >/tmp/idempotent-npm-scripts.txt
+          const p=require('./package.json');
+          for (const name of ['compile','test','lint']) if (p.scripts && p.scripts[name]) console.log(name);
+          NODE
+              while IFS= read -r script; do
+                [ -n "$script" ] && npm run "$script"
+              done </tmp/idempotent-npm-scripts.txt
+              node - <<'NODE' >/tmp/idempotent-extension-scripts.txt
+          const p=require('./package.json');
+          for (const name of ['test:extension-host','test:extension','test:integration']) if (p.scripts && p.scripts[name]) console.log(name);
+          NODE
+              while IFS= read -r script; do
+                [ -n "$script" ] || continue
+                if command -v xvfb-run >/dev/null 2>&1; then xvfb-run -a npm run "$script"; else npm run "$script"; fi
+              done </tmp/idempotent-extension-scripts.txt
+              popd >/dev/null
+            fi
+            printf '%s\n' "${#modules[@]}" >/tmp/idempotent-module-count
+          }
+
+          if ! git merge-base --is-ancestor "$head_sha" origin/main; then
+            git switch --detach "$head_sha"
+            validate_tree
+
+            pr="$(gh pr list --repo "$REPO" --head "$FINAL_BRANCH" --state open --json number --jq '.[0].number // empty')"
+            if [ -z "$pr" ]; then
+              gh pr create --repo "$REPO" --base main --head "$FINAL_BRANCH" --draft \
+                --title 'Integrate all planned change sets into main (verified convergence)' \
+                --body 'Authoritative converged integration. The exact head has passed isolated Python modules, wheel/fresh-install/schema gates, and available VS Code compile/test gates.'
+              pr="$(gh pr list --repo "$REPO" --head "$FINAL_BRANCH" --state open --json number --jq '.[0].number // empty')"
+            fi
+            [ -n "$pr" ] || exit 113
+            current="$(gh pr view "$pr" --repo "$REPO" --json headRefOid --jq '.headRefOid')"
+            [ "$current" = "$head_sha" ] || exit 114
+            if [ "$(gh pr view "$pr" --repo "$REPO" --json isDraft --jq '.isDraft')" = true ]; then
+              gh pr ready "$pr" --repo "$REPO"
+            fi
+            gh pr merge "$pr" --repo "$REPO" --merge --match-head-commit "$head_sha"
+          fi
+
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+          git merge-base --is-ancestor "$head_sha" origin/main || exit 115
+          git switch --detach origin/main
+          audit_sha="$(git rev-parse HEAD)"
+          status pending 'Running idempotent all-plans final audit'
+          validate_tree
+
+          unresolved=/tmp/idempotent-unresolved.txt
+          : > "$unresolved"
+          while IFS= read -r ref; do
+            case "$ref" in
+              origin/HEAD|origin/main|origin/codex/task6-integration-orchestrator|origin/codex/all-plans-final-merge-controller|origin/codex/all-plans-idempotent-finalizer|origin/codex/bootstrap-*|origin/codex/p1t6-upload-*|origin/codex/p1t6-patch-publish*|origin/codex/p1t6-review-decisions-main-integration*|origin/codex/all-plans-main-integration-final*) continue ;;
+            esac
+            git merge-base --is-ancestor "$ref" origin/main && continue
+            ahead="$(git rev-list --count origin/main.."$ref")"
+            [ "$ahead" -eq 0 ] || echo "$ref ahead=$ahead" >> "$unresolved"
+          done < <(git for-each-ref --format='%(refname:short)' refs/remotes/origin | sort)
+          [ ! -s "$unresolved" ] || { cat "$unresolved" >&2; exit 116; }
+
+          final_pr="$(gh pr list --repo "$REPO" --head "$FINAL_BRANCH" --state merged --json number --jq '.[0].number // empty')"
+          for stale in 11 12 13 14 15 16; do
+            state="$(gh pr view "$stale" --repo "$REPO" --json state --jq '.state' 2>/dev/null || true)"
+            if [ "$state" = OPEN ]; then
+              gh pr comment "$stale" --repo "$REPO" --body "Superseded by the verified all-plans integration${final_pr:+ in PR #$final_pr}. This recovery/carrier PR is closed without merge."
+              gh pr close "$stale" --repo "$REPO"
+            fi
+          done
+          open_prs="$(gh pr list --repo "$REPO" --state open --limit 100 --json number,headRefName)"
+          while IFS=$'\t' read -r number head; do
+            [ -n "$number" ] || continue
+            case "$head" in
+              codex/p1t6-review-decisions-main-integration*|codex/all-plans-main-integration-final)
+                gh pr comment "$number" --repo "$REPO" --body "Superseded by the verified final integration${final_pr:+ in PR #$final_pr}; closed without merge."
+                gh pr close "$number" --repo "$REPO"
+                ;;
+            esac
+          done < <(jq -r '.[] | [.number, .headRefName] | @tsv' <<<"$open_prs")
+
+          status success 'All planned changes are merged; final audit passed'
+          trap - EXIT
+          {
+            echo '## Idempotent all-plans finalization complete'
+            echo
+            echo "- Main: $audit_sha"
+            echo "- Integrated final head: $head_sha"
+            echo "- Final PR: ${final_pr:-detected through ancestry}"
+            echo "- Python modules: $(cat /tmp/idempotent-module-count)"
+            echo '- Python, wheel, installed schemas, available VS Code gates: PASS'
+            echo '- Non-carrier remote branch audit: PASS'
+            echo '- Recovery PRs #11-#16: closed without merge'
+          } >> "$GITHUB_STEP_SUMMARY"
