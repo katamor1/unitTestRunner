@@ -122,7 +122,7 @@ describe('Japanese GUI copy contract', () => {
     assert.equal(views.get('unitTestRunner.workflow'), '関数テスト');
     assert.equal(views.get('unitTestRunner.suite'), 'テストスイート');
     assert.doesNotMatch(properties['unitTestRunner.sourceRoot'].description, /workspace folder/);
-    assert.doesNotMatch(properties['unitTestRunner.suiteManifestPath'].description, /manifest/);
+    assert.doesNotMatch(properties['unitTestRunner.suiteManifestPath'].description, /スイートmanifest|manifestのパス/);
 
     const extension = source(path.join('src', 'extension.ts'));
     assert.match(extension, /'ビルドを実行'/);

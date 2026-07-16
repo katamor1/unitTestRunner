@@ -31,7 +31,7 @@ export class SuiteDashboardPanel {
     }
     this.panel = vscode.window.createWebviewPanel(
       SuiteDashboardPanel.viewType,
-      'UnitTestRunner スイート',
+      'UnitTestRunner テストスイート',
       vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true },
     );
@@ -72,7 +72,7 @@ export class SuiteDashboardPanel {
       return;
     }
     if (this.runningLabel) {
-      void vscode.window.showInformationMessage(`UnitTestRunner: ${this.runningLabel}を実行中です。完了するまでお待ちください。`);
+      void vscode.window.showInformationMessage(`UnitTestRunner: 「${this.runningLabel}」を実行しています。完了するまでほかの操作はできません。`);
       return;
     }
     const commandMap: Record<SuiteDashboardCommandKind, string> = {
@@ -100,9 +100,9 @@ export class SuiteDashboardPanel {
 
 function renderDashboardHtml(webview: vscode.Webview, model: SuiteViewModel, runningLabel?: string): string {
   const nonce = createNonce();
-  const reportState = model.reportExists ? escapeHtml(model.lastRunStatus) : '実行結果なし';
-  const error = model.lastError ? `<div class="error">直近エラー: ${escapeHtml(model.lastError)}</div>` : '';
-  const running = runningLabel ? `<div class="busy" role="status">実行中: ${escapeHtml(runningLabel)}<br><span>処理が完了するまでボタンと選択は無効です。</span></div>` : '';
+  const reportState = model.reportExists ? escapeHtml(suiteExecutionStatusLabel(model.lastRunStatus)) : '実行結果はありません';
+  const error = model.lastError ? `<div class="error">前回のエラー: ${escapeHtml(model.lastError)}</div>` : '';
+  const running = runningLabel ? `<div class="busy" role="status">「${escapeHtml(runningLabel)}」を実行しています。<br><span>処理が完了するまでボタンと選択は変更できません。</span></div>` : '';
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -246,29 +246,29 @@ function renderDashboardHtml(webview: vscode.Webview, model: SuiteViewModel, run
 </head>
 <body>
   <header>
-    <h1>スイート</h1>
-    <div class="path">${escapeHtml(model.suitePath || 'suite manifest未設定')}</div>
-    <div class="muted">直近レポート: ${escapeHtml(model.reportPath)} / ${reportState}</div>
+    <h1>テストスイート</h1>
+    <div class="path">${escapeHtml(model.suitePath || 'スイート定義ファイルが設定されていません')}</div>
+    <div class="muted">最新の実行レポート: ${escapeHtml(model.reportPath)} / ${reportState}</div>
     ${error}
     ${running}
     <div class="summary">
-      ${renderMetric('Total', model.summary.total)}
-      ${renderMetric('GREEN', model.summary.green)}
-      ${renderMetric('Not GREEN', model.summary.notGreen)}
-      ${renderMetric('Executed', model.summary.executed)}
-      ${renderMetric('Failed', model.summary.failed)}
+      ${renderMetric('合計', model.summary.total)}
+      ${renderMetric('合格', model.summary.green)}
+      ${renderMetric('不合格', model.summary.notGreen)}
+      ${renderMetric('実行済み', model.summary.executed)}
+      ${renderMetric('失敗', model.summary.failed)}
     </div>
     <div class="actions">
-      <button class="primary" data-kind="register">現在関数を登録</button>
-      <button data-kind="runSelected">選択を実行</button>
-      <button data-kind="runTag">タグ指定で実行</button>
-      <button class="danger" data-kind="runAllGreen">全件GREEN確認</button>
+      <button class="primary" data-kind="register">現在の関数をスイートに登録</button>
+      <button data-kind="runSelected">選択したテストを実行</button>
+      <button data-kind="runTag">タグを指定して実行</button>
+      <button class="danger" data-kind="runAllGreen">全件テストを実行して合否を確認</button>
       <button data-kind="openReport">実行レポートを開く</button>
-      <button data-kind="openManifest">manifestを開く</button>
+      <button data-kind="openManifest">スイート定義ファイルを開く</button>
     </div>
   </header>
   <main>
-    ${model.entries.length === 0 ? '<div class="empty">登録済み関数はありません。</div>' : renderTable(model.entries)}
+    ${model.entries.length === 0 ? '<div class="empty">登録済みの関数はありません。［現在の関数をスイートに登録］から追加してください。</div>' : renderTable(model.entries)}
   </main>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
@@ -307,15 +307,15 @@ function renderTable(entries: SuiteEntryView[]): string {
     <tr>
       <th>選択</th>
       <th>関数</th>
-      <th>ソース</th>
+      <th>ソースファイル</th>
       <th>タグ</th>
-      <th>GREEN</th>
-      <th>実行status</th>
-      <th>テスト</th>
+      <th>合否</th>
+      <th>実行結果</th>
+      <th>テスト結果</th>
       <th>失敗</th>
-      <th>未解決</th>
+      <th>未解決項目</th>
       <th>エラー</th>
-      <th>workspace</th>
+      <th>ワークスペース</th>
     </tr>
   </thead>
   <tbody>${entries.map(renderRow).join('')}</tbody>
@@ -324,7 +324,7 @@ function renderTable(entries: SuiteEntryView[]): string {
 
 function renderRow(entry: SuiteEntryView): string {
   const greenClass = entry.greenStatus === 'green' ? 'green' : entry.greenStatus === 'not_green' ? 'not-green' : '';
-  const greenLabel = entry.greenStatus === 'green' ? 'GREEN' : entry.greenStatus === 'not_green' ? 'Not GREEN' : '未実行';
+  const greenLabel = entry.greenStatus === 'green' ? '合格' : entry.greenStatus === 'not_green' ? '不合格' : '未実行';
   const tests = entry.totalTests > 0 ? `${entry.passedTests}/${entry.totalTests}` : '-';
   return `<tr class="${entry.enabled ? '' : 'disabled'}">
     <td><input type="checkbox" data-entry-id="${escapeAttribute(entry.entryId)}" ${entry.selected ? 'checked' : ''}></td>
@@ -332,7 +332,7 @@ function renderRow(entry: SuiteEntryView): string {
     <td class="wrap">${escapeHtml(entry.source)}</td>
     <td class="wrap">${escapeHtml(entry.tags.join(', '))}</td>
     <td class="${greenClass}">${escapeHtml(greenLabel)}</td>
-    <td>${escapeHtml(entry.lastRunStatus)}</td>
+    <td>${escapeHtml(suiteExecutionStatusLabel(entry.lastRunStatus))}</td>
     <td>${escapeHtml(tests)}</td>
     <td>${entry.failedTests}</td>
     <td>${entry.unresolvedReviewCount}</td>
@@ -345,15 +345,28 @@ function renderMetric(label: string, value: number): string {
   return `<div class="metric"><span>${escapeHtml(label)}</span><strong>${value}</strong></div>`;
 }
 
+function suiteExecutionStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    passed: '成功',
+    failed: '失敗',
+    error: 'エラー',
+    skipped: 'スキップ',
+    not_run: '未実行',
+    suite_run_completed: '完了',
+    suite_run_failed: '失敗',
+  };
+  return labels[status] ?? (status || '未実行');
+}
+
 function suiteDashboardActionLabel(kind: SuiteDashboardMessage['kind']): string {
   const labels: Record<SuiteDashboardMessage['kind'], string> = {
-    register: '現在関数を登録',
-    runSelected: '選択を実行',
-    runTag: 'タグ指定で実行',
-    runAllGreen: '全件GREEN確認',
-    openManifest: 'manifestを開く',
+    register: '現在の関数をスイートに登録',
+    runSelected: '選択したテストを実行',
+    runTag: 'タグを指定して実行',
+    runAllGreen: '全件テストを実行して合否を確認',
+    openManifest: 'スイート定義ファイルを開く',
     openReport: '実行レポートを開く',
-    toggleEntry: '選択を更新',
+    toggleEntry: '選択状態を更新',
   };
   return labels[kind];
 }

@@ -72,8 +72,8 @@ export const SIMPLE_WORKFLOW_ACTIONS: WorkflowAction[] = [
   {
     id: 'quickCheckCurrent',
     kind: 'command',
-    label: 'Quick Checkを実行',
-    repeatLabel: 'Quick Checkを再実行',
+    label: 'クイックチェックを実行',
+    repeatLabel: 'クイックチェックを再実行',
     commandId: 'unitTestRunner.quickCheckCurrentFunction',
     primary: true,
   },
@@ -105,11 +105,11 @@ export const SIMPLE_WORKFLOW_ACTIONS: WorkflowAction[] = [
 ];
 
 export const SIMPLE_SECONDARY_ACTIONS: WorkflowAction[] = [
-  { id: 'openQuickSummary', kind: 'command', label: 'Quick Summaryを開く', commandId: 'unitTestRunner.openQuickSummary' },
+  { id: 'openQuickSummary', kind: 'command', label: 'クイックチェックの概要を開く', commandId: 'unitTestRunner.openQuickSummary' },
   { id: 'openBuildProbeReport', kind: 'openReport', label: 'ビルド結果を開く', reportKey: 'buildProbeReportMd' },
   { id: 'openTestExecutionReport', kind: 'openReport', label: 'テスト結果を開く', reportKey: 'testExecutionReportMd' },
-  { id: 'openOutputWorkspace', kind: 'openOutputWorkspace', label: '出力workspaceを開く' },
-  { id: 'runFullGate', kind: 'command', label: 'Full Gateへ進む', commandId: 'unitTestRunner.runFullGateForCurrentFunction' },
+  { id: 'openOutputWorkspace', kind: 'openOutputWorkspace', label: '出力ワークスペースを開く' },
+  { id: 'runFullGate', kind: 'command', label: 'フルゲートへ進む', commandId: 'unitTestRunner.runFullGateForCurrentFunction' },
 ];
 
 export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
@@ -149,7 +149,7 @@ export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
 
   private async handleMessage(message: WorkflowMessage): Promise<void> {
     if (this.runningLabel) {
-      void vscodeApi().window.showInformationMessage(`UnitTestRunner: ${this.runningLabel}を実行中です。完了するまでお待ちください。`);
+      void vscodeApi().window.showInformationMessage(`UnitTestRunner: 「${this.runningLabel}」を実行しています。完了するまでほかの操作はできません。`);
       return;
     }
     this.runningLabel = message.label || fallbackWorkflowActionLabel(message);
@@ -184,11 +184,11 @@ export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
     const reports = resolveWorkflowReports(state);
     const reportPath = reports?.[reportKey];
     if (typeof reportPath !== 'string' || !reportPath) {
-      void vscodeApi().window.showWarningMessage('UnitTestRunner: 対象レポートがまだ記録されていません。');
+      void vscodeApi().window.showWarningMessage('UnitTestRunner: 対象のレポートはまだ作成されていません。先に該当する処理を実行してください。');
       return;
     }
     if (!fs.existsSync(reportPath)) {
-      void vscodeApi().window.showWarningMessage(`UnitTestRunner: レポートが見つかりません: ${reportPath}`);
+      void vscodeApi().window.showWarningMessage(`UnitTestRunner: レポートが見つかりません。確認先: ${reportPath}`);
       return;
     }
     const { openReport } = await import('../reports/reportOpener');
@@ -225,11 +225,11 @@ export function resolveWorkflowReports(state: WorkflowState): Partial<ReportPath
 export function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState, settings: SettingsViewModel, steps: WorkflowStepViews, optionalActions: WorkflowAction[], runningLabel?: string): string {
   void webview;
   const nonce = createNonce();
-  const functionName = state.functionName || '対象関数未選択';
-  const workspace = state.outputWorkspace || state.reports?.workspace || '出力workspace未選択';
-  const awaiting = state.awaitingSave ? `<div class="notice">保存待ち: ${escapeHtml(state.awaitingSave.filePath)}</div>` : '';
-  const error = state.lastError ? `<div class="error">直近エラー: ${escapeHtml(state.lastError)}</div>` : '';
-  const running = runningLabel ? `<div class="busy" role="status">実行中: ${escapeHtml(runningLabel)}<br><span>大きいプロジェクトでは時間がかかります。完了までボタンは無効です。</span></div>` : '';
+  const functionName = state.functionName || '対象の関数が選択されていません';
+  const workspace = state.outputWorkspace || state.reports?.workspace || '出力ワークスペースが選択されていません';
+  const awaiting = state.awaitingSave ? `<div class="notice">保存を待っています: ${escapeHtml(state.awaitingSave.filePath)}</div>` : '';
+  const error = state.lastError ? `<div class="error">前回のエラー: ${escapeHtml(state.lastError)}</div>` : '';
+  const running = runningLabel ? `<div class="busy" role="status">「${escapeHtml(runningLabel)}」を実行しています。<br><span>大きなプロジェクトでは時間がかかる場合があります。完了するまでほかの操作はできません。</span></div>` : '';
   const simplePanel = renderSimpleWorkflowPanel(functionName, workspace, steps);
   const fullPanel = renderFullWorkflowPanel(functionName, workspace, steps, optionalActions);
   return `<!DOCTYPE html>
@@ -382,8 +382,8 @@ function renderSimpleWorkflowPanel(functionName: string, workspace: string, step
   <h3>${escapeHtml(current.title)}</h3>
   <p>${escapeHtml(current.description)}</p>
   <div class="simple-counts">
-    <div class="simple-count"><strong>${doneCount}</strong><span>完了ステップ</span></div>
-    <div class="simple-count"><strong>${flow.length}</strong><span>簡易ステップ</span></div>
+    <div class="simple-count"><strong>${doneCount}</strong><span>完了したステップ</span></div>
+    <div class="simple-count"><strong>${flow.length}</strong><span>全ステップ</span></div>
   </div>
 </div>
 <div class="simple-flow">
@@ -391,12 +391,12 @@ function renderSimpleWorkflowPanel(functionName: string, workspace: string, step
   ${flow.map(renderSimpleFlowStep).join('')}
 </div>
 <div class="simple-card">
-  <h2>結果・補助</h2>
+  <h2>結果と補助操作</h2>
   <div class="actions">${SIMPLE_SECONDARY_ACTIONS.map((action) => renderAction(action)).join('')}</div>
 </div>
 <div class="simple-card">
   <h2>表示切替</h2>
-  <p class="simple-meta">正式レビューや証跡確認の全工程を見る場合は詳細表示に切り替えます。</p>
+  <p class="simple-meta">レビュー項目や検証資料を含むすべてのステップを確認する場合は、詳細表示に切り替えてください。</p>
   <button type="button" data-view-mode="full">詳細パネルを表示</button>
 </div>`;
 }
@@ -420,10 +420,10 @@ function simpleFlowSteps(steps: WorkflowStepViews): SimpleFlowStepView[] {
     testDone ? 'done' : buildDone ? 'current' : 'pending',
   ];
   return [
-    { title: '1. Quick Check', description: '解析とテスト生成を行います。', status: statuses[0], action: SIMPLE_WORKFLOW_ACTIONS[0] },
-    { title: '2. テストソース確認', description: '入力値・期待値・スタブ設定を確認し、必要に応じて修正します。', status: statuses[1], action: SIMPLE_WORKFLOW_ACTIONS[1] },
+    { title: '1. クイックチェック', description: '関数を解析し、テスト設計とテストソースを生成します。', status: statuses[0], action: SIMPLE_WORKFLOW_ACTIONS[0] },
+    { title: '2. テストソースを確認', description: '入力値・期待値・スタブ設定を確認し、必要に応じて修正します。', status: statuses[1], action: SIMPLE_WORKFLOW_ACTIONS[1] },
     { title: '3. ビルド', description: '生成・修正したテストをコンパイルし、リンク結果を確認します。', status: statuses[2], action: SIMPLE_WORKFLOW_ACTIONS[2] },
-    { title: '4. テスト実行', description: '生成されたテストを実行し、結果レポートを確認します。', status: statuses[3], action: SIMPLE_WORKFLOW_ACTIONS[3] },
+    { title: '4. テストを実行', description: '生成されたテストを実行し、結果レポートを確認します。', status: statuses[3], action: SIMPLE_WORKFLOW_ACTIONS[3] },
   ];
 }
 
@@ -452,7 +452,7 @@ function renderFullWorkflowPanel(functionName: string, workspace: string, steps:
 </div>
 ${steps.map(renderStep).join('')}
 <div class="optional">
-  <h2>任意操作</h2>
+  <h2>その他の操作</h2>
   <div class="actions">${optionalActions.map((action) => renderAction(action)).join('')}</div>
 </div>`;
 }
@@ -484,7 +484,7 @@ function renderAction(action: WorkflowAction, status?: WorkflowStepStatus): stri
 
 function fallbackWorkflowActionLabel(message: WorkflowMessage): string {
   if (message.type === 'settingsAction') {
-    return '設定操作';
+    return '設定を変更';
   }
   if (message.kind === 'command') {
     return commandLabel(message.commandId);
@@ -493,39 +493,39 @@ function fallbackWorkflowActionLabel(message: WorkflowMessage): string {
     return 'レポートを開く';
   }
   if (message.kind === 'confirmStep') {
-    return '工程を更新';
+    return 'ステップを完了';
   }
   if (message.kind === 'openSettings') {
     return '設定を開く';
   }
   if (message.kind === 'openOutputWorkspace') {
-    return '出力workspaceを開く';
+    return '出力ワークスペースを開く';
   }
   if (message.kind === 'copyLastCommand') {
-    return '最後のCLIコマンドをコピー';
+    return '最後に実行したCLIコマンドをコピー';
   }
   return '処理';
 }
 
 function commandLabel(commandId?: string): string {
   const labels: Record<string, string> = {
-    'unitTestRunner.quickCheckCurrentFunction': 'Quick Check',
-    'unitTestRunner.quickCheckSelectedFunction': 'Quick Check',
+    'unitTestRunner.quickCheckCurrentFunction': 'クイックチェック',
+    'unitTestRunner.quickCheckSelectedFunction': 'クイックチェック',
     'unitTestRunner.openGeneratedTestSource': 'テストソースを開く',
-    'unitTestRunner.openQuickSummary': 'Quick Summaryを開く',
-    'unitTestRunner.runFullGateForCurrentFunction': 'Full Gateへ進む',
-    'unitTestRunner.analyzeCurrentFunction': '現在関数を解析',
-    'unitTestRunner.analyzeSelectedFunction': '選択関数を解析',
-    'unitTestRunner.reanalyzeCurrentFunction': '現在関数を再解析',
-    'unitTestRunner.finalizeDossier': 'dossierを確定',
+    'unitTestRunner.openQuickSummary': 'クイックチェックの概要を開く',
+    'unitTestRunner.runFullGateForCurrentFunction': 'フルゲートへ進む',
+    'unitTestRunner.analyzeCurrentFunction': '現在の関数を解析',
+    'unitTestRunner.analyzeSelectedFunction': '選択した関数を解析',
+    'unitTestRunner.reanalyzeCurrentFunction': '現在の関数を再解析',
+    'unitTestRunner.finalizeDossier': '関数分析レポートを確定',
     'unitTestRunner.generateTestDesign': 'テスト設計を生成',
-    'unitTestRunner.generateHarnessSkeleton': 'ハーネスを生成',
-    'unitTestRunner.buildProbeDryRun': 'ビルドプローブをdry-run',
-    'unitTestRunner.runBuildProbe': 'ビルド実行',
-    'unitTestRunner.runTests': 'テスト実行',
-    'unitTestRunner.prepareEvidence': 'エビデンスを準備',
+    'unitTestRunner.generateHarnessSkeleton': 'テストハーネスを生成',
+    'unitTestRunner.buildProbeDryRun': 'ビルドの事前確認を実行',
+    'unitTestRunner.runBuildProbe': 'ビルドを実行',
+    'unitTestRunner.runTests': 'テストを実行',
+    'unitTestRunner.prepareEvidence': '検証資料を作成',
   };
-  return commandId ? labels[commandId] ?? commandId : 'コマンド実行';
+  return commandId ? labels[commandId] ?? commandId : 'コマンドを実行';
 }
 
 function vscodeApi(): typeof import('vscode') {

@@ -199,7 +199,7 @@ describe('CLI envelope compatibility boundary', () => {
     const parsed = parseCliResult('plain output', '', 'C:\\work\\out\\Control_Update');
 
     assert.equal(parsed.reports.functionDossierMd, undefined);
-    assert.ok(parsed.warnings.some((warning) => warning.includes('JSON envelope')));
+    assert.ok(parsed.warnings.some((warning) => warning.includes('JSON形式ではない')));
   });
 
   it('formats validated v1 failures from nested machine fields', () => {
@@ -224,8 +224,8 @@ describe('CLI envelope compatibility boundary', () => {
     const message = formatCliFailureMessage(JSON.stringify(envelope), '', 32);
 
     assert.match(message, /suite-run/);
-    assert.match(message, /全件GREENではありません/);
-    assert.match(message, /GREEN 1 \/ Not GREEN 1 \/ Total 2/);
+    assert.match(message, /全件の合格条件を満たしていません/);
+    assert.match(message, /合計2件 \/ 合格1件 \/ 不合格1件/);
     assert.match(message, /Control_Update failed\./);
     assert.match(message, /One selected entry is not GREEN\./);
   });
