@@ -82,12 +82,11 @@ def _normalize_current_dossier(document: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(document.get("data"), Mapping):
         raise ConsumerContractError("Function dossier data must be an object.")
 
-    compatibility_envelope = copy.deepcopy(dict(document))
-    compatibility_envelope.pop("target", None)
-    compatibility_envelope.pop("build_context", None)
-    compatibility_envelope["schema_version"] = "1.0.0"
+    validated_envelope = copy.deepcopy(dict(document))
+    validated_envelope.pop("target", None)
+    validated_envelope.pop("build_context", None)
     return normalize_consumer_data(
-        compatibility_envelope,
+        validated_envelope,
         expected_kind=ArtifactKind.FUNCTION_DOSSIER,
     )
 
