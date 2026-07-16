@@ -1,0 +1,337 @@
+name: Converge all planned changes onto current main
+
+on:
+  push:
+    branches:
+      - codex/task6-integration-orchestrator
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: converge-all-planned-changes-main
+  cancel-in-progress: false
+
+jobs:
+  converge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 115
+    env:
+      GH_TOKEN: ${{ github.token }}
+      FINAL_BRANCH: codex/all-plans-main-integration-final
+      TASK6_TREE: 363ddb6f86a4508eb5f4dd2a26013b837a5e26d6
+      PR20_HEAD: a204f3aec3015fdb6eea26cf7e566cc9523ba046
+      WRITER_RETRY_MERGE: 969ce9462a688e94c887d6e77359e40296d8927b
+    steps:
+      - name: Checkout complete repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Converge, verify, audit, and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+
+          base_sha="$(git rev-parse origin/main)"
+          git switch --force-create "$FINAL_BRANCH" origin/main
+
+          # PR #20 is the carrier-free planning/consumer-compatibility change set.
+          if ! git merge-base --is-ancestor "$PR20_HEAD" HEAD; then
+            git merge --no-ff --no-edit "$PR20_HEAD"
+          fi
+
+          mapfile -t task6_targets < <(
+            git log --all --pretty='%H %T' |
+              awk -v tree="$TASK6_TREE" '$2 == tree { print $1 }' |
+              sort -u
+          )
+          [ "${#task6_targets[@]}" -ge 1 ] || {
+            echo "No commit found for pinned Task 6 tree $TASK6_TREE" >&2
+            exit 71
+          }
+          task6_target="${task6_targets[0]}"
+          task6_base="$(git merge-base HEAD "$task6_target")"
+
+          mapfile -t task6_modules < <(
+            git diff --name-only "$task6_base" "$task6_target" -- 'tests/test_*.py' |
+              sort -u |
+              sed -E 's#^tests/(test_[^/]+)\.py$#tests.\1#'
+          )
+          [ "${#task6_modules[@]}" -gt 0 ] || {
+            echo 'Pinned Task 6 checkpoint changes no test modules' >&2
+            exit 72
+          }
+
+          task6_was_ancestor=false
+          merged_head=''
+          if git merge-base --is-ancestor "$task6_target" HEAD; then
+            task6_was_ancestor=true
+          else
+            git merge --no-ff --no-edit -X ours "$task6_target"
+            merged_head="$(git rev-parse HEAD)"
+          fi
+
+          python -m pip install --upgrade pip build
+          python -m pip install -e .
+
+          run_modules() {
+            local log="$1"
+            shift
+            : > "$log"
+            local module
+            for module in "$@"; do
+              echo "===== $module =====" | tee -a "$log"
+              if ! timeout --signal=TERM --kill-after=20s 360s \
+                  env PYTHONPATH="$PWD/src" python -X faulthandler -m unittest "$module" -v \
+                  2>&1 | tee -a "$log"; then
+                echo "FAILED_OR_TIMED_OUT=$module" | tee -a "$log"
+                return 1
+              fi
+            done
+          }
+
+          selected_file='none'
+          selected_hunk='none'
+          if ! run_modules /tmp/task6-focused-initial.log "${task6_modules[@]}"; then
+            [ "$task6_was_ancestor" = false ] || {
+              echo 'Task 6 is already in main ancestry but its focused tests fail' >&2
+              exit 73
+            }
+            git merge-base --is-ancestor "$WRITER_RETRY_MERGE" HEAD || {
+              echo 'Expected writer-retry merge is not in the converged history' >&2
+              exit 74
+            }
+
+            mapfile -t interaction_files < <(
+              git diff --name-only "${WRITER_RETRY_MERGE}^1" "$WRITER_RETRY_MERGE" -- |
+                grep -Ev '^(docs/|tests/|\.github/)' || true
+            )
+            [ "${#interaction_files[@]}" -gt 0 ] || {
+              echo 'Writer-retry merge has no product files to isolate' >&2
+              exit 75
+            }
+
+            passing_files=()
+            for candidate in "${interaction_files[@]}"; do
+              git reset --hard "$merged_head"
+              git revert --no-commit -m 1 "$WRITER_RETRY_MERGE"
+              temp="$(mktemp)"
+              cp "$candidate" "$temp"
+              git reset --hard "$merged_head"
+              mkdir -p "$(dirname "$candidate")"
+              cp "$temp" "$candidate"
+              rm -f "$temp"
+              if run_modules "/tmp/task6-file-$(basename "$candidate").log" "${task6_modules[@]}"; then
+                passing_files+=("$candidate")
+              fi
+            done
+            [ "${#passing_files[@]}" -eq 1 ] || {
+              printf 'Expected one interacting product file; found %s\n' "${#passing_files[@]}" >&2
+              printf '%s\n' "${passing_files[@]}" >&2
+              exit 76
+            }
+            selected_file="${passing_files[0]}"
+
+            git reset --hard "$merged_head"
+            git revert --no-commit -m 1 "$WRITER_RETRY_MERGE"
+            git commit -m 'test: materialize writer-retry reversal for Task 6 hunk isolation'
+            reverted_head="$(git rev-parse HEAD)"
+            run_modules /tmp/task6-reverted-baseline.log "${task6_modules[@]}"
+
+            git diff --no-ext-diff --unified=0 "$reverted_head" "$merged_head" -- "$selected_file" > /tmp/task6-interaction.diff
+            rm -rf /tmp/task6-interaction-hunks
+            mkdir -p /tmp/task6-interaction-hunks
+            python - <<'PY'
+          from pathlib import Path
+          source = Path('/tmp/task6-interaction.diff').read_text(encoding='utf-8').splitlines(keepends=True)
+          header: list[str] = []
+          hunks: list[list[str]] = []
+          current: list[str] | None = None
+          for line in source:
+              if line.startswith('@@ '):
+                  if current is not None:
+                      hunks.append(current)
+                  current = [line]
+              elif current is None:
+                  header.append(line)
+              else:
+                  current.append(line)
+          if current is not None:
+              hunks.append(current)
+          if not hunks:
+              raise SystemExit('No independent hunks found in the writer interaction')
+          root = Path('/tmp/task6-interaction-hunks')
+          for index, hunk in enumerate(hunks):
+              (root / f'{index:04d}.patch').write_text(''.join(header + hunk), encoding='utf-8')
+          print(f'Wrote {len(hunks)} hunk patches')
+          PY
+
+            failing_hunks=()
+            for patch in /tmp/task6-interaction-hunks/*.patch; do
+              git reset --hard "$reverted_head"
+              if ! git apply --unidiff-zero --recount "$patch"; then
+                echo "Non-independent hunk skipped: $patch"
+                continue
+              fi
+              if ! run_modules "/tmp/task6-hunk-$(basename "$patch").log" "${task6_modules[@]}"; then
+                failing_hunks+=("$patch")
+              fi
+            done
+            [ "${#failing_hunks[@]}" -eq 1 ] || {
+              printf 'Expected one independently failing hunk; found %s\n' "${#failing_hunks[@]}" >&2
+              printf '%s\n' "${failing_hunks[@]}" >&2
+              exit 77
+            }
+            selected_hunk="${failing_hunks[0]}"
+
+            git reset --hard "$merged_head"
+            git apply --unidiff-zero --recount -R "$selected_hunk"
+            git add "$selected_file"
+            git commit -m 'fix: reconcile Task 6 write guard with bounded writer retries'
+          fi
+
+          # Focused proof includes the Task 6 modules and every regression changed by PR #19.
+          mapfile -t writer_modules < <(
+            git diff --name-only "${WRITER_RETRY_MERGE}^1" "$WRITER_RETRY_MERGE" -- 'tests/test_*.py' |
+              sort -u |
+              sed -E 's#^tests/(test_[^/]+)\.py$#tests.\1#'
+          )
+          mapfile -t focused_modules < <(
+            printf '%s\n' "${task6_modules[@]}" "${writer_modules[@]}" |
+              awk 'NF && !seen[$0]++'
+          )
+          run_modules /tmp/all-plans-focused-final.log "${focused_modules[@]}"
+
+          mapfile -t all_modules < <(
+            find tests -maxdepth 1 -type f -name 'test_*.py' -printf '%f\n' |
+              sort |
+              sed -E 's#^(test_[^/]+)\.py$#tests.\1#'
+          )
+          [ "${#all_modules[@]}" -gt 0 ] || {
+            echo 'Repository test discovery returned zero modules' >&2
+            exit 78
+          }
+          run_modules /tmp/all-plans-full-isolated.log "${all_modules[@]}"
+
+          env PYTHONPATH="$PWD/src" python -m compileall -q src tests
+          env PYTHONPATH="$PWD/src" python -m unit_test_runner --help >/tmp/all-plans-cli-help.txt
+          git diff --check origin/main...HEAD
+
+          rm -rf /tmp/all-plans-dist /tmp/all-plans-wheel-venv
+          python -m build --wheel --outdir /tmp/all-plans-dist
+          python -m venv /tmp/all-plans-wheel-venv
+          /tmp/all-plans-wheel-venv/bin/python -m pip install --upgrade pip
+          /tmp/all-plans-wheel-venv/bin/python -m pip install /tmp/all-plans-dist/*.whl
+          /tmp/all-plans-wheel-venv/bin/python -m unit_test_runner --help >/tmp/all-plans-wheel-help.txt
+          /tmp/all-plans-wheel-venv/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+          import unit_test_runner
+          schema_root = Path(unit_test_runner.__file__).resolve().parent / 'schemas'
+          schemas = sorted(schema_root.glob('*.json'))
+          if not schemas:
+              raise SystemExit(f'Installed wheel contains no schemas under {schema_root}')
+          for schema in schemas:
+              json.loads(schema.read_text(encoding='utf-8'))
+          print(f'Loaded {len(schemas)} installed JSON schemas')
+          PY
+
+          # Every remaining remote branch must either be integrated, be an explicit
+          # recovery/carrier, or be superseded by the pinned Task 6/PR20 histories.
+          unresolved=/tmp/all-plans-unresolved-branches.txt
+          excluded=/tmp/all-plans-excluded-branches.txt
+          : > "$unresolved"
+          : > "$excluded"
+          while IFS= read -r ref; do
+            case "$ref" in
+              origin/HEAD|origin/main|origin/codex/task6-integration-orchestrator|origin/$FINAL_BRANCH)
+                continue
+                ;;
+            esac
+            if git merge-base --is-ancestor "$ref" HEAD; then
+              continue
+            fi
+            ahead="$(git rev-list --count origin/main.."$ref")"
+            [ "$ahead" -gt 0 ] || continue
+            if git merge-base --is-ancestor "$ref" "$task6_target" 2>/dev/null; then
+              echo "$ref superseded-by-task6-tree" >> "$excluded"
+              continue
+            fi
+            if git merge-base --is-ancestor "$ref" "$PR20_HEAD" 2>/dev/null; then
+              echo "$ref superseded-by-pr20-head" >> "$excluded"
+              continue
+            fi
+            case "$ref" in
+              origin/codex/bootstrap-*|origin/codex/p1t6-upload-*|origin/codex/p1t6-patch-publish*|origin/codex/p1t6-review-decisions-main-integration*|origin/codex/all-plans-main-integration-final)
+                echo "$ref explicit-recovery-or-replacement" >> "$excluded"
+                ;;
+              *)
+                echo "$ref ahead=$ahead" >> "$unresolved"
+                git log --oneline --no-merges origin/main.."$ref" | head -50 >> "$unresolved"
+                git diff --name-status origin/main..."$ref" | head -200 >> "$unresolved"
+                ;;
+            esac
+          done < <(git for-each-ref --format='%(refname:short)' refs/remotes/origin | sort)
+          if [ -s "$unresolved" ]; then
+            echo 'Unintegrated non-carrier branches remain:' >&2
+            cat "$unresolved" >&2
+            exit 79
+          fi
+
+          final_tree="$(git rev-parse HEAD^{tree})"
+          mkdir -p docs/review
+          cat > docs/review/2026-07-16-all-planned-changes-main-integration.md <<EOF
+          # All Planned Change Sets — Main Integration Evidence
+
+          - Baseline main: \`$base_sha\`
+          - Converged tree before this evidence commit: \`$final_tree\`
+          - PR #20 fixed head: \`$PR20_HEAD\`
+          - Phase 1 Task 6 pinned tree: \`$TASK6_TREE\`
+          - Phase 1 Task 6 source commit: \`$task6_target\`
+          - Task 6 already in main ancestry at start: \`$task6_was_ancestor\`
+          - Writer interaction file: \`$selected_file\`
+          - Minimal reversed hunk: \`$selected_hunk\`
+          - Focused isolated modules: \`${#focused_modules[@]}\`
+          - Repository isolated modules: \`${#all_modules[@]}\`
+          - Python compileall: PASS
+          - Source-tree CLI help: PASS
+          - Wheel build and fresh install: PASS
+          - Installed-wheel CLI help: PASS
+          - Installed JSON schema load: PASS
+          - Git whitespace/error check: PASS
+          - Non-carrier remote branch audit: PASS
+
+          ## Superseded recovery and replacement branches
+
+          \`\`\`text
+          $(cat "$excluded")
+          \`\`\`
+
+          The recovery/carrier pull requests are intentionally closed without merge after this
+          converged branch is merged and the standard hosted CI passes on \`main\`.
+          EOF
+          sed -i 's/^          //' docs/review/2026-07-16-all-planned-changes-main-integration.md
+          git add docs/review/2026-07-16-all-planned-changes-main-integration.md
+          git commit -m 'docs: record all planned changes main integration evidence'
+
+          final_sha="$(git rev-parse HEAD)"
+          echo "base_sha=$base_sha"
+          echo "task6_target=$task6_target"
+          echo "task6_was_ancestor=$task6_was_ancestor"
+          echo "selected_file=$selected_file"
+          echo "selected_hunk=$selected_hunk"
+          echo "focused_modules=${#focused_modules[@]}"
+          echo "all_modules=${#all_modules[@]}"
+          echo "final_sha=$final_sha"
+          test -z "$(git status --porcelain)"
+          git push --force-with-lease origin "HEAD:refs/heads/$FINAL_BRANCH"
