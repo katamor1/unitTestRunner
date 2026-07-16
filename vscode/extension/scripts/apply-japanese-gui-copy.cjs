@@ -149,7 +149,10 @@ async function prepare() {
   } finally {
     fs.rmSync(scriptPath, { force: true });
   }
-  run('npm.cmd', ['run', 'compile'], { cwd: EXTENSION_ROOT });
+  run('npm.cmd', ['run', 'compile'], {
+    cwd: EXTENSION_ROOT,
+    shell: process.platform === 'win32',
+  });
 }
 
 function restoreOriginalRunner() {
