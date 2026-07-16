@@ -12,6 +12,210 @@
 
 ---
 
+## 0. 2026-07-17 mandatory current-main reconciliation
+
+> **Normative precedence:** This dated section is the controlling execution protocol for all Task 6 work after `b19980da0789d5396f7ac7fa7799eea79915a440`. It supersedes every conflicting historical base, carrier-history, obsolete-PR, slice-entry, product-scope, gate, PR, merge, and closeout clause later in this document. Later sections remain semantic design and historical evidence only where they do not conflict with this section. In particular, no later command may test carrier history from `969ce946...HEAD`, treat PRs #11-#16 as open, or use the pre-reconciliation broad product allowlist.
+
+### 0.1 Reconciled history, live evidence, and accounting
+
+- `969ce9462a688e94c887d6e77359e40296d8927b` remains the **historical Task 6 start**, not the base for the next product diff or carrier-history gate.
+- The external reconciliation anchor is exact current-main commit `b19980da0789d5396f7ac7fa7799eea79915a440`, tree `bc2cb3922817257a9c38c62196758d39fdae43e1`. Its exact main run `29509934587` was 6/6 GREEN; this is also the recorded PR #24 merge run.
+- Historical merge PR #21, exact merge `bf5034f4dfa1886e9091ca102e2796ed33d870a8`, did **not** satisfy the intended carrier-free history rule. Its tree introduced these exact three carrier paths:
+  - `.github/bootstrap/finalized-dossier-reanalysis-fix.patch.b64`
+  - `.github/bootstrap/merged-current-dossier-fix.patch.b64`
+  - `.github/workflows/materialize-all-planned-changes.yml`
+- PR #20 merge `8ea10bdf5713d263a80e915f7abbbabeb1d3fcfa` used `bf5034f4dfa1886e9091ca102e2796ed33d870a8` as its first parent, so that integration history carried the three paths even though its own product intent was described as carrier-free. PR #20 head `f00a587d227a1687b994f41fd57ce12823152103` run `29494843353` and exact merge run `29496632184` were 6/6 GREEN; those GREEN results do not retroactively make the preceding history compliant.
+- PR #22/integration merge `3462729ff6e85df0523c655d7a6fb532cbb052f0` removed the exact three paths from the resulting tree. That integration/direct-fix sequence is historical repair evidence, but it does not rewrite the fact that PR #21 and PR #20 traversed a noncompliant history. The later `b19980d` tree contains none of the three paths.
+- Do not rewrite public history, reopen an old PR, or manufacture a reordered merge sequence to claim that the external history complied. The only forward carrier claim permitted is the mechanically verified `b19980d..candidate` and `b19980d..merge` claim below.
+- PRs #11-#16 are already `CLOSED` and unmerged. They were closed before the product-merge boundary required by the earlier plan. Do not reopen them, do not call the early closure compliant, and do not delete their remote branches. After the new reconciliation product merge is exact-SHA verified, read all six back and record their still-`CLOSED` state as present-tense closeout evidence.
+- Durable progress remains **13/38**. Neither the historical external merges, this amendment, an unmerged reconciliation candidate, nor a GREEN product PR advances the numerator. Task 6 becomes **14/38** only after the reconciliation product merge passes exact-merge local and hosted-main verification and the exact four-path closeout PR is merged and verified.
+
+### 0.2 Base lift and amendment boundary
+
+1. This plan amendment is a documentation-only PR from exact anchor `b19980da0789d5396f7ac7fa7799eea79915a440`; its branch diff contains only this plan path. Its exact head must pass all six hosted jobs, it must merge with fixed base/head/tree identities, and the resulting exact main merge SHA must also pass all six hosted jobs.
+2. Create or rebase the reconciliation product branch only after that amendment merge is verified. Its `reviewed_base_sha` is the then-exact `origin/main` amendment merge SHA, and `b19980da0789d5396f7ac7fa7799eea79915a440` must be an ancestor of that base and every candidate/merge head.
+3. Freeze `reviewed_base_sha`, `reviewed_head_sha`, `reviewed_tree_sha`, and the exact check-suite head SHA after all local gates and both fresh reviews pass. Immediately before merge, require `origin/main == reviewed_base_sha`; any base drift invalidates the candidate and requires a new base lift plus all gates and reviews again.
+4. Use a merge commit only. Require its first parent to equal `reviewed_base_sha`, second parent to equal `reviewed_head_sha`, and tree to equal `reviewed_tree_sha`. Re-run the carrier gate for the exact merge SHA, run the prescribed local post-merge checks, and require the exact merge SHA's main workflow to be 6/6 GREEN.
+
+### 0.3 Exact reconciliation product scope and audited regressions
+
+The product diff is evaluated as `reviewed_base_sha...reviewed_head_sha`, not from historical `969ce946`. It may contain any necessary subset of these exact paths; an unchanged path may be omitted, but no other path is permitted without another reviewed plan amendment:
+
+- `src/unit_test_runner/contracts/validator.py`
+- `src/unit_test_runner/dossier/finalizer.py`
+- `src/unit_test_runner/dossier/review_workflow.py`
+- `src/unit_test_runner/review_ids.py`
+- `src/unit_test_runner/test_spec/generation.py`
+- `src/unit_test_runner/test_spec/identity.py`
+- `src/unit_test_runner/test_spec/models.py`
+- `tests/test_dossier_review_workflow.py`
+- `tests/test_review_decisions.py`
+- `tests/test_test_spec_contract.py`
+- `docs/superpowers/plans/2026-07-15-phase1-task6-gate-evidence.md`
+
+This is a current-main reconciliation, not only a tuple-fix replay. The candidate must remediate all **28 audited current regressions** in the following closed groups and preserve their tests:
+
+- exact-scalar, embedded-NUL, strict-UTF-8, collision-checked stable review/function IDs;
+- a TestSpec-only safe schema-validation shadow that preserves ordinary schema diagnostics and schema-plus-semantic aggregation without imposing a global exact-container policy;
+- raw model construction before operations, with no invalid scalar/container coercion through `str`, `int`, `dict`, or `list`;
+- exact source-SHA handling plus malformed/unhashable optional collection and review-status guards;
+- normalized case binding to the exact actual spelling and rejection of normalized actual-ID collisions;
+- recursive built-in container materialization without attacker-controlled `deepcopy`/mapping/sequence hooks, plus direct-model exact `related_*` list handling;
+- dossier discovery/finalization fail-closed behavior for malformed direct TestSpec collections, without exceptions or fabricated decisionable items.
+
+The exact 28-test audit set is closed to these method IDs:
+
+1. `tests.test_test_spec_contract.TestSpecContractTests.test_generation_rejects_coerced_function_and_case_identity`
+2. `tests.test_test_spec_contract.TestSpecContractTests.test_generation_rejects_string_subclass_semantic_inputs`
+3. `tests.test_test_spec_contract.TestSpecContractTests.test_related_case_collection_has_one_exact_shared_semantic_contract`
+4. `tests.test_test_spec_contract.TestSpecContractTests.test_equivalent_related_case_spellings_bind_to_exact_candidate`
+5. `tests.test_test_spec_contract.TestSpecContractTests.test_equivalent_related_case_spellings_cannot_bypass_executable_blocker`
+6. `tests.test_test_spec_contract.TestSpecContractTests.test_generation_rejects_ambiguous_normalized_case_spellings`
+7. `tests.test_test_spec_contract.TestSpecContractTests.test_direct_load_blocks_semantically_equivalent_executable_references`
+8. `tests.test_test_spec_contract.TestSpecContractTests.test_direct_load_rejects_semantically_duplicate_actual_case_ids_in_both_orders`
+9. `tests.test_test_spec_contract.TestSpecContractTests.test_strict_unresolved_item_semantics_reject_malformed_fields_independent_of_blocking`
+10. `tests.test_test_spec_contract.TestSpecContractTests.test_schema_invalid_collection_types_are_structured_at_public_boundaries`
+11. `tests.test_test_spec_contract.TestSpecContractTests.test_strict_case_ids_are_validated_before_string_coercion`
+12. `tests.test_test_spec_contract.TestSpecContractTests.test_raw_model_scalars_are_validated_before_construction`
+13. `tests.test_test_spec_contract.TestSpecContractTests.test_schema_version_is_exact_before_public_validation`
+14. `tests.test_test_spec_contract.TestSpecContractTests.test_in_memory_test_spec_scalars_reject_hostile_subclasses`
+15. `tests.test_test_spec_contract.TestSpecContractTests.test_hostile_id_hash_and_equality_are_not_invoked_before_semantics`
+16. `tests.test_test_spec_contract.TestSpecContractTests.test_test_spec_shadow_preserves_schema_and_semantic_diagnostics`
+17. `tests.test_test_spec_contract.TestSpecContractTests.test_test_spec_shadow_blocks_hostile_common_scalar_hooks`
+18. `tests.test_test_spec_contract.TestSpecContractTests.test_generation_rejects_coerced_source_sha_before_construction`
+19. `tests.test_test_spec_contract.TestSpecContractTests.test_generation_rejects_malformed_optional_fields_before_operations`
+20. `tests.test_test_spec_contract.TestSpecContractTests.test_dossier_rejects_malformed_direct_test_spec_collections`
+21. `tests.test_test_spec_contract.TestSpecContractTests.test_setup_and_expression_values_fail_closed_across_consumers`
+22. `tests.test_test_spec_contract.TestSpecContractTests.test_top_level_list_subclasses_use_builtin_storage_at_all_boundaries`
+23. `tests.test_test_spec_contract.TestSpecContractTests.test_nested_container_subclasses_are_materialized_at_consumer_boundaries`
+24. `tests.test_test_spec_contract.TestSpecContractTests.test_exact_related_case_list_policy_is_scoped_to_unresolved_items`
+25. `tests.test_test_spec_contract.TestSpecContractTests.test_direct_model_enforces_exact_unresolved_case_list_before_materialization`
+26. `tests.test_test_spec_contract.TestSpecContractTests.test_direct_exact_list_violation_preserves_other_diagnostics`
+27. `tests.test_test_spec_contract.TestSpecContractTests.test_direct_model_materializes_container_subclasses_before_use`
+28. `tests.test_test_spec_contract.TestSpecContractTests.test_materialized_scalars_do_not_invoke_deepcopy_hooks`
+
+The authoritative isolated gate must observe every ID exactly once in its structured executed-test inventory and no required ID may be absent or duplicated. Gate evidence and the completion record store the sorted required/observed sets, per-ID count, and literal `28/28`; a grouped summary or aggregate module pass is not a substitute.
+
+The reconciliation must preserve the current Task 6 later public APIs and behavior already present at the anchor. It must also retain the provenance-sequence behavior proven by `fa9aa6c38d6bb6cb8100962625105086789bc615`; the product scope does not authorize an unrelated later-API redesign. Use one product writer, begin each behavioral correction with an assertion-level RED, then run the smallest GREEN and related regressions. Fresh spec and code-quality reviewers must both report `C0/I0/M0` for the exact candidate; any finding or byte change invalidates the corresponding review.
+
+### 0.4 Forward carrier and exact-path gate
+
+Run this gate with `gateKind=candidate` before product PR creation and immediately before merge, then with `gateKind=merge` for the exact merge SHA. It replaces every later `969ce946..HEAD` carrier-history command. Every native Git command captures and checks its own exit code before its output is consumed:
+
+```powershell
+$reconciliationAnchor = 'b19980da0789d5396f7ac7fa7799eea79915a440'
+$reviewedBase = '<reviewed_base_sha>'
+$reviewedHead = '<reviewed_head_sha>'
+$gateHead = '<reviewed_head_or_exact_merge_sha>'
+$gateKind = '<candidate_or_merge>'
+$allowedExact = @(
+  'src/unit_test_runner/contracts/validator.py',
+  'src/unit_test_runner/dossier/finalizer.py',
+  'src/unit_test_runner/dossier/review_workflow.py',
+  'src/unit_test_runner/review_ids.py',
+  'src/unit_test_runner/test_spec/generation.py',
+  'src/unit_test_runner/test_spec/identity.py',
+  'src/unit_test_runner/test_spec/models.py',
+  'tests/test_dossier_review_workflow.py',
+  'tests/test_review_decisions.py',
+  'tests/test_test_spec_contract.py',
+  'docs/superpowers/plans/2026-07-15-phase1-task6-gate-evidence.md'
+)
+$carrierPaths = @(
+  '.github/bootstrap/finalized-dossier-reanalysis-fix.patch.b64',
+  '.github/bootstrap/merged-current-dossier-fix.patch.b64',
+  '.github/workflows/materialize-all-planned-changes.yml'
+)
+
+if ($gateKind -notin @('candidate', 'merge')) { throw 'invalid gateKind' }
+$candidateHead = if ($gateKind -eq 'merge') {
+  $value = ((git rev-parse "$gateHead^2") -join '').Trim()
+  if ($LASTEXITCODE -ne 0 -or $value -notmatch '^[0-9a-f]{40}$') { throw 'cannot resolve merge second parent' }
+  $value
+} else { $gateHead }
+if ($candidateHead -cne $reviewedHead) { throw 'gate candidate differs from reviewed head' }
+
+git merge-base --is-ancestor $reconciliationAnchor $gateHead
+if ($LASTEXITCODE -ne 0) { throw "b19980d ancestry failed: $LASTEXITCODE" }
+git merge-base --is-ancestor $reviewedBase $candidateHead
+if ($LASTEXITCODE -ne 0) { throw "reviewed-base ancestry failed: $LASTEXITCODE" }
+
+$candidateMerges = @(git rev-list --merges "$reviewedBase..$candidateHead")
+if ($LASTEXITCODE -ne 0) { throw "candidate merge enumeration failed: $LASTEXITCODE" }
+$candidateMerges = @($candidateMerges | Where-Object { $_.Trim() })
+if ($candidateMerges.Count -ne 0) { throw ('candidate history contains merge commits: ' + ($candidateMerges -join ', ')) }
+
+$changed = @(git diff --name-only "$reviewedBase...$candidateHead")
+if ($LASTEXITCODE -ne 0) { throw "candidate diff enumeration failed: $LASTEXITCODE" }
+$unexpectedChanged = @($changed | Where-Object { $_ -cnotin $allowedExact })
+if ($unexpectedChanged.Count -ne 0) { throw ('unexpected candidate diff paths: ' + ($unexpectedChanged -join ', ')) }
+
+$historyPaths = @(git log --full-history -m --format= --name-only "$reviewedBase..$candidateHead")
+if ($LASTEXITCODE -ne 0) { throw "candidate history enumeration failed: $LASTEXITCODE" }
+$historyPaths = @($historyPaths | Where-Object { $_.Trim() } | Sort-Object -CaseSensitive -Unique)
+$unexpectedHistory = @($historyPaths | Where-Object { $_ -cnotin $allowedExact })
+if ($unexpectedHistory.Count -ne 0) { throw ('unexpected candidate history paths: ' + ($unexpectedHistory -join ', ')) }
+
+foreach ($treeish in @($reconciliationAnchor, $gateHead)) {
+  $present = @(git ls-tree -r --name-only $treeish -- @carrierPaths)
+  if ($LASTEXITCODE -ne 0) { throw "carrier tree inspection failed for $treeish`: $LASTEXITCODE" }
+  $present = @($present | Where-Object { $_.Trim() })
+  if ($present.Count -ne 0) {
+    throw "carrier paths are present in tree $treeish`: $($present -join ', ')"
+  }
+}
+
+$carrierHistory = @(
+  git log --full-history -m --format= --name-only "$reconciliationAnchor..$gateHead" -- @carrierPaths
+)
+if ($LASTEXITCODE -ne 0) { throw "carrier history inspection failed: $LASTEXITCODE" }
+$carrierHistory = @($carrierHistory | Where-Object { $_.Trim() } | Sort-Object -Unique)
+if ($carrierHistory.Count -ne 0) {
+  throw ('carrier path appeared after b19980d: ' + ($carrierHistory -join ', '))
+}
+
+if ($gateKind -eq 'merge') {
+  $parents = @((((git show -s --format='%P' $gateHead) -join '').Trim() -split ' ') | Where-Object { $_ })
+  if ($LASTEXITCODE -ne 0 -or $parents.Count -ne 2) { throw 'exact merge must have two readable parents' }
+  if ($parents[0] -cne $reviewedBase -or $parents[1] -cne $reviewedHead) { throw 'exact merge parents differ from reviewed identities' }
+  $mergeTree = ((git show -s --format='%T' $gateHead) -join '').Trim()
+  if ($LASTEXITCODE -ne 0) { throw 'cannot read exact merge tree' }
+  $reviewedTree = ((git show -s --format='%T' $reviewedHead) -join '').Trim()
+  if ($LASTEXITCODE -ne 0) { throw 'cannot read reviewed tree' }
+  if ($mergeTree -cne $reviewedTree) { throw 'exact merge tree differs from reviewed tree' }
+}
+```
+
+The amendment plan path is part of the already-merged base and is not a product-diff exception. A command error, non-ancestor base, candidate merge commit, out-of-scope changed/history path, carrier-tree/history occurrence, or merge parent/tree mismatch is RED.
+
+### 0.5 Required current-main verification
+
+All commands use the candidate worktree's absolute `src` as `PYTHONPATH`; evidence from another editable worktree is invalid. Run all of the following against the unchanged exact candidate, repeat the integration-sensitive subset at the exact merge SHA, and require the corresponding hosted product/head and main/merge workflows to be 6/6 GREEN:
+
+- enumerate the **current** `tests/test_*.py` inventory dynamically; never hardcode historical 112/113-module or test totals. Run each module in one fresh process with a 300-second module timeout, a real distinct Windows long/8.3-short temporary-directory pair, `TEMP`/`TMP`/`TMPDIR` set to the short alias, and `UNIT_TEST_RUNNER_REQUIRE_8DOT3_ALIAS=1`;
+- accept compiler skips only when no `gcc`, `clang`, or `cc` is available, and then require exact set equality with these three IDs/reasons: `tests.test_cli_execution_outcome.CliExecutionOutcomeTests.test_failed_fixture_execution_returns_nonzero_cli_result|host C compiler is required`, `tests.test_dependency_policy_end_to_end.DependencyPolicyEndToEndTests.test_real_default_and_case_stub_override_build_and_run_without_symbol_collisions|host C compiler is required`, and `tests.test_vc6_fixture_build_e2e.Vc6FixtureBuildEndToEndTests.test_default_fixture_analysis_compiles_and_links_without_mutating_product_tree|host C compiler is required`. If a compiler exists, no compiler skip is permitted; hosted CI must record the real compiler path/version and must not skip;
+- run focused reconciliation tests, all directly related Task 6 regressions, `py -m compileall -q src tests`, candidate-range `git diff --check`, clean status, CLI global/command help, and a real discovery/write smoke against a copied temporary fixture while proving both source fixture and product worktree unchanged;
+- run source integrity/tracking checks and the positive/negative fixture and host compile/run checks required by the current CI contract;
+- build the wheel, inspect METADATA, install it into a fresh venv through normal dependency resolution, run `pip check`, change to a sanitized repository-external working directory, and use that venv's `python -I` to import from the installed wheel, validate every packaged schema, and execute all three Task 6 migrations (`REVIEW_DECISIONS`, `FUNCTION_DOSSIER`, `DOSSIER_MANIFEST`) with input-byte/object immutability and strict output validation;
+- in `vscode/extension`, run clean `npm.cmd ci`, compile, unit tests, and Extension Host activation smoke;
+- run source-integrity, exact product-scope, and section 0.4 carrier gates last, record exact base/head/tree/log identities in the self-SHA-free gate-evidence document, and obtain fresh spec plus quality `C0/I0/M0` reviews after the final product bytes are fixed.
+
+### 0.6 Product merge, obsolete-PR readback, and closeout
+
+- The plan-amendment PR, product PR, and closeout PR are three distinct integrations. Each uses fixed base/head/tree/check identities, exact 6/6 head checks, merge-commit parent/tree verification, and exact-main-SHA 6/6 readback. Do not mix product bytes into the amendment or closeout PR.
+- After the reconciliation product merge passes exact-SHA local and hosted-main verification, read PRs #11, #12, #13, #14, #15, and #16 back individually and require `state=CLOSED`. Do not reopen them and do not delete any remote branch.
+- The closeout diff is restricted to these exact four paths, with no fifth path:
+  - `docs/superpowers/plans/2026-07-11-unit-test-runner-phase-1-contract-execution-evidence.md`
+  - `docs/superpowers/plans/preflight/phase1-task-6-preflight.md`
+  - `docs/superpowers/plans/preflight/README.md`
+  - `docs/superpowers/plans/2026-07-15-phase1-task6-completion.md`
+- The four documents record the amendment and product PRs' final merge/check facts and only the closeout facts knowable before closeout merge: closeout PR number, fixed base/head SHA, head tree SHA, and exact-head six-job check/run identity. They do not predict or write the closeout merge SHA, merge tree, or exact-main run, and the same PR is not amended after merge to add those self-referential facts.
+- After closeout merge, external GitHub readback—not another commit to the same PR—must verify its exact merge SHA, first/second parents, merge tree equality to the reviewed head tree, and exact-main-SHA 6/6 run. The four-path closeout encodes this pending external-readback condition; durable **14/38** exists only after that readback succeeds.
+- The central ledger is fixed at `docs/superpowers/plans/2026-07-15-unit-test-runner-38-task-progress.md`. It remains a Task 7 plan deliverable and is not created or edited in Task 6 closeout.
+- Only after durable 14/38 may a Task 7 planning branch create the Task 7 execution plan and that central ledger. Its plan PR must merge and the exact plan-merge SHA's main CI must be verified 6/6 GREEN before any Task 7 product branch is created or any Task 7 product work begins. This rule supersedes every later clause that permits product work after merely writing, committing, pushing, or opening the Task 7 plan.
+
+---
+
 ## 1. Authority, starting point, and progress rule
 
 ### Authoritative inputs
@@ -23,7 +227,9 @@
 
 If an implementation detail conflicts with those documents, stop that slice and resolve the mismatch before product code continues. The preflight semantic rules take priority over recovered implementation details.
 
-### Clean starting point
+### Historical clean starting point (superseded for current execution)
+
+The entries below describe the original `969ce946` launch boundary. Section 0 replaces their base/worktree/gate meaning for all current reconciliation work.
 
 - Product worktree: `C:\Users\stell\source\repos\unitTestRunner-postmerge-pr17`
 - Branch: `codex/p1t6-review-decisions-readiness-clean`
@@ -45,7 +251,7 @@ The primary checkout at `C:\Users\stell\source\repos\unitTestRunner` contains us
 
 ## 2. PR #11-#16 recovery and cleanup boundary
 
-Open draft PRs #11 through #16 are obsolete recovery work. None is a merge candidate or an implementation authority. PR #16 (`codex/bootstrap-p1t6-v3`) is additionally a transport carrier whose recovered bytes may be consulted only under the rules below.
+PRs #11 through #16 are obsolete, already-closed, unmerged recovery work. None is a merge candidate or an implementation authority. PR #16 (`codex/bootstrap-p1t6-v3`) is additionally a transport carrier whose recovered bytes may be consulted only under the rules below. Section 0 controls their current readback treatment.
 
 Verified recovery identity:
 
@@ -64,8 +270,8 @@ Rules:
 3. Use `git show 363ddb6f86a4508eb5f4dd2a26013b837a5e26d6:<path>` only to inspect individual intended behavior or test wording after the authoritative design has been read.
 4. Recreate each behavior with a new assertion-level RED on the current tree.
 5. Do not copy PR #16 carrier code that predates PR #19's Windows sharing-denial semantics.
-6. Retain all six open draft PRs until the new carrier-free Task 6 product PR is merged and that exact merge SHA passes both post-merge local checks and the hosted `main` checks.
-7. Only then close PRs #11, #12, #13, #14, #15, and #16 through GitHub and read each one back with `state=CLOSED`.
+6. The historical requirement to retain all six PRs open until the verified product boundary was not met; preserve that caveat and do not reopen them to manufacture compliance.
+7. After the reconciliation product merge is verified, read PRs #11, #12, #13, #14, #15, and #16 back through GitHub and require their existing `state=CLOSED` without performing another close transition.
 8. Do not delete any remote branch as part of this recovery or cleanup sequence.
 
 ---
@@ -2643,96 +2849,561 @@ finally {
 
 Record the wheel path/hash, full `Requires-Dist` list, normal install and `pip check` exits, repository-external probe working directory, installed package and migration-module paths, artifact-kind/current/versioned-contract counts, packaged-schema count, the exact three migrated kinds, every input-immutability/output-validation/kind-specific semantic assertion, and cleanup result. The evidence must prove no project import came from the repository. The direct dependency is `referencing>=0.28.4,<1`; `typing-extensions` is not a Task 6 direct dependency.
 
-Authoritative isolated full gate (dynamic inventory, one fresh process per module):
+Authoritative isolated full gate (dynamic inventory, forced distinct 8.3 alias, structured results, and no-orphan enforcement):
 
-```powershell
+The following block is the executable replacement for the former text-parser loop. It uses a fresh Windows Job Object per module, assigns the waiting child before releasing it to import tests, and sets KILL_ON_JOB_CLOSE. Timeout, assignment/query failure, or any active descendant after the child finishes is RED. The JSON evidence file is outside the physical alias root; the physical long root and its short alias must both be absent at exit.
+
+~~~powershell
+$ErrorActionPreference = 'Stop'
+$task6Repo = (Resolve-Path -LiteralPath .).Path
 $task6SourceRoot = (Resolve-Path -LiteralPath .\src).Path
 $env:PYTHONPATH = $task6SourceRoot
-$task6SourcePrefix = $task6SourceRoot.TrimEnd('\') + '\'
-$task6ImportedPath = ((& py -c "from pathlib import Path; import unit_test_runner; print(Path(unit_test_runner.__file__).resolve())") -join '').Trim()
-if ($LASTEXITCODE -ne 0 -or -not $task6ImportedPath.StartsWith($task6SourcePrefix,[StringComparison]::OrdinalIgnoreCase)) { throw "wrong Task 6 import root: $task6ImportedPath" }
-$modules = Get-ChildItem -LiteralPath .\tests -Filter 'test_*.py' -File |
-  Sort-Object Name |
-  ForEach-Object { 'tests.' + $_.BaseName }
-if (-not $modules) { throw 'isolated Python test discovery returned no modules' }
 
-$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$log = Join-Path $env:TEMP "unit-test-runner-task6-$stamp.log"
-$csv = Join-Path $env:TEMP "unit-test-runner-task6-$stamp.csv"
-$rows = @()
-$actualSkips = @()
-foreach ($module in $modules) {
-  $output = @(& py -m unittest $module -v 2>&1 | ForEach-Object { $_.ToString() })
-  $exitCode = $LASTEXITCODE
-  "`n=== $module ===" | Tee-Object -FilePath $log -Append | Out-Null
-  $output | Tee-Object -FilePath $log -Append
+@'
+from __future__ import annotations
 
-  $trimmed = @($output | ForEach-Object { $_.Trim() })
-  $ranLines = @($trimmed | Where-Object { $_ -match '^Ran (\d+) tests? in ' })
-  $summaryLines = @($trimmed | Where-Object { $_ -match '^(OK(?: \(skipped=\d+\))?|FAILED \(.+\))$' })
-  $parsed = $ranLines.Count -ge 1 -and $summaryLines.Count -ge 1
-  $tests = 0
-  $skips = 0
-  $failures = 0
-  $errors = 0
-  if ($parsed) {
-    $null = $ranLines[-1] -match '^Ran (\d+) tests? in '
-    $tests = [int]$Matches[1]
-    $summary = $summaryLines[-1]
-    if ($summary -match 'skipped=(\d+)') { $skips = [int]$Matches[1] }
-    if ($summary -match 'failures=(\d+)') { $failures = [int]$Matches[1] }
-    if ($summary -match 'errors=(\d+)') { $errors = [int]$Matches[1] }
-  }
+import collections
+import ctypes
+from ctypes import wintypes
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import time
+import traceback
+import uuid
 
-  foreach ($line in $trimmed) {
-    if ($line -match '^\S+ \((?<qualified>[^)]+)\) \.\.\. skipped [''\"](?<reason>.*)[''\"]$') {
-      $actualSkips += "$($Matches.qualified)|$($Matches.reason)"
-    }
-  }
-  if ($parsed -and $skips -ne @($actualSkips | Where-Object { $_ -like "$module.*" }).Count) {
-    $parsed = $false
-  }
-  $rows += [pscustomobject]@{
-    Module=$module; ExitCode=$exitCode; Parsed=$parsed; Tests=$tests;
-    Skips=$skips; Failures=$failures; Errors=$errors
-  }
-}
-$rows | Export-Csv -LiteralPath $csv -NoTypeInformation -Encoding utf8
-
-$testsTotal = ($rows | Measure-Object Tests -Sum).Sum
-$skipsTotal = ($rows | Measure-Object Skips -Sum).Sum
-$failuresTotal = ($rows | Measure-Object Failures -Sum).Sum
-$errorsTotal = ($rows | Measure-Object Errors -Sum).Sum
-$nonzeroTotal = @($rows | Where-Object { $_.ExitCode -ne 0 }).Count
-$parseFailureTotal = @($rows | Where-Object { -not $_.Parsed }).Count
-"isolated_modules=$($modules.Count) tests=$testsTotal skips=$skipsTotal failures=$failuresTotal errors=$errorsTotal nonzero=$nonzeroTotal parse_failures=$parseFailureTotal log=$log csv=$csv"
-
-$allowedCompilerSkips = @(
-  'tests.test_cli_execution_outcome.CliExecutionOutcomeTests.test_failed_fixture_execution_returns_nonzero_cli_result|host C compiler is required',
-  'tests.test_dependency_policy_end_to_end.DependencyPolicyEndToEndTests.test_real_default_and_case_stub_override_build_and_run_without_symbol_collisions|host C compiler is required',
-  'tests.test_vc6_fixture_build_e2e.Vc6FixtureBuildEndToEndTests.test_default_fixture_analysis_compiles_and_links_without_mutating_product_tree|host C compiler is required'
+from tests.windows_path_alias_support import (
+    WINDOWS_8DOT3_PREFIX,
+    windows_path_alias_pair,
 )
-$compiler = Get-Command gcc, clang, cc -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($null -eq $compiler) {
-  $unexpectedSkips = @($actualSkips | Where-Object { $_ -notin $allowedCompilerSkips })
-  $missingSkips = @($allowedCompilerSkips | Where-Object { $_ -notin $actualSkips })
-  if ($unexpectedSkips.Count -ne 0 -or $missingSkips.Count -ne 0) {
-    throw "local skip set mismatch: unexpected=$($unexpectedSkips -join ',') missing=$($missingSkips -join ',')"
-  }
-}
-elseif ($actualSkips.Count -ne 0) {
-  throw ('compiler is available but tests skipped: ' + ($actualSkips -join ','))
-}
-if ($failuresTotal -ne 0 -or $errorsTotal -ne 0 -or $nonzeroTotal -ne 0 -or $parseFailureTotal -ne 0) {
-  throw 'isolated Python gate failed; inspect the recorded log and CSV'
-}
-```
 
+SENTINEL = "__UNIT_TEST_RUNNER_TASK6_MODULE_RESULT__="
+MODULE_TIMEOUT_SECONDS = 300
+ORPHAN_DRAIN_SECONDS = 10
+REQUIRED_REGRESSION_IDS = (
+    "tests.test_test_spec_contract.TestSpecContractTests.test_generation_rejects_coerced_function_and_case_identity",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_generation_rejects_string_subclass_semantic_inputs",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_related_case_collection_has_one_exact_shared_semantic_contract",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_equivalent_related_case_spellings_bind_to_exact_candidate",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_equivalent_related_case_spellings_cannot_bypass_executable_blocker",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_generation_rejects_ambiguous_normalized_case_spellings",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_direct_load_blocks_semantically_equivalent_executable_references",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_direct_load_rejects_semantically_duplicate_actual_case_ids_in_both_orders",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_strict_unresolved_item_semantics_reject_malformed_fields_independent_of_blocking",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_schema_invalid_collection_types_are_structured_at_public_boundaries",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_strict_case_ids_are_validated_before_string_coercion",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_raw_model_scalars_are_validated_before_construction",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_schema_version_is_exact_before_public_validation",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_in_memory_test_spec_scalars_reject_hostile_subclasses",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_hostile_id_hash_and_equality_are_not_invoked_before_semantics",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_test_spec_shadow_preserves_schema_and_semantic_diagnostics",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_test_spec_shadow_blocks_hostile_common_scalar_hooks",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_generation_rejects_coerced_source_sha_before_construction",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_generation_rejects_malformed_optional_fields_before_operations",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_dossier_rejects_malformed_direct_test_spec_collections",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_setup_and_expression_values_fail_closed_across_consumers",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_top_level_list_subclasses_use_builtin_storage_at_all_boundaries",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_nested_container_subclasses_are_materialized_at_consumer_boundaries",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_exact_related_case_list_policy_is_scoped_to_unresolved_items",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_direct_model_enforces_exact_unresolved_case_list_before_materialization",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_direct_exact_list_violation_preserves_other_diagnostics",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_direct_model_materializes_container_subclasses_before_use",
+    "tests.test_test_spec_contract.TestSpecContractTests.test_materialized_scalars_do_not_invoke_deepcopy_hooks",
+)
+ALLOWED_COMPILER_SKIPS = {
+    "tests.test_cli_execution_outcome.CliExecutionOutcomeTests."
+    "test_failed_fixture_execution_returns_nonzero_cli_result"
+    "|host C compiler is required",
+    "tests.test_dependency_policy_end_to_end.DependencyPolicyEndToEndTests."
+    "test_real_default_and_case_stub_override_build_and_run_without_symbol_collisions"
+    "|host C compiler is required",
+    "tests.test_vc6_fixture_build_e2e.Vc6FixtureBuildEndToEndTests."
+    "test_default_fixture_analysis_compiles_and_links_without_mutating_product_tree"
+    "|host C compiler is required",
+}
+
+CHILD = r"""
+import json
+import os
+from pathlib import Path
+import sys
+import unittest
+
+SENTINEL = "__UNIT_TEST_RUNNER_TASK6_MODULE_RESULT__="
+if sys.stdin.buffer.read(1) != b"R":
+    raise SystemExit("parent did not release assigned child")
+module = sys.argv[1]
+source_root = Path(os.environ["PYTHONPATH"]).resolve()
+import unit_test_runner
+imported_path = Path(unit_test_runner.__file__).resolve()
+try:
+    imported_path.relative_to(source_root)
+except ValueError:
+    raise SystemExit(f"wrong candidate import root: {imported_path}")
+
+class RecordingResult(unittest.TestResult):
+    def __init__(self):
+        super().__init__()
+        self.executed_ids = []
+
+    def startTest(self, test):
+        self.executed_ids.append(test.id())
+        super().startTest(test)
+
+suite = unittest.defaultTestLoader.loadTestsFromName(module)
+result = RecordingResult()
+suite.run(result)
+payload = {
+    "module": module,
+    "imported_path": str(imported_path),
+    "tests_run": result.testsRun,
+    "executed_ids": result.executed_ids,
+    "failures": [test.id() for test, _ in result.failures],
+    "errors": [test.id() for test, _ in result.errors],
+    "skipped": [
+        {"id": test.id(), "reason": reason}
+        for test, reason in result.skipped
+    ],
+    "expected_failures": [test.id() for test, _ in result.expectedFailures],
+    "unexpected_successes": [test.id() for test in result.unexpectedSuccesses],
+}
+print(SENTINEL + json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
+raise SystemExit(0 if result.wasSuccessful() else 1)
+"""
+
+if os.name != "nt":
+    raise SystemExit("Task 6 required-alias isolated gate requires Windows")
+
+JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9
+JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION_CLASS = 1
+FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
+INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF
+
+class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+    _fields_ = [
+        ("PerProcessUserTimeLimit", ctypes.c_longlong),
+        ("PerJobUserTimeLimit", ctypes.c_longlong),
+        ("LimitFlags", wintypes.DWORD),
+        ("MinimumWorkingSetSize", ctypes.c_size_t),
+        ("MaximumWorkingSetSize", ctypes.c_size_t),
+        ("ActiveProcessLimit", wintypes.DWORD),
+        ("Affinity", ctypes.c_size_t),
+        ("PriorityClass", wintypes.DWORD),
+        ("SchedulingClass", wintypes.DWORD),
+    ]
+
+class IO_COUNTERS(ctypes.Structure):
+    _fields_ = [
+        ("ReadOperationCount", ctypes.c_ulonglong),
+        ("WriteOperationCount", ctypes.c_ulonglong),
+        ("OtherOperationCount", ctypes.c_ulonglong),
+        ("ReadTransferCount", ctypes.c_ulonglong),
+        ("WriteTransferCount", ctypes.c_ulonglong),
+        ("OtherTransferCount", ctypes.c_ulonglong),
+    ]
+
+class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+    _fields_ = [
+        ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+        ("IoInfo", IO_COUNTERS),
+        ("ProcessMemoryLimit", ctypes.c_size_t),
+        ("JobMemoryLimit", ctypes.c_size_t),
+        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+        ("PeakJobMemoryUsed", ctypes.c_size_t),
+    ]
+
+class JOBOBJECT_BASIC_ACCOUNTING_INFORMATION(ctypes.Structure):
+    _fields_ = [
+        ("TotalUserTime", ctypes.c_longlong),
+        ("TotalKernelTime", ctypes.c_longlong),
+        ("ThisPeriodTotalUserTime", ctypes.c_longlong),
+        ("ThisPeriodTotalKernelTime", ctypes.c_longlong),
+        ("TotalPageFaultCount", wintypes.DWORD),
+        ("TotalProcesses", wintypes.DWORD),
+        ("ActiveProcesses", wintypes.DWORD),
+        ("TotalTerminatedProcesses", wintypes.DWORD),
+    ]
+
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+kernel32.SetInformationJobObject.argtypes = [
+    wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD
+]
+kernel32.SetInformationJobObject.restype = wintypes.BOOL
+kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+kernel32.QueryInformationJobObject.argtypes = [
+    wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p
+]
+kernel32.QueryInformationJobObject.restype = wintypes.BOOL
+kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+kernel32.TerminateJobObject.restype = wintypes.BOOL
+kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+kernel32.CloseHandle.restype = wintypes.BOOL
+kernel32.GetFileAttributesW.argtypes = [wintypes.LPCWSTR]
+kernel32.GetFileAttributesW.restype = wintypes.DWORD
+
+def winerror(message):
+    return OSError(ctypes.get_last_error(), message)
+
+def create_kill_job():
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        raise winerror("CreateJobObjectW failed")
+    limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not kernel32.SetInformationJobObject(
+        job,
+        JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
+        ctypes.byref(limits),
+        ctypes.sizeof(limits),
+    ):
+        error = winerror("SetInformationJobObject failed")
+        kernel32.CloseHandle(job)
+        raise error
+    return job
+
+def active_processes(job):
+    accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION()
+    if not kernel32.QueryInformationJobObject(
+        job,
+        JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION_CLASS,
+        ctypes.byref(accounting),
+        ctypes.sizeof(accounting),
+        None,
+    ):
+        raise winerror("QueryInformationJobObject failed")
+    return int(accounting.ActiveProcesses)
+
+def terminate_job(job, exit_code):
+    if not kernel32.TerminateJobObject(job, exit_code):
+        raise winerror("TerminateJobObject failed")
+
+def run_module(module, *, repo, source_root, short_temp):
+    child_env = os.environ.copy()
+    child_env["PYTHONPATH"] = os.fspath(source_root)
+    child_env["UNIT_TEST_RUNNER_REQUIRE_8DOT3_ALIAS"] = "1"
+    for name in ("TEMP", "TMP", "TMPDIR"):
+        child_env[name] = os.fspath(short_temp)
+
+    job = create_kill_job()
+    process = None
+    stdout = ""
+    stderr = ""
+    timed_out = False
+    orphan_processes = 0
+    try:
+        process = subprocess.Popen(
+            [sys.executable, "-c", CHILD, module],
+            cwd=repo,
+            env=child_env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        if not kernel32.AssignProcessToJobObject(
+            job, wintypes.HANDLE(int(process._handle))
+        ):
+            process.kill()
+            process.communicate()
+            raise winerror("AssignProcessToJobObject failed")
+        try:
+            stdout, stderr = process.communicate(
+                input="R", timeout=MODULE_TIMEOUT_SECONDS
+            )
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            terminate_job(job, 124)
+            stdout, stderr = process.communicate(timeout=30)
+
+        drain_deadline = time.monotonic() + ORPHAN_DRAIN_SECONDS
+        while active_processes(job) and time.monotonic() < drain_deadline:
+            time.sleep(0.05)
+        orphan_processes = active_processes(job)
+        if orphan_processes:
+            terminate_job(job, 125)
+            process.wait(timeout=30)
+    finally:
+        kernel32.CloseHandle(job)
+
+    sentinel_lines = [
+        line[len(SENTINEL):]
+        for line in stdout.splitlines()
+        if line.startswith(SENTINEL)
+    ]
+    payload = None
+    parse_error = None
+    if len(sentinel_lines) != 1:
+        parse_error = f"expected one sentinel, observed {len(sentinel_lines)}"
+    else:
+        try:
+            payload = json.loads(sentinel_lines[0])
+        except Exception as error:
+            parse_error = f"invalid sentinel JSON: {error}"
+    return {
+        "module": module,
+        "exit_code": process.returncode,
+        "timed_out": timed_out,
+        "orphan_processes": orphan_processes,
+        "parse_error": parse_error,
+        "payload": payload,
+        "stdout": stdout,
+        "stderr": stderr,
+    }
+
+repo = Path.cwd().resolve()
+source_root = (repo / "src").resolve()
+if not source_root.is_dir():
+    raise SystemExit(f"candidate source root missing: {source_root}")
+modules = sorted(
+    f"tests.{path.stem}" for path in (repo / "tests").glob("test_*.py")
+)
+if not modules:
+    raise SystemExit("isolated Python test discovery returned no modules")
+
+local_temp = (Path(os.environ["LOCALAPPDATA"]) / "Temp").resolve()
+if not local_temp.is_dir():
+    raise SystemExit(f"LOCALAPPDATA Temp missing: {local_temp}")
+long_root = local_temp / (
+    WINDOWS_8DOT3_PREFIX + "full gate " + uuid.uuid4().hex
+)
+evidence_path = local_temp / (
+    "unit-test-runner-task6-full-gate-" + uuid.uuid4().hex + ".json"
+)
+rows = []
+fatal_error = None
+pair = None
+cleanup = {
+    "long_absent": False,
+    "short_absent": False,
+    "error": None,
+}
+
+try:
+    long_root.mkdir()
+    pair = windows_path_alias_pair(long_root)
+    long_key = os.path.normcase(os.path.normpath(os.fspath(pair.long)))
+    short_key = os.path.normcase(os.path.normpath(os.fspath(pair.short)))
+    if long_key == short_key:
+        raise AssertionError("required long/8.3 paths are textually equal")
+    if not os.path.samefile(pair.long, pair.short):
+        raise AssertionError("required long/8.3 paths are not the same directory")
+    common = os.path.normcase(
+        os.path.commonpath([os.fspath(local_temp), os.fspath(pair.long)])
+    )
+    if common != os.path.normcase(os.fspath(local_temp)):
+        raise AssertionError("alias root escaped LOCALAPPDATA Temp")
+
+    for index, module in enumerate(modules, start=1):
+        row = run_module(
+            module,
+            repo=repo,
+            source_root=source_root,
+            short_temp=pair.short,
+        )
+        rows.append(row)
+        print(
+            f"[{index}/{len(modules)}] {module} "
+            f"exit={row['exit_code']} timeout={row['timed_out']} "
+            f"orphans={row['orphan_processes']} parsed={row['parse_error'] is None}",
+            flush=True,
+        )
+except BaseException:
+    fatal_error = traceback.format_exc()
+finally:
+    try:
+        if pair is not None and os.path.lexists(pair.long):
+            if not os.path.samefile(pair.long, pair.short):
+                raise AssertionError("alias identity changed before cleanup")
+            attributes = kernel32.GetFileAttributesW(os.fspath(pair.long))
+            if attributes == INVALID_FILE_ATTRIBUTES:
+                raise winerror("GetFileAttributesW failed before cleanup")
+            if attributes & FILE_ATTRIBUTE_REPARSE_POINT:
+                raise AssertionError("refusing reparse-point alias-root cleanup")
+        if os.path.lexists(long_root):
+            shutil.rmtree(long_root)
+        cleanup["long_absent"] = not os.path.lexists(
+            pair.long if pair is not None else long_root
+        )
+        cleanup["short_absent"] = (
+            pair is not None and not os.path.lexists(pair.short)
+        )
+    except BaseException:
+        cleanup["error"] = traceback.format_exc()
+
+executed_ids = []
+actual_skips = []
+module_problems = []
+tests_total = 0
+failures_total = 0
+errors_total = 0
+expected_failures_total = 0
+for row in rows:
+    payload = row["payload"]
+    if (
+        row["timed_out"]
+        or row["orphan_processes"]
+        or row["parse_error"] is not None
+        or row["exit_code"] != 0
+        or payload is None
+    ):
+        module_problems.append(row["module"])
+        continue
+    if payload.get("module") != row["module"]:
+        module_problems.append(row["module"])
+        continue
+    tests_run = payload.get("tests_run")
+    ids = payload.get("executed_ids")
+    if not isinstance(tests_run, int) or tests_run <= 0 or not isinstance(ids, list):
+        module_problems.append(row["module"])
+        continue
+    if tests_run != len(ids):
+        module_problems.append(row["module"])
+    tests_total += tests_run
+    executed_ids.extend(ids)
+    failures_total += len(payload.get("failures", ()))
+    errors_total += len(payload.get("errors", ()))
+    expected_failures_total += len(payload.get("expected_failures", ()))
+    if (
+        payload.get("failures")
+        or payload.get("errors")
+        or payload.get("expected_failures")
+        or payload.get("unexpected_successes")
+    ):
+        module_problems.append(row["module"])
+    for skipped in payload.get("skipped", ()):
+        actual_skips.append(f"{skipped['id']}|{skipped['reason']}")
+
+executed_counts = collections.Counter(executed_ids)
+required_id_set = frozenset(REQUIRED_REGRESSION_IDS)
+required_counts = {
+    test_id: executed_counts[test_id] for test_id in REQUIRED_REGRESSION_IDS
+}
+observed_required_ids = sorted(
+    test_id for test_id in required_id_set if executed_counts[test_id] > 0
+)
+missing_required_ids = sorted(
+    test_id for test_id in required_id_set if executed_counts[test_id] == 0
+)
+duplicate_required_ids = sorted(
+    test_id for test_id in required_id_set if executed_counts[test_id] > 1
+)
+audit_28_ok = (
+    len(REQUIRED_REGRESSION_IDS) == 28
+    and len(required_id_set) == 28
+    and not missing_required_ids
+    and not duplicate_required_ids
+)
+compiler_name = next(
+    (name for name in ("gcc", "clang", "cc") if shutil.which(name)),
+    None,
+)
+compiler_path = shutil.which(compiler_name) if compiler_name is not None else None
+compiler_version = None
+if compiler_path is not None:
+    version = subprocess.run(
+        [compiler_path, "--version"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if version.returncode != 0:
+        fatal_error = (fatal_error or "") + "\ncompiler --version failed"
+    else:
+        compiler_version = (version.stdout or version.stderr).splitlines()[0]
+skip_set = set(actual_skips)
+skip_ok = (
+    len(actual_skips) == len(skip_set)
+    and (
+        skip_set == ALLOWED_COMPILER_SKIPS
+        if compiler_path is None
+        else not actual_skips
+    )
+)
+problems = []
+if fatal_error:
+    problems.append("fatal harness error")
+if len(rows) != len(modules):
+    problems.append("not every discovered module ran")
+if module_problems:
+    problems.append("module failures: " + ", ".join(sorted(set(module_problems))))
+if failures_total or errors_total or expected_failures_total:
+    problems.append("structured unittest failures/errors/expected-failures are nonzero")
+if not audit_28_ok:
+    problems.append("required regression audit is not 28/28 exactly once")
+if not skip_ok:
+    problems.append("compiler skip set mismatch")
+if cleanup["error"] or not cleanup["long_absent"] or not cleanup["short_absent"]:
+    problems.append("physical long/short temp cleanup failed")
+
+report = {
+    "repo": str(repo),
+    "source_root": str(source_root),
+    "long_temp": str(pair.long) if pair is not None else str(long_root),
+    "short_temp": str(pair.short) if pair is not None else None,
+    "samefile_verified": pair is not None,
+    "module_count": len(modules),
+    "tests_total": tests_total,
+    "failures_total": failures_total,
+    "errors_total": errors_total,
+    "expected_failures_total": expected_failures_total,
+    "actual_skips": sorted(actual_skips),
+    "compiler": {
+        "name": compiler_name,
+        "path": compiler_path,
+        "version": compiler_version,
+    },
+    "required_regression_ids": sorted(required_id_set),
+    "observed_required_regression_ids": observed_required_ids,
+    "missing_required_regression_ids": missing_required_ids,
+    "duplicate_required_regression_ids": duplicate_required_ids,
+    "required_regression_counts": required_counts,
+    "required_regression_result": "28/28" if audit_28_ok else "FAILED",
+    "cleanup": cleanup,
+    "fatal_error": fatal_error,
+    "problems": problems,
+    "rows": rows,
+}
+evidence_path.write_text(
+    json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True),
+    encoding="utf-8",
+)
+print(json.dumps({
+    "evidence_path": str(evidence_path),
+    "modules": len(modules),
+    "tests": tests_total,
+    "skips": len(actual_skips),
+    "failures": failures_total,
+    "errors": errors_total,
+    "expected_failures": expected_failures_total,
+    "required_regressions": report["required_regression_result"],
+    "cleanup": cleanup,
+    "problems": problems,
+}, ensure_ascii=False, sort_keys=True))
+if problems:
+    raise SystemExit("Task 6 isolated full gate failed; inspect " + str(evidence_path))
+'@ | py -
+if ($LASTEXITCODE -ne 0) { throw "Task 6 isolated full gate failed: $LASTEXITCODE" }
+~~~
+
+The runner must preserve the emitted evidence JSON and record its SHA-256. A missing/duplicate sentinel, wrong import root, nonzero child, timeout, test failure/error/expected failure/unexpected success, Job Object error, surviving descendant, 28-ID count other than exactly one each, skip-set mismatch, or incomplete long/short cleanup is a gate failure.
 Record actual module/test/skip/failure/error/nonzero totals. Do not hardcode recovered carrier totals (`117/563`) or current baseline totals (`112/543`) as expected Task 6 totals.
 
 Local compiler-dependent skips must match the documented allowed local skip set exactly. Hosted CI must use the real compiler and have no unexpected skip.
 
-Carrier-free mechanical gate (run before PR creation, immediately before merge, and again at the exact product merge SHA):
+Historical carrier-free mechanical gate (superseded; do not execute after `b19980d`):
+
+The following block is retained only as the original protocol record. Section 0.4 replaces it with the executable `b19980d..candidate` and `b19980d..merge` gate and the exact three reconciled carrier paths.
 
 ```powershell
 $startAnchor = '969ce9462a688e94c887d6e77359e40296d8927b'
@@ -2932,6 +3603,8 @@ After preliminary gates, write `docs/superpowers/plans/2026-07-15-phase1-task6-g
 
 ### Slice 10 — Formal review, product PR, merge, and post-merge accounting
 
+This numbered sequence is the historical pre-reconciliation protocol. For current execution, section 0.2 replaces its base/merge rules and section 0.6 replaces its obsolete-PR and closeout actions; the remaining semantic verification requirements apply only where they do not conflict with section 0.
+
 1. Fetch `origin/main`. Require start anchor `969ce9462a688e94c887d6e77359e40296d8927b` to be its ancestor and require `git merge-base origin/main HEAD` to equal `origin/main`. If main advanced and is not already contained, rebase the Task 6 commits onto the new `origin/main`, refresh the pre-final evidence commit without self-SHA claims, then restart Slice 9 and this slice.
 2. With the pre-final evidence already committed and a clean worktree, run the focused, related, isolated full, package/schema/installed-wheel-migration, fixture, source-integrity, VS Code, CLI smoke, compile, diff, and carrier-free gates **again at the unchanged candidate HEAD**. The installed-wheel gate must again execute and validate every exact Task 6 migration from its sanitized repository-external working directory under `python -I`; source-tree migration results cannot stand in for it. Store raw logs/CSV outside the checkout; do not edit tracked evidence afterward.
 3. Fresh spec reviewer checks `origin/main...HEAD` against every fixed semantic decision and carrier correction.
@@ -2959,17 +3632,17 @@ After preliminary gates, write `docs/superpowers/plans/2026-07-15-phase1-task6-g
    - merge tree equals `reviewed_tree_sha`,
    - the carrier-free ancestry/history/path gate passes again.
 13. In a clean post-merge worktree at that exact merge SHA, run focused tests, compileall, CLI help/smoke, diff/status checks, and then monitor the `main` push workflow to all GREEN for the exact merge SHA.
-14. After the clean product merge and both the exact-merge-SHA local and hosted `main` verification, close obsolete open draft PRs #11, #12, #13, #14, #15, and #16 through GitHub. Read each PR back and require `state=CLOSED`; if any close or readback fails, stop the closeout. Do not delete any remote branch. These are external actions, not effects of a Git documentation commit.
+14. Historical instruction superseded by section 0.6: PRs #11-#16 are already closed and unmerged. After the clean reconciliation product merge and both exact-merge-SHA local and hosted `main` verification, only read each PR back and require `state=CLOSED`; do not reopen, re-close, or delete any remote branch.
 15. From the verified product merge SHA, create a post-merge closeout documentation branch/commit that:
    - first re-reads these four exact paths from the then-current verified `main`; if any path was renamed or its authority changed, stop and amend/review the closeout allowlist before writing:
      - `docs/superpowers/plans/2026-07-11-unit-test-runner-phase-1-contract-execution-evidence.md` — phase plan; check off only Task 6 requirements proven by the product merge evidence;
      - `docs/superpowers/plans/preflight/phase1-task-6-preflight.md` — Task 6 preflight; replace `not started` with the exact approved/merged/verified identities and handoff;
-     - `docs/superpowers/plans/preflight/README.md` — restart handoff; advance the durable integrated boundary to 14/38 and make Task 7 the next task without rewriting historical Task 5 evidence;
-     - `docs/superpowers/plans/2026-07-15-phase1-task6-completion.md` — new completion record containing product PR, product merge SHA/tree, hosted run IDs/head SHAs, dynamic local totals/log hashes, limitations, both reviewer `C0/I0/M0` verdicts, post-merge gates, individual GitHub closed-state readback proof for PRs #11 through #16, confirmation that no remote branch was deleted, and the closeout base SHA;
+     - `docs/superpowers/plans/preflight/README.md` — restart handoff; encode the conditional 14/38 transition and make Task 7 the next task without rewriting historical Task 5 evidence; it must not claim that the closeout's still-future external readback has already succeeded;
+     - `docs/superpowers/plans/2026-07-15-phase1-task6-completion.md` — new completion record containing product PR, product merge SHA/tree, hosted run IDs/head SHAs, dynamic local totals/log hashes, the exact 28/28 audit, limitations, both reviewer `C0/I0/M0` verdicts, post-product-merge gates, individual GitHub closed-state readback proof for PRs #11 through #16, confirmation that no remote branch was deleted, and the closeout PR's pre-merge base/head/head-tree/check identities;
    - permits no fifth path in the documentation-only diff and does not rewrite the pre-final self-SHA-free gate evidence;
-   - updates progress from 13/38 to 14/38 and marks Task 6 complete only in those exact documents after all referenced evidence has been read back.
-16. Push the closeout documentation branch, open a documentation-only PR, require its exact-head checks GREEN, merge it, and verify the resulting `main` SHA. Progress is not durably **14/38** until this documentation PR is merged and verified.
-17. Only after durable 14/38, create a new isolated Task 7 planning branch/worktree from that verified documentation merge SHA. Write, review, commit, and push the Task 7 execution plan before any Task 7 product change; do not mix the Task 7 plan into the Task 6 closeout PR.
+   - does not record or predict its own merge SHA/tree/exact-main run and does not amend the same PR after merge; it encodes that Task 6 becomes complete only if the external readback in section 0.6 succeeds.
+16. Push the closeout documentation branch, open a documentation-only PR, require its exact-head checks GREEN, and merge it without changing the reviewed head. Externally read back and verify the resulting exact merge SHA, parents, tree, and exact-main 6/6 run. Progress becomes durably **14/38** only after that readback; do not write those self-referential facts back through the same PR.
+17. Only after durable 14/38, create a new isolated Task 7 planning branch/worktree from that verified documentation merge SHA. The Task 7 plan PR creates both its execution plan and `docs/superpowers/plans/2026-07-15-unit-test-runner-38-task-progress.md`. Review and merge that plan PR and verify the exact plan-merge SHA's main CI 6/6 GREEN before creating any Task 7 product branch or starting any Task 7 product work.
 
 ---
 
@@ -2977,7 +3650,7 @@ After preliminary gates, write `docs/superpowers/plans/2026-07-15-phase1-task6-g
 
 Stop the active slice without committing product code if any of these occurs:
 
-- The product worktree is not based on `969ce946` plus reviewed Task 6 commits.
+- The current reconciliation worktree is not based on the verified plan-amendment merge descended from exact anchor `b19980da0789d5396f7ac7fa7799eea79915a440`.
 - The primary checkout's user-owned state would need to be modified.
 - A RED is import/setup failure rather than an assertion proving behavior.
 - A proposed write accepts pre-resolved current items instead of re-resolving under lock.
@@ -2999,7 +3672,7 @@ Stop the active slice without committing product code if any of these occurs:
 - Formal review has any unresolved Critical, Important, or Minor finding, or either fresh review is not `C0/I0/M0` for the exact candidate.
 - Hosted CI has an unexpected skip, missing real compiler, or non-GREEN job.
 - The carrier head/path/materializer appears in ancestry or branch history, an unreviewed path is outside the allowlist, or reviewed base/head/tree/check identities do not match the merge target.
-- Any obsolete PR #11 through #16 is treated as a merge candidate or implementation authority, is closed before the verified product-merge boundary, cannot be read back as `state=CLOSED` after closure, or any remote branch deletion is proposed.
+- Any obsolete PR #11 through #16 is treated as a merge candidate or implementation authority, is reopened/re-closed to manufacture sequence compliance, cannot be read back as `state=CLOSED` after the reconciliation product merge, or any remote branch deletion is proposed.
 
 Do not mark the goal blocked merely because a slice is difficult. Preserve the RED and diagnostic evidence, investigate within scope, and resume from the last clean commit.
 
