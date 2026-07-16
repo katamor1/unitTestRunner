@@ -60,7 +60,7 @@ export class SuitePanelProvider implements vscode.WebviewViewProvider {
       return;
     }
     if (this.runningLabel) {
-      void vscode.window.showInformationMessage(`UnitTestRunner: ${this.runningLabel}を実行中です。完了するまでお待ちください。`);
+      void vscode.window.showInformationMessage(`UnitTestRunner: 「${this.runningLabel}」を実行しています。完了するまでほかの操作はできません。`);
       return;
     }
     const commandMap = {
@@ -97,10 +97,10 @@ export function readSelectedSuiteEntryIds(context: vscode.ExtensionContext): str
 function renderSuiteHtml(webview: vscode.Webview, model: SuiteViewModel, runningLabel?: string): string {
   const nonce = createNonce();
   const summary = model.reportExists
-    ? `<div class="summary">GREEN ${model.summary.green} / Not GREEN ${model.summary.notGreen} / Total ${model.summary.total}</div>`
+    ? `<div class="summary">合計 ${model.summary.total}件 / 合格 ${model.summary.green}件 / 不合格 ${model.summary.notGreen}件</div>`
     : '<div class="summary muted">実行結果はまだありません。</div>';
   const error = model.lastError ? `<div class="error">${escapeHtml(model.lastError)}</div>` : '';
-  const running = runningLabel ? `<div class="busy" role="status">実行中: ${escapeHtml(runningLabel)}<br><span>処理が完了するまでボタンと選択は無効です。</span></div>` : '';
+  const running = runningLabel ? `<div class="busy" role="status">「${escapeHtml(runningLabel)}」を実行しています。<br><span>処理が完了するまでボタンと選択は変更できません。</span></div>` : '';
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -131,20 +131,20 @@ function renderSuiteHtml(webview: vscode.Webview, model: SuiteViewModel, running
   </style>
 </head>
 <body>
-  <div class="path">${escapeHtml(model.suitePath || 'suite manifest未設定')}</div>
+  <div class="path">${escapeHtml(model.suitePath || 'スイート定義ファイルが設定されていません')}</div>
   ${summary}
   ${error}
   ${running}
   <div class="actions">
-    <button class="primary" data-kind="register">現在関数を登録</button>
-    <button data-kind="openSuite">広い一覧を開く</button>
-    <button data-kind="runSelected">選択を実行</button>
-    <button data-kind="runTag">タグ指定で実行</button>
-    <button class="danger" data-kind="runAllGreen">全件GREEN確認</button>
-    <button data-kind="openManifest">manifestを開く</button>
+    <button class="primary" data-kind="register">現在の関数をスイートに登録</button>
+    <button data-kind="openSuite">スイート一覧を開く</button>
+    <button data-kind="runSelected">選択したテストを実行</button>
+    <button data-kind="runTag">タグを指定して実行</button>
+    <button class="danger" data-kind="runAllGreen">全件テストを実行して合否を確認</button>
+    <button data-kind="openManifest">スイート定義ファイルを開く</button>
     <button data-kind="openReport">実行レポートを開く</button>
   </div>
-  ${model.entries.length === 0 ? '<p class="empty">登録済み関数はありません。</p>' : model.entries.map(renderEntry).join('')}
+  ${model.entries.length === 0 ? '<p class="empty">登録済みの関数はありません。［現在の関数をスイートに登録］から追加してください。</p>' : model.entries.map(renderEntry).join('')}
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const initialRunningLabel = ${JSON.stringify(runningLabel ?? '')};
@@ -179,24 +179,37 @@ function renderSuiteHtml(webview: vscode.Webview, model: SuiteViewModel, running
 function renderEntry(entry: SuiteEntryView): string {
   const tags = entry.tags.join(', ');
   const statusClass = entry.greenStatus === 'green' ? 'green' : entry.greenStatus === 'not_green' ? 'not-green' : '';
-  const green = entry.greenStatus === 'green' ? 'GREEN' : entry.greenStatus === 'not_green' ? 'Not GREEN' : '未実行';
+  const green = entry.greenStatus === 'green' ? '合格' : entry.greenStatus === 'not_green' ? '不合格' : '未実行';
   return `<section class="entry ${entry.enabled ? '' : 'disabled'} ${statusClass}">
   <label class="title"><input type="checkbox" data-entry-id="${escapeAttribute(entry.entryId)}" ${entry.selected ? 'checked' : ''}>${escapeHtml(entry.functionName || entry.entryId)}</label>
   <div class="meta">${escapeHtml(entry.source)} / ${escapeHtml(tags)}</div>
-  <div class="meta"><span class="status">${escapeHtml(green)}</span> / ${escapeHtml(entry.lastRunStatus)}</div>
+  <div class="meta"><span class="status">${escapeHtml(green)}</span> / ${escapeHtml(suiteExecutionStatusLabel(entry.lastRunStatus))}</div>
 </section>`;
+}
+
+function suiteExecutionStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    passed: '成功',
+    failed: '失敗',
+    error: 'エラー',
+    skipped: 'スキップ',
+    not_run: '未実行',
+    suite_run_completed: '完了',
+    suite_run_failed: '失敗',
+  };
+  return labels[status] ?? (status || '未実行');
 }
 
 function suiteActionLabel(kind: SuiteActionMessage['kind']): string {
   const labels: Record<SuiteActionMessage['kind'], string> = {
-    register: '現在関数を登録',
-    runSelected: '選択を実行',
-    runTag: 'タグ指定で実行',
-    runAllGreen: '全件GREEN確認',
-    openSuite: '広い一覧を開く',
-    openManifest: 'manifestを開く',
+    register: '現在の関数をスイートに登録',
+    runSelected: '選択したテストを実行',
+    runTag: 'タグを指定して実行',
+    runAllGreen: '全件テストを実行して合否を確認',
+    openSuite: 'スイート一覧を開く',
+    openManifest: 'スイート定義ファイルを開く',
     openReport: '実行レポートを開く',
-    toggleEntry: '選択を更新',
+    toggleEntry: '選択状態を更新',
   };
   return labels[kind];
 }

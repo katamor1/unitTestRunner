@@ -102,7 +102,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.equal(fields.get('sourceRoot')?.effectiveValue, 'C:\\work\\product');
     assert.equal(fields.get('dswPath')?.state, 'missing');
     assert.equal(fields.get('outputRoot')?.state, 'warning');
-    assert.ok(fields.get('outputRoot')?.messages.some((message) => message.includes('本番リポジトリへ生成物が混入')));
+    assert.ok(fields.get('outputRoot')?.messages.some((message) => message.includes('生成物が本番ソースへ混在')));
     assert.equal(fields.get('defaultConfiguration')?.state, 'default');
     assert.equal(fields.get('defaultProject')?.state, 'configured');
     assert.ok(fields.get('sourceRoot')?.actions.some((action) => action.kind === 'inputText'));
@@ -160,9 +160,9 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.match(readyHtml, /data-setting-kind="pickFile"/);
 
     assert.match(missingHtml, /<details id="unitTestRunnerSettings" class="settings" open>/);
-    assert.match(missingHtml, /未設定の必須項目があります。/);
+    assert.match(missingHtml, /必須項目に未設定があります。各項目を確認してください。/);
     assert.match(warningHtml, /<details id="unitTestRunnerSettings" class="settings" open>/);
-    assert.match(warningHtml, /本番リポジトリへ生成物が混入/);
+    assert.match(warningHtml, /生成物が本番ソースへ混在/);
   });
 
   it('resolves selected and cursor function names without parsing C in VS Code', () => {
@@ -456,8 +456,8 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
       32,
     );
 
-    assert.match(message, /全件GREENではありません/);
-    assert.match(message, /GREEN 1 \/ Not GREEN 1 \/ Total 2/);
+    assert.match(message, /全件の合格条件を満たしていません/);
+    assert.match(message, /合計2件 \/ 合格1件 \/ 不合格1件/);
     assert.match(message, /suite_run_report\.md/);
   });
 
@@ -511,11 +511,11 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
       assert.ok(commands.has(command), command);
       assert.ok(activationEvents.has(`onCommand:${command}`), command);
     }
-    assert.equal(commandTitles.get('unitTestRunner.analyzeCurrentFunction'), 'UnitTestRunner: 現在関数を解析');
-    assert.equal(commandTitles.get('unitTestRunner.openLastFunctionDossier'), 'UnitTestRunner: 最後の関数dossierを開く');
-    assert.equal(commandTitles.get('unitTestRunner.openSuite'), 'UnitTestRunner: スイートを開く');
-    assert.equal(commandTitles.get('unitTestRunner.openSuiteManifest'), 'UnitTestRunner: スイートmanifestを開く');
-    assert.equal(commandTitles.get('unitTestRunner.runAllSuiteTestsRequireGreen'), 'UnitTestRunner: スイート全件GREEN確認');
+    assert.equal(commandTitles.get('unitTestRunner.analyzeCurrentFunction'), 'UnitTestRunner: 現在の関数を解析');
+    assert.equal(commandTitles.get('unitTestRunner.openLastFunctionDossier'), 'UnitTestRunner: 最後の関数分析レポートを開く');
+    assert.equal(commandTitles.get('unitTestRunner.openSuite'), 'UnitTestRunner: テストスイートを開く');
+    assert.equal(commandTitles.get('unitTestRunner.openSuiteManifest'), 'UnitTestRunner: スイート定義ファイルを開く');
+    assert.equal(commandTitles.get('unitTestRunner.runAllSuiteTestsRequireGreen'), 'UnitTestRunner: 全件テストを実行して合否を確認');
     assert.equal([...commandTitles.values()].some((title) => title.includes('Analyze Current Function')), false);
     assert.equal([...commandTitles.values()].some((title) => title.includes('Open Last Function Dossier')), false);
   });
@@ -533,8 +533,8 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.ok(contextMenus.some((item) => item.command === 'unitTestRunner.analyzeCurrentFunction' && item.when.includes('editorLangId == c')));
     assert.ok(contextMenus.some((item) => item.command === 'unitTestRunner.analyzeSelectedFunction' && item.when.includes('editorHasSelection')));
     assert.ok(activityContainers.some((item) => item.id === 'unitTestRunner' && item.icon === 'media/unit-test-runner.svg'));
-    assert.ok(workflowViews.some((item) => item.id === 'unitTestRunner.workflow' && item.name === 'ワークフロー' && item.type === 'webview'));
-    assert.ok(workflowViews.some((item) => item.id === 'unitTestRunner.suite' && item.name === 'スイート' && item.type === 'webview'));
+    assert.ok(workflowViews.some((item) => item.id === 'unitTestRunner.workflow' && item.name === '関数テスト' && item.type === 'webview'));
+    assert.ok(workflowViews.some((item) => item.id === 'unitTestRunner.suite' && item.name === 'テストスイート' && item.type === 'webview'));
     assert.ok(configuration['unitTestRunner.suiteManifestPath']);
   });
 
@@ -665,7 +665,7 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.ok(reviewIndex >= 0);
     assert.ok(harnessIndex > reviewIndex);
     assert.ok(probeIndex > harnessIndex);
-    assert.match(harnessStep.purpose, /Build Probe/);
+    assert.match(harnessStep.purpose, /ビルドの事前確認/);
     assert.match(harnessStep.requiredAction, /test_case_design\.json/);
     assert.equal(harnessStep.actions[0].commandId, 'unitTestRunner.generateHarnessSkeleton');
   });
@@ -675,9 +675,9 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.ok(reviewStep);
     const actions = new Map(reviewStep.actions.map((action) => [action.label, action]));
 
-    assert.equal(actions.get('CSVを開く')?.reportKey, 'testCaseDesignCsv');
-    assert.equal(actions.get('Markdownを開く')?.reportKey, 'testCaseDesignMd');
-    assert.equal(actions.get('JSONを開く')?.reportKey, 'testCaseDesignJson');
+    assert.equal(actions.get('テスト設計（CSV）を開く')?.reportKey, 'testCaseDesignCsv');
+    assert.equal(actions.get('レビュー用Markdownを開く')?.reportKey, 'testCaseDesignMd');
+    assert.equal(actions.get('生成用JSONを開く')?.reportKey, 'testCaseDesignJson');
   });
 
   it('completes an awaiting-save workflow step only for the matching file', () => {

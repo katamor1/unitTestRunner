@@ -90,7 +90,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (result.matched) {
       await context.workspaceState.update(WORKFLOW_STATE_KEY, result.state);
       workflowPanel.refresh();
-      void vscode.window.showInformationMessage('UnitTestRunner: 保存を検知し、次の工程へ進めました。');
+      void vscode.window.showInformationMessage('UnitTestRunner: ファイルの保存を確認しました。次のステップへ進めます。');
     }
   }));
 
@@ -228,7 +228,7 @@ async function openGeneratedTestSource(context: vscode.ExtensionContext): Promis
     }
     if (matches.length > 1) {
       const selected = await vscode.window.showQuickPick(matches, {
-        placeHolder: '開くテストソースを選択してください。',
+        placeHolder: '開くテストソースを選んでください。',
       });
       if (selected) {
         await openReport(selected);
@@ -236,7 +236,7 @@ async function openGeneratedTestSource(context: vscode.ExtensionContext): Promis
       }
     }
   }
-  throw new Error(`生成テストソースが見つかりません: ${candidates[0]}`);
+  throw new Error(`生成したテストソースが見つかりません。確認先: ${candidates[0]}`);
 }
 
 async function openQuickSummary(context: vscode.ExtensionContext): Promise<void> {
@@ -252,11 +252,11 @@ async function lastFunctionName(context: vscode.ExtensionContext): Promise<strin
     return state.functionName;
   }
   const prompt = await vscode.window.showInputBox({
-    prompt: '生成テストソースを開く関数名を入力してください。',
-    validateInput: (value) => (/^[A-Za-z_]\w*$/.test(value) ? undefined : 'Cの関数識別子を入力してください。'),
+    prompt: 'テストソースを開く対象の関数名を入力してください。',
+    validateInput: (value) => (/^[A-Za-z_]\w*$/.test(value) ? undefined : 'C言語の関数名として有効な識別子を入力してください。'),
   });
   if (!prompt) {
-    throw new Error('関数名の指定が必要です。');
+    throw new Error('関数名を入力してください。');
   }
   return prompt;
 }
@@ -280,7 +280,7 @@ function sanitizeIdentifier(value: string): string {
 async function analyzeActiveFunction(context: vscode.ExtensionContext, output: vscode.OutputChannel, workflowPanel: WorkflowPanelProvider): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    throw new Error('UnitTestRunnerを実行する前にCソースファイルを開いてください。');
+    throw new Error('Cソースファイルを開き、対象の関数内にカーソルを置いてから実行してください。');
   }
   const settings = readConfig(context);
   showValidation(settings);
@@ -311,7 +311,7 @@ async function analyzeActiveFunction(context: vscode.ExtensionContext, output: v
 async function reanalyzeActiveFunction(context: vscode.ExtensionContext, output: vscode.OutputChannel, workflowPanel: WorkflowPanelProvider): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    throw new Error('UnitTestRunnerを実行する前にCソースファイルを開いてください。');
+    throw new Error('Cソースファイルを開き、対象の関数内にカーソルを置いてから実行してください。');
   }
   const settings = readConfig(context);
   showValidation(settings);
@@ -350,13 +350,13 @@ async function registerActiveFunctionInSuite(context: vscode.ExtensionContext, o
   await context.globalState.update(LAST_WORKSPACE_KEY, target.outputWorkspace);
   workflowPanel.refresh();
   suiteDashboard.refresh();
-  void vscode.window.showInformationMessage('UnitTestRunner: 現在関数をスイートに登録しました。');
+  void vscode.window.showInformationMessage('UnitTestRunner: 現在の関数をテストスイートに登録しました。');
 }
 
 async function activeFunctionTarget(context: vscode.ExtensionContext): Promise<FunctionTarget> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    throw new Error('UnitTestRunnerを実行する前にCソースファイルを開いてください。');
+    throw new Error('Cソースファイルを開き、対象の関数内にカーソルを置いてから実行してください。');
   }
   const settings = readConfig(context);
   showValidation(settings);
@@ -382,11 +382,11 @@ interface SuiteCommandOptions {
 
 async function runSuiteByTag(context: vscode.ExtensionContext, output: vscode.OutputChannel, suitePanel: SuitePanelProvider, suiteDashboard: SuiteDashboardPanel): Promise<void> {
   const tag = await vscode.window.showInputBox({
-    prompt: '実行するスイートタグを入力してください。',
+    prompt: '実行するテストに付けられたタグを入力してください。',
     value: 'selected',
   });
   if (!tag) {
-    throw new Error('スイートタグの指定が必要です。');
+    throw new Error('実行するタグを入力してください。');
   }
   await runSuiteCommand(context, output, { tag: tag.trim(), run: true }, suitePanel, suiteDashboard);
 }
@@ -396,7 +396,7 @@ async function runSuiteCommand(context: vscode.ExtensionContext, output: vscode.
   showValidation(settings);
   const entryIds = options.selected ? readSelectedSuiteEntryIds(context) : undefined;
   if (options.selected && (!entryIds || entryIds.length === 0)) {
-    throw new Error('スイートで実行する関数を選択してください。');
+    throw new Error('テストスイートで実行する関数を選択してください。');
   }
   const invocation = buildSuiteRunInvocation(settings, {
     entryIds,
@@ -463,7 +463,7 @@ function showValidation(settings: AdapterSettings): void {
     }
   }
   if (!validation.ok) {
-    throw new Error(`UnitTestRunnerの設定が不足しています: ${validation.warnings.map((warning) => warning.message).join(' ')}`);
+    throw new Error(`UnitTestRunnerの必須設定が不足しています。ワークフローパネルの［設定］を確認してください。${validation.warnings.map((warning) => ` ${warning.message}`).join('')}`);
   }
 }
 
@@ -472,7 +472,7 @@ async function handleSettingsAction(fieldId: SettingsFieldId, kind: SettingsActi
   const model = readSettingsViewModel();
   const field = model.fields.find((item) => item.id === fieldId);
   if (!field) {
-    throw new Error(`Unknown settings field: ${fieldId}`);
+    throw new Error(`設定項目を認識できません: ${fieldId}`);
   }
   if (kind === 'reset') {
     await resetSetting(fieldId);
@@ -484,7 +484,7 @@ async function handleSettingsAction(fieldId: SettingsFieldId, kind: SettingsActi
       canSelectFolders: true,
       canSelectMany: false,
       defaultUri: defaultUriForField(field.effectiveValue, false),
-      openLabel: '選択',
+      openLabel: 'このフォルダーを選択',
       title: `${field.label}を選択`,
     });
     if (!selected?.[0]) {
@@ -500,7 +500,7 @@ async function handleSettingsAction(fieldId: SettingsFieldId, kind: SettingsActi
       canSelectMany: false,
       defaultUri: defaultUriForField(field.configuredValue || field.effectiveValue, true),
       filters: filePickerFilters(fieldId),
-      openLabel: '選択',
+      openLabel: 'このファイルを選択',
       title: `${field.label}を選択`,
     });
     if (!selected?.[0]) {
@@ -523,7 +523,7 @@ async function handleSettingsAction(fieldId: SettingsFieldId, kind: SettingsActi
 
 function ensureWorkspaceSettingsTarget(): void {
   if (!vscode.workspace.workspaceFolders?.length && !vscode.workspace.workspaceFile) {
-    throw new Error('UnitTestRunnerの設定を保存するには、フォルダまたはworkspaceを開いてください。');
+    throw new Error('設定を保存するには、VS Codeでフォルダーまたはワークスペースを開いてください。');
   }
 }
 
@@ -595,7 +595,7 @@ function defaultUriForField(value: string, fileSelection: boolean): vscode.Uri |
 
 function filePickerFilters(fieldId: SettingsFieldId): Record<string, string[]> {
   if (fieldId === 'dswPath') {
-    return { 'Visual C++ workspace': ['dsw'], 'すべてのファイル': ['*'] };
+    return { 'Visual C++ワークスペース': ['dsw'], 'すべてのファイル': ['*'] };
   }
   if (fieldId === 'cliPath') {
     return { '実行ファイル': ['exe'], 'すべてのファイル': ['*'] };
@@ -604,35 +604,35 @@ function filePickerFilters(fieldId: SettingsFieldId): Record<string, string[]> {
     return { 'JSON': ['json'], 'すべてのファイル': ['*'] };
   }
   if (fieldId === 'vcvarsPath') {
-    return { 'Batch files': ['bat', 'cmd'], 'すべてのファイル': ['*'] };
+    return { 'バッチファイル': ['bat', 'cmd'], 'すべてのファイル': ['*'] };
   }
   return { 'すべてのファイル': ['*'] };
 }
 
 function inputPrompt(fieldId: SettingsFieldId): string {
   if (fieldId === 'sourceRoot') {
-    return 'プロジェクトルートのフォルダパスを入力してください。空にするとVS Codeで開いたTOPフォルダを使います。';
+    return 'ソースのルートフォルダーのパスを入力してください。空欄の場合は、VS Codeで最初に開いたフォルダーを使用します。';
   }
   if (fieldId === 'dswPath') {
-    return 'VC6 .dsw ファイルの絶対パスを入力してください。';
+    return 'VC6ワークスペースファイル（.dsw）の絶対パスを入力してください。';
   }
   if (fieldId === 'outputRoot') {
-    return '生成物の出力ルートフォルダを入力してください。関数名フォルダはこの下に自動作成されます。';
+    return '生成物を保存する出力先フォルダーを入力してください。関数ごとのフォルダーは、この中に自動で作成されます。';
   }
   if (fieldId === 'suiteManifestPath') {
-    return '複数関数回帰スイートmanifestのパスを入力してください。空にすると outputRoot\\suites\\default\\suite_manifest.json を使います。';
+    return 'テストスイートの定義ファイルのパスを入力してください。空欄の場合は、出力先フォルダー配下のsuites\\default\\suite_manifest.jsonを使用します。';
   }
   if (fieldId === 'defaultConfiguration') {
-    return 'VC6構成名を入力してください。';
+    return 'Visual C++ 6.0のビルド構成名を入力してください。';
   }
   if (fieldId === 'defaultProject') {
-    return '既定プロジェクト名を入力してください。空にすると指定なしになります。';
+    return '既定として使用するVisual C++ 6.0のプロジェクト名を入力してください。空欄の場合は指定しません。';
   }
   if (fieldId === 'vcvarsPath') {
-    return 'VC6環境設定バッチの絶対パスを入力してください。例: C:\\Program Files\\Microsoft Visual Studio\\VC98\\Bin\\VCVARS32.BAT';
+    return 'Visual C++ 6.0の環境設定バッチファイルの絶対パスを入力してください。例: C:\\Program Files\\Microsoft Visual Studio\\VC98\\Bin\\VCVARS32.BAT';
   }
   if (fieldId === 'cliPath') {
-    return '外部CLI exeの絶対パスを入力してください。同梱CLIを使う場合は unit-test-runner または空にします。';
+    return '外部のUnitTestRunner実行ファイルの絶対パスを入力してください。同梱のCLIを使用する場合は、unit-test-runnerまたは空欄にします。';
   }
   return '値を入力してください。';
 }
@@ -648,10 +648,10 @@ async function resolveFunctionName(editor: vscode.TextEditor): Promise<string> {
   }
   const prompt = await vscode.window.showInputBox({
     prompt: '解析する関数名を入力してください。',
-    validateInput: (value) => (/^[A-Za-z_]\w*$/.test(value) ? undefined : 'Cの関数識別子を入力してください。'),
+    validateInput: (value) => (/^[A-Za-z_]\w*$/.test(value) ? undefined : 'C言語の関数名として有効な識別子を入力してください。'),
   });
   if (!prompt) {
-    throw new Error('関数解析をキャンセルしました。');
+    throw new Error('関数名が入力されなかったため、解析を中止しました。');
   }
   return prompt;
 }
@@ -684,11 +684,44 @@ async function runWorkspaceCommand(context: vscode.ExtensionContext, output: vsc
   });
 }
 
+interface ExecutionConfirmation {
+  operation: string;
+  message: string;
+  action: string;
+}
+
+function executionConfirmation(invocation: CliInvocation): ExecutionConfirmation {
+  if (invocation.args.includes('build-probe')) {
+    return {
+      operation: 'ビルド',
+      message: '生成したテストをビルドします。ビルドを実行してもよろしいですか？',
+      action: 'ビルドを実行',
+    };
+  }
+  if (invocation.args.includes('run-tests')) {
+    return {
+      operation: 'テスト実行',
+      message: '生成したテストを実行します。テストを実行してもよろしいですか？',
+      action: 'テストを実行',
+    };
+  }
+  return {
+    operation: '処理',
+    message: '生成したツールまたはテストを実行します。実行してもよろしいですか？',
+    action: '実行する',
+  };
+}
+
 async function executeInvocation(context: vscode.ExtensionContext, output: vscode.OutputChannel, invocation: CliInvocation, outputWorkspace: string, workflowPanel: WorkflowPanelProvider): Promise<ReportPaths> {
   if (invocation.requiresConfirmation) {
-    const selected = await vscode.window.showWarningMessage('このコマンドは生成されたツールまたはテストを実行する可能性があります。続行しますか？', { modal: true }, '続行');
-    if (selected !== '続行') {
-      throw new Error('UnitTestRunnerコマンドをキャンセルしました。');
+    const confirmation = executionConfirmation(invocation);
+    const selected = await vscode.window.showWarningMessage(
+      confirmation.message,
+      { modal: true },
+      confirmation.action,
+    );
+    if (selected !== confirmation.action) {
+      throw new Error(`${confirmation.operation}を中止しました。`);
     }
   }
   await context.globalState.update(LAST_COMMAND_KEY, invocation.displayCommand);
@@ -705,8 +738,8 @@ async function executeInvocation(context: vscode.ExtensionContext, output: vscod
   output.append(result.stdout);
   output.append(result.stderr);
   if (result.timedOut) {
-    await recordWorkflowError(context, workflowPanel, 'unit-test-runnerがタイムアウトしました。');
-    throw new Error('unit-test-runnerがタイムアウトしました。');
+    await recordWorkflowError(context, workflowPanel, 'UnitTestRunner CLIの処理がタイムアウトしました。');
+    throw new Error('UnitTestRunner CLIの処理がタイムアウトしました。');
   }
   if (result.exitCode !== 0) {
     const message = formatCliFailureMessage(result.stdout, result.stderr, result.exitCode);
@@ -720,8 +753,13 @@ async function executeInvocation(context: vscode.ExtensionContext, output: vscod
 
 async function executeSuiteInvocation(context: vscode.ExtensionContext, output: vscode.OutputChannel, invocation: CliInvocation, suitePanel: SuitePanelProvider, suiteDashboard: SuiteDashboardPanel): Promise<boolean> {
   if (invocation.requiresConfirmation) {
-    const selected = await vscode.window.showWarningMessage('このコマンドは登録済みスイートのテストを実行する可能性があります。続行しますか？', { modal: true }, '続行');
-    if (selected !== '続行') {
+    const runAll = invocation.args.includes('--all');
+    const action = runAll ? '全件テストを実行' : 'テストスイートを実行';
+    const message = runAll
+      ? '登録されているすべてのテストを実行し、合否を確認します。実行してもよろしいですか？'
+      : '選択したテストスイートを実行します。実行してもよろしいですか？';
+    const selected = await vscode.window.showWarningMessage(message, { modal: true }, action);
+    if (selected !== action) {
       return false;
     }
   }
@@ -734,13 +772,13 @@ async function executeSuiteInvocation(context: vscode.ExtensionContext, output: 
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await recordSuiteError(context, suitePanel, suiteDashboard, message);
-    await showSuiteError(context, `unit-test-runnerを起動できませんでした。${message}`);
+    await showSuiteError(context, `UnitTestRunner CLIを起動できませんでした。 ${message}`);
     return false;
   }
   output.append(result.stdout);
   output.append(result.stderr);
   if (result.timedOut) {
-    const message = 'unit-test-runnerがタイムアウトしました。';
+    const message = 'UnitTestRunner CLIの処理がタイムアウトしました。';
     await recordSuiteError(context, suitePanel, suiteDashboard, message);
     await showSuiteError(context, message);
     return false;
@@ -756,7 +794,7 @@ async function executeSuiteInvocation(context: vscode.ExtensionContext, output: 
   suiteDashboard.refresh();
   const summary = suiteSummaryFromStdout(result.stdout);
   if (summary) {
-    void vscode.window.showInformationMessage(`UnitTestRunner: スイート実行完了。GREEN ${summary.green} / Not GREEN ${summary.notGreen} / Total ${summary.total}`);
+    void vscode.window.showInformationMessage(`UnitTestRunner: テストスイートの実行が完了しました。合計${summary.total}件のうち、${summary.green}件合格、${summary.notGreen}件不合格でした。`);
   }
   return true;
 }
@@ -841,9 +879,9 @@ async function lastWorkspace(context: vscode.ExtensionContext): Promise<string> 
   if (workspace) {
     return workspace;
   }
-  const selected = await vscode.window.showInputBox({ prompt: '出力workspaceのパスを入力してください。' });
+  const selected = await vscode.window.showInputBox({ prompt: '出力ワークスペースのフォルダーパスを入力してください。' });
   if (!selected) {
-    throw new Error('出力workspaceの指定が必要です。');
+    throw new Error('出力ワークスペースのフォルダーパスを入力してください。');
   }
   await context.globalState.update(LAST_WORKSPACE_KEY, selected);
   return selected;
@@ -854,7 +892,7 @@ async function openLastReport(context: vscode.ExtensionContext, key: keyof Repor
   const remembered = key === 'functionDossierMd' ? context.globalState.get<string>(LAST_DOSSIER_KEY) : undefined;
   const reportPath = remembered || (workspace ? resolveReportPaths(workspace)[key] : undefined);
   if (!reportPath) {
-    throw new Error('記録済みの出力workspaceがありません。');
+    throw new Error('記録された出力ワークスペースがありません。先に関数解析またはクイックチェックを実行してください。');
   }
   await openReport(reportPath);
 }
@@ -862,7 +900,7 @@ async function openLastReport(context: vscode.ExtensionContext, key: keyof Repor
 async function openSuiteManifest(context: vscode.ExtensionContext): Promise<void> {
   const suitePath = buildSuiteManifestPath(readConfig(context));
   if (!fs.existsSync(suitePath)) {
-    throw new Error(`スイートmanifestがまだありません: ${suitePath}`);
+    throw new Error(`スイート定義ファイルが見つかりません。確認先: ${suitePath}`);
   }
   await openReport(suitePath);
 }
@@ -871,7 +909,7 @@ async function openSuiteRunReport(context: vscode.ExtensionContext): Promise<voi
   const suitePath = buildSuiteManifestPath(readConfig(context));
   const reportPath = path.join(path.dirname(suitePath), 'reports', 'suite_run_report.md');
   if (!fs.existsSync(reportPath)) {
-    throw new Error(`スイート実行レポートがまだありません: ${reportPath}`);
+    throw new Error(`テストスイートの実行レポートが見つかりません。先にテストスイートを実行してください。確認先: ${reportPath}`);
   }
   await openReport(reportPath);
 }
@@ -884,7 +922,7 @@ async function openOutputWorkspace(context: vscode.ExtensionContext): Promise<vo
 async function copyLastCommand(context: vscode.ExtensionContext): Promise<void> {
   const command = context.globalState.get<string>(LAST_COMMAND_KEY);
   if (!command) {
-    throw new Error('記録済みのUnitTestRunnerコマンドがありません。');
+    throw new Error('記録されたCLIコマンドがありません。先にいずれかの処理を実行してください。');
   }
   await vscode.env.clipboard.writeText(command);
 }

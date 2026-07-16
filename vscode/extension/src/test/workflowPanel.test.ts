@@ -92,16 +92,16 @@ describe('UnitTestRunner workflow panel view modes', () => {
     assert.match(html, /data-default-mode="simple"/);
     assert.match(html, /id="simplePanel" class="panel-view simple-panel"/);
     assert.match(html, /id="fullPanel" class="panel-view full-panel hidden"/);
-    assert.match(html, /<h3>1\. Quick Check<\/h3>/);
-    assert.match(html, /<h3>2\. テストソース確認<\/h3>/);
+    assert.match(html, /<h3>1\. クイックチェック<\/h3>/);
+    assert.match(html, /<h3>2\. テストソースを確認<\/h3>/);
     assert.match(html, /<h3>3\. ビルド<\/h3>/);
-    assert.match(html, /<h3>4\. テスト実行<\/h3>/);
-    assert.match(html, />Quick Checkを再実行<\/button>/);
+    assert.match(html, /<h3>4\. テストを実行<\/h3>/);
+    assert.match(html, />クイックチェックを再実行<\/button>/);
     assert.match(html, />テストソースを開く<\/button>/);
     assert.match(html, />ビルドを再実行<\/button>/);
     assert.match(html, />テストを再実行<\/button>/);
-    assert.doesNotMatch(html, />[1-4]\. (?:Quick Check|テストソース|ビルド|テスト実行).*<\/button>/);
-    assert.match(html, /data-label="Quick Checkを再実行"/);
+    assert.doesNotMatch(html, />[1-4]\. (?:クイックチェック|テストソース|ビルド|テスト).*<\/button>/);
+    assert.match(html, /data-label="クイックチェックを再実行"/);
     assert.match(html, /data-label="ビルドを再実行"/);
     assert.match(html, /data-label="テストを再実行"/);
     assert.ok(SIMPLE_WORKFLOW_ACTIONS.some((item) => item.commandId === 'unitTestRunner.quickCheckCurrentFunction'));
@@ -120,7 +120,7 @@ describe('UnitTestRunner workflow panel view modes', () => {
     };
 
     const html = renderState(state);
-    const quickButton = html.match(/<button class="[^"]*"[^>]*>Quick Checkを実行<\/button>/)?.[0] ?? '';
+    const quickButton = html.match(/<button class="[^"]*"[^>]*>クイックチェックを実行<\/button>/)?.[0] ?? '';
     const buildButton = html.match(/<button class="[^"]*"[^>]*>ビルドを実行<\/button>/)?.[0] ?? '';
 
     assert.match(quickButton, /class="[^"]*primary/);
@@ -137,14 +137,14 @@ describe('UnitTestRunner workflow panel view modes', () => {
 
     const html = renderState(state);
 
-    assert.match(html, /現在関数の解析を再実行/);
-    assert.match(html, /data-label="現在関数の解析を再実行"/);
+    assert.match(html, /現在の関数を再解析/);
+    assert.match(html, /data-label="現在の関数を再解析"/);
     assert.match(html, /次の操作/);
     assert.match(html, /未実施/);
     assert.doesNotMatch(html, /現在の推奨/);
 
     const completedDossier = html.match(
-      /<section class="step done">[\s\S]*?<h3>3\. function_dossier\.md 確認<\/h3>[\s\S]*?<\/section>/,
+      /<section class="step done">[\s\S]*?<h3>3\. 関数分析レポート（function_dossier\.md）を確認<\/h3>[\s\S]*?<\/section>/,
     )?.[0] ?? '';
     assert.ok(completedDossier);
     assert.doesNotMatch(completedDossier, /保存済みとして確定/);

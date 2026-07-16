@@ -1,13 +1,13 @@
 import { SettingsAction, SettingsFieldId, SettingsViewModel } from '../config/settingsViewModel';
 
 export function renderSettings(settings: SettingsViewModel): string {
-  const readyLabel = settings.ready ? '設定確認は完了しています。' : '未設定の必須項目があります。';
+  const readyLabel = settings.ready ? '必須項目はすべて設定されています。' : '必須項目に未設定があります。各項目を確認してください。';
   const openAttribute = settings.ready && settings.warnings.length === 0 ? '' : ' open';
   return `<details id="unitTestRunnerSettings" class="settings"${openAttribute}>
   <summary class="settings-summary">
     <h2>設定</h2>
     <span class="settings-toggle settings-collapsed-label">設定を表示</span>
-    <span class="settings-toggle settings-expanded-label">設定を隠す</span>
+    <span class="settings-toggle settings-expanded-label">設定を閉じる</span>
   </summary>
   <p class="settings-ready">${escapeHtml(readyLabel)}</p>
   ${settings.fields.map(renderSettingField).join('')}
@@ -16,7 +16,7 @@ export function renderSettings(settings: SettingsViewModel): string {
 
 function renderSettingField(field: SettingsViewModel['fields'][number]): string {
   const value = field.effectiveValue || '未設定';
-  const configured = field.configuredValue && field.configuredValue !== field.effectiveValue ? `<div class="setting-value">設定値: ${escapeHtml(field.configuredValue)}</div>` : '';
+  const configured = field.configuredValue && field.configuredValue !== field.effectiveValue ? `<div class="setting-value">保存されている設定: ${escapeHtml(field.configuredValue)}</div>` : '';
   const messages = field.messages.map((message) => `<div class="setting-message">${escapeHtml(message)}</div>`).join('');
   return `<section class="setting-field ${field.state}">
   <div class="setting-title">

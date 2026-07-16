@@ -15,7 +15,7 @@ export function parseCliResultReportPaths(stdout: string, stderr: string, worksp
 }
 
 export function formatCliFailureMessage(stdout: string, stderr: string, exitCode: number | null): string {
-  const exitText = `unit-test-runnerが終了コード ${exitCode ?? 'unknown'} で終了しました。`;
+  const exitText = `UnitTestRunner CLIが終了コード ${exitCode ?? '不明'} で終了しました。`;
   const parsed = parseJsonObject(stdout);
   if (!parsed) {
     const detail = stderr.trim();
@@ -90,7 +90,7 @@ function formatSuiteRunFailure(parsed: Record<string, unknown>, exitCode: number
   const green = numberValue(summary.green);
   const notGreen = numberValue(summary.not_green);
   const reportPath = stringValue(reports.suite_run_report_md);
-  const parts = [`全件GREENではありません。GREEN ${green} / Not GREEN ${notGreen} / Total ${total}`];
+  const parts = [`全件の合格条件を満たしていません。合計${total}件 / 合格${green}件 / 不合格${notGreen}件`];
   if (reportPath) {
     parts.push(`実行レポート: ${reportPath}`);
   }
@@ -102,7 +102,7 @@ export function parseCliResult(stdout: string, stderr: string, workspace: string
   try {
     parsed = JSON.parse(stdout) as unknown;
   } catch {
-    const warnings = ['CLI output is not a JSON envelope; produced report paths are unavailable.'];
+    const warnings = ['CLIの出力がJSON形式ではないため、生成されたレポートのパスを取得できませんでした。'];
     if (stderr.trim()) {
       warnings.push(stderr.trim());
     }
