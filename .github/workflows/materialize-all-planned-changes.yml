@@ -25,7 +25,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Reconstruct and verify final product tree
+      - name: Reconstruct through current-dossier compatibility fix
         shell: bash
         run: |
           set -euo pipefail
@@ -88,15 +88,21 @@ jobs:
           git add src/unit_test_runner/build_probe.py tests/test_build_probe.py
           git diff --cached --check
           git commit -m "fix: validate merged current dossier contract"
-          test "$(git rev-parse HEAD^{tree})" = \
-            "eab459fc47683c9e8129426ebc27029ccde4805e"
+          actual_tree=$(git rev-parse HEAD^{tree})
+          echo "Intermediate product tree: $actual_tree"
+          test "$actual_tree" = "eab459fc47683c9e8129426ebc27029ccde4805e"
 
+      - name: Apply finalized-dossier reanalysis fix
+        shell: bash
+        run: |
+          set -euo pipefail
           git show \
             origin/codex/bootstrap-integrate-all-plans:.github/bootstrap/finalized-dossier-reanalysis-fix.patch.b64 \
             | tr -d '\r\n' \
             | base64 --decode > "$RUNNER_TEMP/reanalysis-fix.patch"
-          test "$(sha256sum "$RUNNER_TEMP/reanalysis-fix.patch" | awk '{print $1}')" = \
-            "d55022a69c921fab4af3adbd216846ac6b336d2b47df307412cb9533747ce359"
+          actual_patch_hash=$(sha256sum "$RUNNER_TEMP/reanalysis-fix.patch" | awk '{print $1}')
+          echo "Reanalysis fix hash: $actual_patch_hash"
+          test "$actual_patch_hash" = "d55022a69c921fab4af3adbd216846ac6b336d2b47df307412cb9533747ce359"
           git apply --check "$RUNNER_TEMP/reanalysis-fix.patch"
           git apply "$RUNNER_TEMP/reanalysis-fix.patch"
           git add src/unit_test_runner/reanalysis/workflow.py
