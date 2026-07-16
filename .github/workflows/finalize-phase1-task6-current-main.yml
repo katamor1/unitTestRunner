@@ -1,0 +1,164 @@
+name: Finalize verified Phase 1 Task 6 integration
+
+on:
+  push:
+    branches:
+      - codex/task6-integration-orchestrator
+
+permissions:
+  actions: read
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: finalize-phase1-task6-current-main
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 115
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: katamor1/unitTestRunner
+      PRODUCT_BRANCH: codex/p1t6-review-decisions-main-integration
+    steps:
+      - name: Checkout full repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create, verify, and merge the replacement Task 6 PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+
+          deadline=$((SECONDS + 6600))
+          product_sha=''
+          while (( SECONDS < deadline )); do
+            if product_sha="$(gh api "repos/$REPO/branches/${PRODUCT_BRANCH//\//%2F}" --jq '.commit.sha' 2>/dev/null)" && [ -n "$product_sha" ]; then
+              break
+            fi
+            echo 'Waiting for the guarded integration workflow to publish the product branch...'
+            sleep 30
+          done
+          [ -n "$product_sha" ] || { echo 'product branch was not published before timeout' >&2; exit 41; }
+          echo "product_sha=$product_sha"
+
+          git fetch origin "$PRODUCT_BRANCH:refs/remotes/origin/$PRODUCT_BRANCH"
+          git merge-base --is-ancestor origin/main "origin/$PRODUCT_BRANCH" || {
+            echo 'product branch is not based on current main' >&2
+            exit 42
+          }
+
+          pr="$(gh pr list --repo "$REPO" --head "$PRODUCT_BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$pr" ]; then
+            gh pr create --repo "$REPO" --base main --head "$PRODUCT_BRANCH" --draft \
+              --title 'Complete Phase 1 Task 6 review decisions on current main' \
+              --body-file <(cat <<'EOF'
+## Summary
+
+Integrates the recovered Phase 1 Task 6 implementation onto the current `main` history without merging any obsolete carrier/recovery PR.
+
+- stable semantic review IDs and exact subject references
+- versioned review-decision, dossier, and manifest contracts with retained legacy schemas
+- atomic, revision-guarded review-decision persistence
+- stale/orphan assessment and independent readiness axes
+- canonical review discovery/write CLI workflows
+- compatibility with current Windows path-alias and writer-lock safeguards
+
+## Reproducible integration and pre-publication gate
+
+A guarded same-repository workflow located the unique commit for the pinned Task 6 Git tree, merged it onto current `main`, reconciled the single writer-lock overlap by regression testing, and published this branch only after all of the following passed:
+
+- every Task 6 changed test module in isolated processes
+- every top-level `tests/test_*.py` module in a fresh Python process
+- `compileall`
+- CLI help
+- `git diff --check`
+- wheel build, fresh-environment install, CLI smoke, and installed-schema JSON loading
+
+This PR remains draft until the standard hosted CI jobs are green for this exact head.
+EOF
+)
+            pr="$(gh pr list --repo "$REPO" --head "$PRODUCT_BRANCH" --state open --json number --jq '.[0].number // empty')"
+          fi
+          [ -n "$pr" ] || { echo 'unable to locate or create product PR' >&2; exit 43; }
+          echo "pr=$pr"
+
+          required=(
+            'Source integrity'
+            'Package contract'
+            'VS Code unit tests'
+            'VC6 fixture smoke'
+            'Python tests'
+            'VS Code Extension Host activation'
+          )
+
+          deadline=$((SECONDS + 6600))
+          while (( SECONDS < deadline )); do
+            payload="$(gh pr view "$pr" --repo "$REPO" --json headRefOid,statusCheckRollup,mergeStateStatus)"
+            actual_sha="$(jq -r '.headRefOid' <<<"$payload")"
+            [ "$actual_sha" = "$product_sha" ] || {
+              echo "PR head moved from $product_sha to $actual_sha" >&2
+              exit 44
+            }
+
+            missing=0
+            pending=0
+            failed=0
+            for name in "${required[@]}"; do
+              count="$(jq --arg name "$name" '[.statusCheckRollup[] | select(.name == $name)] | length' <<<"$payload")"
+              if [ "$count" -eq 0 ]; then
+                missing=$((missing + 1))
+                continue
+              fi
+              state="$(jq -r --arg name "$name" '[.statusCheckRollup[] | select(.name == $name)] | last | (.conclusion // .state // .status // "")' <<<"$payload")"
+              case "$state" in
+                SUCCESS|NEUTRAL|SKIPPED) ;;
+                FAILURE|ERROR|CANCELLED|TIMED_OUT|ACTION_REQUIRED|STARTUP_FAILURE|STALE) failed=$((failed + 1)) ;;
+                *) pending=$((pending + 1)) ;;
+              esac
+            done
+            echo "required checks: missing=$missing pending=$pending failed=$failed"
+            [ "$failed" -eq 0 ] || exit 45
+            if [ "$missing" -eq 0 ] && [ "$pending" -eq 0 ]; then
+              break
+            fi
+            sleep 30
+          done
+          (( SECONDS < deadline )) || { echo 'hosted PR checks timed out' >&2; exit 46; }
+
+          gh pr ready "$pr" --repo "$REPO" || true
+          gh pr merge "$pr" --repo "$REPO" --merge --match-head-commit "$product_sha"
+          merge_sha="$(gh pr view "$pr" --repo "$REPO" --json mergeCommit --jq '.mergeCommit.oid')"
+          [ -n "$merge_sha" ] || { echo 'merge commit was not reported' >&2; exit 47; }
+          echo "merge_sha=$merge_sha"
+
+          deadline=$((SECONDS + 6600))
+          while (( SECONDS < deadline )); do
+            runs="$(gh api "repos/$REPO/actions/runs?head_sha=$merge_sha&event=push&per_page=100")"
+            ci_count="$(jq '[.workflow_runs[] | select(.name == "CI")] | length' <<<"$runs")"
+            ci_pending="$(jq '[.workflow_runs[] | select(.name == "CI" and .status != "completed")] | length' <<<"$runs")"
+            ci_failed="$(jq '[.workflow_runs[] | select(.name == "CI" and .status == "completed" and .conclusion != "success")] | length' <<<"$runs")"
+            ci_success="$(jq '[.workflow_runs[] | select(.name == "CI" and .status == "completed" and .conclusion == "success")] | length' <<<"$runs")"
+            echo "post-merge CI: count=$ci_count pending=$ci_pending failed=$ci_failed success=$ci_success"
+            [ "$ci_failed" -eq 0 ] || exit 48
+            if [ "$ci_count" -gt 0 ] && [ "$ci_pending" -eq 0 ] && [ "$ci_success" -eq "$ci_count" ]; then
+              break
+            fi
+            sleep 30
+          done
+          (( SECONDS < deadline )) || { echo 'post-merge main CI timed out' >&2; exit 49; }
+
+          for stale in 11 12 13 14 15 16; do
+            state="$(gh pr view "$stale" --repo "$REPO" --json state --jq '.state' 2>/dev/null || true)"
+            if [ "$state" = OPEN ]; then
+              gh pr comment "$stale" --repo "$REPO" --body "Superseded by the verified current-main Task 6 integration in PR #$pr. This recovery/carrier branch is intentionally closed without merge."
+              gh pr close "$stale" --repo "$REPO"
+            fi
+          done
+
+          echo "Task 6 PR #$pr merged as $merge_sha; post-merge CI is green."
