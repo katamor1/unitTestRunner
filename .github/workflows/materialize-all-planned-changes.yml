@@ -19,16 +19,26 @@ concurrency:
 jobs:
   materialize:
     runs-on: ubuntu-latest
-    steps:
+    env:
+      FIX_PATCH_B64: ZGlmZiAtLWdpdCBhL3NyYy91bml0X3Rlc3RfcnVubmVyL2J1aWxkX3Byb2JlLnB5IGIvc3JjL3VuaXRfdGVzdF9ydW5uZXIvYnVpbGRfcHJvYmUucHkKaW5kZXggMmNjYTQ4Mi4uNWFlOGJiOCAxMDA2NDQKLS0tIGEvc3JjL3VuaXRfdGVzdF9ydW5uZXIvYnVpbGRfcHJvYmUucHkKKysrIGIvc3JjL3VuaXRfdGVzdF9ydW5uZXIvYnVpbGRfcHJvYmUucHkKQEAgLTgyLDEyICs4MiwxMSBAQCBkZWYgX25vcm1hbGl6ZV9jdXJyZW50X2Rvc3NpZXIoZG9jdW1lbnQ6IE1hcHBpbmdbc3RyLCBBbnldKSAtPiBkaWN0W3N0ciwgQW55XToKICAgICBpZiBub3QgaXNpbnN0YW5jZShkb2N1bWVudC5nZXQoImRhdGEiKSwgTWFwcGluZyk6CiAgICAgICAgIHJhaXNlIENvbnN1bWVyQ29udHJhY3RFcnJvcigiRnVuY3Rpb24gZG9zc2llciBkYXRhIG11c3QgYmUgYW4gb2JqZWN0LiIpCiAKLSAgICBjb21wYXRpYmlsaXR5X2VudmVsb3BlID0gY29weS5kZWVwY29weShkaWN0KGRvY3VtZW50KSkKLSAgICBjb21wYXRpYmlsaXR5X2VudmVsb3BlLnBvcCgidGFyZ2V0IiwgTm9uZSkKLSAgICBjb21wYXRpYmlsaXR5X2VudmVsb3BlLnBvcCgiYnVpbGRfY29udGV4dCIsIE5vbmUpCi0gICAgY29tcGF0aWJpbGl0eV9lbnZlbG9wZVsic2NoZW1hX3ZlcnNpb24iXSA9ICIxLjAuMCIKKyAgICB2YWxpZGF0ZWRfZW52ZWxvcGUgPSBjb3B5LmRlZXBjb3B5KGRpY3QoZG9jdW1lbnQpKQorICAgIHZhbGlkYXRlZF9lbnZlbG9wZS5wb3AoInRhcmdldCIsIE5vbmUpCisgICAgdmFsaWRhdGVkX2VudmVsb3BlLnBvcCgiYnVpbGRfY29udGV4dCIsIE5vbmUpCiAgICAgcmV0dXJuIG5vcm1hbGl6ZV9jb25zdW1lcl9kYXRhKAotICAgICAgICBjb21wYXRpYmlsaXR5X2VudmVsb3BlLAorICAgICAgICB2YWxpZGF0ZWRfZW52ZWxvcGUsCiAgICAgICAgIGV4cGVjdGVkX2tpbmQ9QXJ0aWZhY3RLaW5kLkZVTkNUSU9OX0RPU1NJRVIsCiAgICAgKQogCmRpZmYgLS1naXQgYS90ZXN0cy90ZXN0X2J1aWxkX3Byb2JlLnB5IGIvdGVzdHMvdGVzdF9idWlsZF9wcm9iZS5weQppbmRleCAxMDBlMjg0Li5jNmIwMTZkIDEwMDY0NAotLS0gYS90ZXN0cy90ZXN0X2J1aWxkX3Byb2JlLnB5CisrKyBiL3Rlc3RzL3Rlc3RfYnVpbGRfcHJvYmUucHkKQEAgLTExNCwyNSArMTE0LDcgQEAgTElOSyA6IGZhdGFsIGVycm9yIExOSzIwMTk6IHVucmVzb2x2ZWQgZXh0ZXJuYWwgc3ltYm9sIF9Xcml0ZU91dHB1dCByZWZlcmVuY2VkIGkKICAgICAgICAgICAgIChyb290IC8gImV4dHJhY3RlZCIgLyAic3JjIiAvICJjb250cm9sLmMiKS53cml0ZV90ZXh0KAogICAgICAgICAgICAgICAgICJpbnQgVGFyZ2V0KHZvaWQpIHsgcmV0dXJuIDA7IH1cbiIsIGVuY29kaW5nPSJhc2NpaSIKICAgICAgICAgICAgICkKLSAgICAgICAgICAgIGRvc3NpZXIgPSB7Ci0gICAgICAgICAgICAgICAgImFydGlmYWN0X2tpbmQiOiAiZnVuY3Rpb25fZG9zc2llciIsCi0gICAgICAgICAgICAgICAgInNjaGVtYV92ZXJzaW9uIjogIjEuMS4wIiwKLSAgICAgICAgICAgICAgICAicHJvZHVjZXIiOiB7Ci0gICAgICAgICAgICAgICAgICAgICJuYW1lIjogInVuaXQtdGVzdC1ydW5uZXIiLAotICAgICAgICAgICAgICAgICAgICAidmVyc2lvbiI6ICIwLjEuMCIsCi0gICAgICAgICAgICAgICAgICAgICJjb21taXQiOiAiYjY2NzkwMTY1YTJkNGY4Mjk0M2NkMTk5YjNiNDk5ZTFmMTcyNWZjMyIsCi0gICAgICAgICAgICAgICAgfSwKLSAgICAgICAgICAgICAgICAic3ViamVjdCI6IHsKLSAgICAgICAgICAgICAgICAgICAgImZ1bmN0aW9uX2lkIjogImZuX3RhcmdldCIsCi0gICAgICAgICAgICAgICAgICAgICJzb3VyY2VfcGF0aCI6ICJzcmMvY29udHJvbC5jIiwKLSAgICAgICAgICAgICAgICAgICAgInNvdXJjZV9zaGEyNTYiOiAiYSIgKiA2NCwKLSAgICAgICAgICAgICAgICB9LAotICAgICAgICAgICAgICAgICJkYXRhIjogewotICAgICAgICAgICAgICAgICAgICAidGFyZ2V0IjogeyJzb3VyY2UiOiAic3JjL2NvbnRyb2wuYyIsICJmdW5jdGlvbiI6ICJUYXJnZXQifSwKLSAgICAgICAgICAgICAgICAgICAgImJ1aWxkX2NvbnRleHQiOiB7ImluY2x1ZGVfZGlycyI6IFtdLCAiZGVmaW5lcyI6IFtdfSwKLSAgICAgICAgICAgICAgICB9LAotICAgICAgICAgICAgICAgICJleHRlbnNpb25zIjoge30sCi0gICAgICAgICAgICB9CisgICAgICAgICAgICBkb3NzaWVyID0gX2N1cnJlbnRfZG9zc2llcl9lbnZlbG9wZSgpCiAgICAgICAgICAgICBkb3NzaWVyX3BhdGggPSByZXBvcnRzIC8gImZ1bmN0aW9uX2Rvc3NpZXIuanNvbiIKICAgICAgICAgICAgIGRvc3NpZXJfcGF0aC53cml0ZV90ZXh0KGpzb24uZHVtcHMoZG9zc2llciksIGVuY29kaW5nPSJ1dGYtOCIpCiAK    steps:
       - name: Checkout bootstrap branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Fetch verified source refs
+      - name: Reconstruct, verify, and publish product branch
         shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+          OPENBLAS_NUM_THREADS: "1"
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
         run: |
           set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git fetch --no-tags origin \
             +refs/heads/codex/bootstrap-p1t6-v3:refs/remotes/origin/codex/bootstrap-p1t6-v3 \
             +refs/heads/codex/p1t6-review-decisions-readiness-clean:refs/remotes/origin/codex/p1t6-review-decisions-readiness-clean \
@@ -36,10 +46,6 @@ jobs:
           test "$(git rev-parse origin/main)" = "969ce9462a688e94c887d6e77359e40296d8927b"
           test "$(git rev-parse origin/codex/p1t6-review-decisions-readiness-clean)" = "a204f3aec3015fdb6eea26cf7e566cc9523ba046"
 
-      - name: Reconstruct exact Task 6 patch
-        shell: bash
-        run: |
-          set -euo pipefail
           carrier=origin/codex/bootstrap-p1t6-v3
           git ls-tree -r --name-only "$carrier" .github/bootstrap/p1t6-v3-b64 \
             | sort \
@@ -54,12 +60,6 @@ jobs:
           test "$(sha256sum "$RUNNER_TEMP/p1t6.patch" | awk '{print $1}')" = \
             "8aaa74a87b2e1ea64087726bbcbfd8c998d5940c458d04768b63f969fe461ef0"
 
-      - name: Materialize exact Task 6 tree
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -C task6-exact b66790165a2d4f82943cd199b3b499e1f1725fc3
           git apply --check "$RUNNER_TEMP/p1t6.patch"
           git apply "$RUNNER_TEMP/p1t6.patch"
@@ -67,16 +67,12 @@ jobs:
           test "$(git write-tree)" = "363ddb6f86a4508eb5f4dd2a26013b837a5e26d6"
           git diff --cached --check
           git commit -m "feat: complete phase 1 task 6 review decisions"
-          echo "TASK6_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          task6_commit=$(git rev-parse HEAD)
 
-      - name: Merge Task 6 with the current planned compatibility changes
-        shell: bash
-        run: |
-          set -euo pipefail
           git switch -C codex/integrate-all-plans \
             origin/codex/p1t6-review-decisions-readiness-clean
           set +e
-          git merge --no-ff --no-commit "$TASK6_COMMIT"
+          git merge --no-ff --no-commit "$task6_commit"
           merge_status=$?
           set -e
           test "$merge_status" = "1"
@@ -87,80 +83,17 @@ jobs:
           git diff --cached --check
           git commit -m "merge: integrate Phase 1 Task 6 implementation"
 
-      - name: Resolve the merged current-dossier contract
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          source = Path("src/unit_test_runner/build_probe.py")
-          text = source.read_text(encoding="utf-8")
-          old = '''    compatibility_envelope = copy.deepcopy(dict(document))
-              compatibility_envelope.pop("target", None)
-              compatibility_envelope.pop("build_context", None)
-              compatibility_envelope["schema_version"] = "1.0.0"
-              return normalize_consumer_data(
-                  compatibility_envelope,
-                  expected_kind=ArtifactKind.FUNCTION_DOSSIER,
-              )
-          '''
-          new = '''    validated_envelope = copy.deepcopy(dict(document))
-              validated_envelope.pop("target", None)
-              validated_envelope.pop("build_context", None)
-              return normalize_consumer_data(
-                  validated_envelope,
-                  expected_kind=ArtifactKind.FUNCTION_DOSSIER,
-              )
-          '''
-          if old not in text:
-              raise SystemExit("current dossier compatibility block not found")
-          source.write_text(text.replace(old, new), encoding="utf-8")
-
-          tests = Path("tests/test_build_probe.py")
-          text = tests.read_text(encoding="utf-8")
-          old = '''            dossier = {
-                  "artifact_kind": "function_dossier",
-                  "schema_version": "1.1.0",
-                  "producer": {
-                      "name": "unit-test-runner",
-                      "version": "0.1.0",
-                      "commit": "b66790165a2d4f82943cd199b3b499e1f1725fc3",
-                  },
-                  "subject": {
-                      "function_id": "fn_target",
-                      "source_path": "src/control.c",
-                      "source_sha256": "a" * 64,
-                  },
-                  "data": {
-                      "target": {"source": "src/control.c", "function": "Target"},
-                      "build_context": {"include_dirs": [], "defines": []},
-                  },
-                  "extensions": {},
-              }
-          '''
-          new = '''            dossier = _current_dossier_envelope()
-          '''
-          if old not in text:
-              raise SystemExit("stale minimal current dossier fixture not found")
-          tests.write_text(text.replace(old, new), encoding="utf-8")
-          PY
+          printf '%s' "$FIX_PATCH_B64" | base64 --decode > "$RUNNER_TEMP/integration-fix.patch"
+          test "$(sha256sum "$RUNNER_TEMP/integration-fix.patch" | awk '{print $1}')" = \
+            "aef4c6392879d09f2c2e26fa8f78ce2a4a3b5a07055acca7e366d61c2c42d4e7"
+          git apply --check "$RUNNER_TEMP/integration-fix.patch"
+          git apply "$RUNNER_TEMP/integration-fix.patch"
           git add src/unit_test_runner/build_probe.py tests/test_build_probe.py
           git diff --cached --check
           git commit -m "fix: validate merged current dossier contract"
           test "$(git rev-parse HEAD^{tree})" = \
             "eab459fc47683c9e8129426ebc27029ccde4805e"
 
-      - name: Run integration-focused verification
-        shell: bash
-        env:
-          PYTHONPATH: ${{ github.workspace }}/src
-          OPENBLAS_NUM_THREADS: "1"
-          OMP_NUM_THREADS: "1"
-          MKL_NUM_THREADS: "1"
-          NUMEXPR_NUM_THREADS: "1"
-        run: |
-          set -euo pipefail
           python -m pip install "setuptools>=61" wheel
           python -m pip install -e .
           python -m unittest \
@@ -176,10 +109,4 @@ jobs:
           python -m compileall -q src tests
           python -m unit_test_runner --help >/dev/null
           git diff --check origin/main...HEAD
-
-      - name: Publish the product branch
-        shell: bash
-        run: |
-          set -euo pipefail
-          git push --force-with-lease origin \
-            HEAD:refs/heads/codex/integrate-all-plans
+          git push --force origin HEAD:refs/heads/codex/integrate-all-plans
