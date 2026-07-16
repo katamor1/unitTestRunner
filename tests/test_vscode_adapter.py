@@ -35,11 +35,11 @@ class VscodeAdapterTests(unittest.TestCase):
             for command in manifest["contributes"]["commands"]
         }
         self.assertEqual(
-            "UnitTestRunner: 選択関数を解析",
+            "UnitTestRunner: 選択した関数を解析",
             commands["unitTestRunner.analyzeSelectedFunction"],
         )
         self.assertEqual(
-            "UnitTestRunner: 最後の関数dossierを開く",
+            "UnitTestRunner: 最後の関数分析レポートを開く",
             commands["unitTestRunner.openLastFunctionDossier"],
         )
         self.assertIn("unitTestRunner.openGeneratedTestSource", commands)
