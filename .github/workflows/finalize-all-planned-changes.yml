@@ -1,0 +1,275 @@
+name: Finalize all planned changes integration
+
+on:
+  push:
+    branches:
+      - codex/all-plans-final-merge-controller
+
+permissions:
+  actions: read
+  contents: write
+  issues: write
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: finalize-all-planned-changes-integration
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: katamor1/unitTestRunner
+      FINAL_BRANCH: codex/all-plans-main-integration-final-v2
+    steps:
+      - name: Checkout complete history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify PR checks, merge exact head, and validate main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+          audit_sha=''
+          audit_status() {
+            local state="$1"
+            local description="$2"
+            [ -n "$audit_sha" ] || return 0
+            gh api --method POST "repos/$REPO/statuses/$audit_sha" \
+              -f state="$state" \
+              -f context='all-plans/post-merge-audit' \
+              -f description="$description" >/dev/null || true
+          }
+          on_exit() {
+            local rc=$?
+            if [ "$rc" -ne 0 ]; then
+              audit_status failure 'Post-merge all-plans audit failed'
+            fi
+            exit "$rc"
+          }
+          trap on_exit EXIT
+
+          deadline=$((SECONDS + 7200))
+          pr=''
+          head_sha=''
+          while (( SECONDS < deadline )); do
+            branch_status="$(gh api "repos/$REPO/branches/${FINAL_BRANCH//\//%2F}" --jq '.commit.sha' 2>/dev/null || true)"
+            if [ -n "$branch_status" ]; then
+              pr_payload="$(gh pr list --repo "$REPO" --head "$FINAL_BRANCH" --state open --json number,headRefOid,isDraft)"
+              count="$(jq 'length' <<<"$pr_payload")"
+              if [ "$count" -eq 1 ]; then
+                pr="$(jq -r '.[0].number' <<<"$pr_payload")"
+                head_sha="$(jq -r '.[0].headRefOid' <<<"$pr_payload")"
+                [ "$head_sha" = "$branch_status" ] || {
+                  echo "PR head $head_sha differs from branch head $branch_status" >&2
+                  exit 91
+                }
+                break
+              fi
+              [ "$count" -le 1 ] || {
+                echo "Multiple open PRs found for $FINAL_BRANCH" >&2
+                exit 92
+              }
+            fi
+            sleep 30
+          done
+          [ -n "$pr" ] || {
+            echo "No unique open PR found for $FINAL_BRANCH before timeout" >&2
+            exit 93
+          }
+          echo "pr=$pr head_sha=$head_sha"
+
+          deadline=$((SECONDS + 7200))
+          while (( SECONDS < deadline )); do
+            current_sha="$(gh pr view "$pr" --repo "$REPO" --json headRefOid --jq '.headRefOid')"
+            [ "$current_sha" = "$head_sha" ] || {
+              echo "PR head moved from $head_sha to $current_sha" >&2
+              exit 94
+            }
+
+            runs="$(gh api "repos/$REPO/actions/runs?head_sha=$head_sha&per_page=100")"
+            mapfile -t ci_ids < <(jq -r '.workflow_runs[] | select(.name == "CI") | .id' <<<"$runs")
+            if [ "${#ci_ids[@]}" -eq 0 ]; then
+              echo 'Waiting for standard CI to start...'
+              sleep 30
+              continue
+            fi
+
+            pending=0
+            failed=0
+            successful=0
+            for run_id in "${ci_ids[@]}"; do
+              status="$(jq -r --argjson id "$run_id" '.workflow_runs[] | select(.id == $id) | .status' <<<"$runs")"
+              conclusion="$(jq -r --argjson id "$run_id" '.workflow_runs[] | select(.id == $id) | (.conclusion // "")' <<<"$runs")"
+              if [ "$status" != completed ]; then
+                pending=$((pending + 1))
+                continue
+              fi
+              if [ "$conclusion" != success ]; then
+                failed=$((failed + 1))
+                continue
+              fi
+              jobs="$(gh api "repos/$REPO/actions/runs/$run_id/jobs?per_page=100")"
+              job_count="$(jq '.total_count' <<<"$jobs")"
+              job_pending="$(jq '[.jobs[] | select(.status != "completed")] | length' <<<"$jobs")"
+              job_failed="$(jq '[.jobs[] | select(.status == "completed" and (.conclusion != "success" and .conclusion != "skipped"))] | length' <<<"$jobs")"
+              if [ "$job_count" -lt 6 ] || [ "$job_pending" -ne 0 ] || [ "$job_failed" -ne 0 ]; then
+                failed=$((failed + 1))
+              else
+                successful=$((successful + 1))
+              fi
+            done
+            echo "CI runs: success=$successful pending=$pending failed=$failed"
+            [ "$failed" -eq 0 ] || exit 95
+            if [ "$successful" -gt 0 ] && [ "$pending" -eq 0 ]; then
+              break
+            fi
+            sleep 30
+          done
+          (( SECONDS < deadline )) || {
+            echo 'Standard CI did not complete before timeout' >&2
+            exit 96
+          }
+
+          if [ "$(gh pr view "$pr" --repo "$REPO" --json isDraft --jq '.isDraft')" = true ]; then
+            gh pr ready "$pr" --repo "$REPO"
+          fi
+          gh pr merge "$pr" --repo "$REPO" --merge --match-head-commit "$head_sha"
+
+          merge_sha="$(gh pr view "$pr" --repo "$REPO" --json mergeCommit --jq '.mergeCommit.oid // empty')"
+          [ -n "$merge_sha" ] || {
+            echo 'GitHub did not report a merge commit' >&2
+            exit 97
+          }
+          audit_sha="$merge_sha"
+          audit_status pending 'Running post-merge all-plans audit'
+
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+          git merge-base --is-ancestor "$head_sha" origin/main || {
+            echo 'Merged final branch is not an ancestor of origin/main' >&2
+            exit 98
+          }
+          actual_main="$(git rev-parse origin/main)"
+          [ "$actual_main" = "$merge_sha" ] || {
+            git merge-base --is-ancestor "$merge_sha" origin/main || {
+              echo "Reported merge $merge_sha is not in current main $actual_main" >&2
+              exit 99
+            }
+          }
+          git switch --detach origin/main
+
+          python -m pip install --upgrade pip build
+          python -m pip install -e .
+
+          run_modules() {
+            local log="$1"
+            shift
+            : > "$log"
+            local module
+            for module in "$@"; do
+              echo "===== $module =====" | tee -a "$log"
+              if ! timeout --signal=TERM --kill-after=20s 360s \
+                  env PYTHONPATH="$PWD/src" python -X faulthandler -m unittest "$module" -v \
+                  2>&1 | tee -a "$log"; then
+                echo "FAILED_OR_TIMED_OUT=$module" | tee -a "$log"
+                return 1
+              fi
+            done
+          }
+
+          mapfile -t all_modules < <(
+            find tests -maxdepth 1 -type f -name 'test_*.py' -printf '%f\n' |
+              sort |
+              sed -E 's#^(test_[^/]+)\.py$#tests.\1#'
+          )
+          [ "${#all_modules[@]}" -gt 0 ] || exit 100
+          run_modules /tmp/post-merge-all-plans-python.log "${all_modules[@]}"
+          env PYTHONPATH="$PWD/src" python -m compileall -q src tests
+          env PYTHONPATH="$PWD/src" python -m unit_test_runner --help >/tmp/post-merge-cli-help.txt
+          git diff --check HEAD^
+
+          rm -rf /tmp/post-merge-dist /tmp/post-merge-wheel-venv
+          python -m build --wheel --outdir /tmp/post-merge-dist
+          python -m venv /tmp/post-merge-wheel-venv
+          /tmp/post-merge-wheel-venv/bin/python -m pip install --upgrade pip
+          /tmp/post-merge-wheel-venv/bin/python -m pip install /tmp/post-merge-dist/*.whl
+          /tmp/post-merge-wheel-venv/bin/python -m unit_test_runner --help >/tmp/post-merge-wheel-help.txt
+          /tmp/post-merge-wheel-venv/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+          import unit_test_runner
+          root = Path(unit_test_runner.__file__).resolve().parent / 'schemas'
+          schemas = sorted(root.glob('*.json'))
+          if not schemas:
+              raise SystemExit(f'No schemas installed under {root}')
+          for schema in schemas:
+              json.loads(schema.read_text(encoding='utf-8'))
+          print(f'Loaded {len(schemas)} installed schemas')
+          PY
+
+          # Final remote-branch audit. Known recovery/carrier/replacement branches
+          # may remain as refs, but no unknown product branch may be ahead of main.
+          unresolved=/tmp/post-merge-unresolved.txt
+          : > "$unresolved"
+          while IFS= read -r ref; do
+            case "$ref" in
+              origin/HEAD|origin/main|origin/codex/task6-integration-orchestrator|origin/codex/all-plans-final-merge-controller|origin/codex/bootstrap-*|origin/codex/p1t6-upload-*|origin/codex/p1t6-patch-publish*|origin/codex/p1t6-review-decisions-main-integration*|origin/codex/all-plans-main-integration-final*)
+                continue
+                ;;
+            esac
+            if git merge-base --is-ancestor "$ref" origin/main; then
+              continue
+            fi
+            ahead="$(git rev-list --count origin/main.."$ref")"
+            [ "$ahead" -eq 0 ] || echo "$ref ahead=$ahead" >> "$unresolved"
+          done < <(git for-each-ref --format='%(refname:short)' refs/remotes/origin | sort)
+          if [ -s "$unresolved" ]; then
+            cat "$unresolved" >&2
+            exit 101
+          fi
+
+          for stale in 11 12 13 14 15 16; do
+            state="$(gh pr view "$stale" --repo "$REPO" --json state --jq '.state' 2>/dev/null || true)"
+            if [ "$state" = OPEN ]; then
+              gh pr comment "$stale" --repo "$REPO" --body "Superseded by the verified all-plans integration in PR #$pr. This recovery/carrier PR is intentionally closed without merge."
+              gh pr close "$stale" --repo "$REPO"
+            fi
+          done
+
+          open_replacements="$(gh pr list --repo "$REPO" --state open --limit 100 --json number,headRefName)"
+          while IFS=$'\t' read -r other head; do
+            [ -n "$other" ] || continue
+            [ "$other" = "$pr" ] && continue
+            case "$head" in
+              codex/p1t6-review-decisions-main-integration*|codex/all-plans-main-integration-final)
+                gh pr comment "$other" --repo "$REPO" --body "Superseded by merged PR #$pr and closed without merge."
+                gh pr close "$other" --repo "$REPO"
+                ;;
+            esac
+          done < <(jq -r '.[] | [.number, .headRefName] | @tsv' <<<"$open_replacements")
+
+          audit_status success 'All planned changes merged and post-merge audit passed'
+          trap - EXIT
+          {
+            echo '## All planned changes integration complete'
+            echo
+            echo "- PR: #$pr"
+            echo "- Exact head: $head_sha"
+            echo "- Merge commit: $merge_sha"
+            echo "- Post-merge Python modules: ${#all_modules[@]}"
+            echo '- Wheel/fresh-install/schema gate: PASS'
+            echo '- Remote non-carrier branch audit: PASS'
+            echo '- Obsolete recovery PRs #11-#16: closed without merge'
+          } >> "$GITHUB_STEP_SUMMARY"
