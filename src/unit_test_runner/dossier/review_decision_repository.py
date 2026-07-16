@@ -372,7 +372,9 @@ def _exclusive_lock(path: Path, *, timeout_seconds: float = 10.0):
 
 
 def _write_exclusive_fsync(path: Path, data: bytes) -> None:
-    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    # Windows CRT text mode translates LF to CRLF even for os.write().
+    # Contract artifacts must preserve the exact validated byte sequence.
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0)
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     descriptor = os.open(path, flags, 0o600)
