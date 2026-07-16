@@ -19,8 +19,7 @@ concurrency:
 jobs:
   materialize:
     runs-on: ubuntu-latest
-    env:
-      FIX_PATCH_B64: ZGlmZiAtLWdpdCBhL3NyYy91bml0X3Rlc3RfcnVubmVyL2J1aWxkX3Byb2JlLnB5IGIvc3JjL3VuaXRfdGVzdF9ydW5uZXIvYnVpbGRfcHJvYmUucHkKaW5kZXggMmNjYTQ4Mi4uNWFlOGJiOCAxMDA2NDQKLS0tIGEvc3JjL3VuaXRfdGVzdF9ydW5uZXIvYnVpbGRfcHJvYmUucHkKKysrIGIvc3JjL3VuaXRfdGVzdF9ydW5uZXIvYnVpbGRfcHJvYmUucHkKQEAgLTgyLDEyICs4MiwxMSBAQCBkZWYgX25vcm1hbGl6ZV9jdXJyZW50X2Rvc3NpZXIoZG9jdW1lbnQ6IE1hcHBpbmdbc3RyLCBBbnldKSAtPiBkaWN0W3N0ciwgQW55XToKICAgICBpZiBub3QgaXNpbnN0YW5jZShkb2N1bWVudC5nZXQoImRhdGEiKSwgTWFwcGluZyk6CiAgICAgICAgIHJhaXNlIENvbnN1bWVyQ29udHJhY3RFcnJvcigiRnVuY3Rpb24gZG9zc2llciBkYXRhIG11c3QgYmUgYW4gb2JqZWN0LiIpCiAKLSAgICBjb21wYXRpYmlsaXR5X2VudmVsb3BlID0gY29weS5kZWVwY29weShkaWN0KGRvY3VtZW50KSkKLSAgICBjb21wYXRpYmlsaXR5X2VudmVsb3BlLnBvcCgidGFyZ2V0IiwgTm9uZSkKLSAgICBjb21wYXRpYmlsaXR5X2VudmVsb3BlLnBvcCgiYnVpbGRfY29udGV4dCIsIE5vbmUpCi0gICAgY29tcGF0aWJpbGl0eV9lbnZlbG9wZVsic2NoZW1hX3ZlcnNpb24iXSA9ICIxLjAuMCIKKyAgICB2YWxpZGF0ZWRfZW52ZWxvcGUgPSBjb3B5LmRlZXBjb3B5KGRpY3QoZG9jdW1lbnQpKQorICAgIHZhbGlkYXRlZF9lbnZlbG9wZS5wb3AoInRhcmdldCIsIE5vbmUpCisgICAgdmFsaWRhdGVkX2VudmVsb3BlLnBvcCgiYnVpbGRfY29udGV4dCIsIE5vbmUpCiAgICAgcmV0dXJuIG5vcm1hbGl6ZV9jb25zdW1lcl9kYXRhKAotICAgICAgICBjb21wYXRpYmlsaXR5X2VudmVsb3BlLAorICAgICAgICB2YWxpZGF0ZWRfZW52ZWxvcGUsCiAgICAgICAgIGV4cGVjdGVkX2tpbmQ9QXJ0aWZhY3RLaW5kLkZVTkNUSU9OX0RPU1NJRVIsCiAgICAgKQogCmRpZmYgLS1naXQgYS90ZXN0cy90ZXN0X2J1aWxkX3Byb2JlLnB5IGIvdGVzdHMvdGVzdF9idWlsZF9wcm9iZS5weQppbmRleCAxMDBlMjg0Li5jNmIwMTZkIDEwMDY0NAotLS0gYS90ZXN0cy90ZXN0X2J1aWxkX3Byb2JlLnB5CisrKyBiL3Rlc3RzL3Rlc3RfYnVpbGRfcHJvYmUucHkKQEAgLTExNCwyNSArMTE0LDcgQEAgTElOSyA6IGZhdGFsIGVycm9yIExOSzIwMTk6IHVucmVzb2x2ZWQgZXh0ZXJuYWwgc3ltYm9sIF9Xcml0ZU91dHB1dCByZWZlcmVuY2VkIGkKICAgICAgICAgICAgIChyb290IC8gImV4dHJhY3RlZCIgLyAic3JjIiAvICJjb250cm9sLmMiKS53cml0ZV90ZXh0KAogICAgICAgICAgICAgICAgICJpbnQgVGFyZ2V0KHZvaWQpIHsgcmV0dXJuIDA7IH1cbiIsIGVuY29kaW5nPSJhc2NpaSIKICAgICAgICAgICAgICkKLSAgICAgICAgICAgIGRvc3NpZXIgPSB7Ci0gICAgICAgICAgICAgICAgImFydGlmYWN0X2tpbmQiOiAiZnVuY3Rpb25fZG9zc2llciIsCi0gICAgICAgICAgICAgICAgInNjaGVtYV92ZXJzaW9uIjogIjEuMS4wIiwKLSAgICAgICAgICAgICAgICAicHJvZHVjZXIiOiB7Ci0gICAgICAgICAgICAgICAgICAgICJuYW1lIjogInVuaXQtdGVzdC1ydW5uZXIiLAotICAgICAgICAgICAgICAgICAgICAidmVyc2lvbiI6ICIwLjEuMCIsCi0gICAgICAgICAgICAgICAgICAgICJjb21taXQiOiAiYjY2NzkwMTY1YTJkNGY4Mjk0M2NkMTk5YjNiNDk5ZTFmMTcyNWZjMyIsCi0gICAgICAgICAgICAgICAgfSwKLSAgICAgICAgICAgICAgICAic3ViamVjdCI6IHsKLSAgICAgICAgICAgICAgICAgICAgImZ1bmN0aW9uX2lkIjogImZuX3RhcmdldCIsCi0gICAgICAgICAgICAgICAgICAgICJzb3VyY2VfcGF0aCI6ICJzcmMvY29udHJvbC5jIiwKLSAgICAgICAgICAgICAgICAgICAgInNvdXJjZV9zaGEyNTYiOiAiYSIgKiA2NCwKLSAgICAgICAgICAgICAgICB9LAotICAgICAgICAgICAgICAgICJkYXRhIjogewotICAgICAgICAgICAgICAgICAgICAidGFyZ2V0IjogeyJzb3VyY2UiOiAic3JjL2NvbnRyb2wuYyIsICJmdW5jdGlvbiI6ICJUYXJnZXQifSwKLSAgICAgICAgICAgICAgICAgICAgImJ1aWxkX2NvbnRleHQiOiB7ImluY2x1ZGVfZGlycyI6IFtdLCAiZGVmaW5lcyI6IFtdfSwKLSAgICAgICAgICAgICAgICB9LAotICAgICAgICAgICAgICAgICJleHRlbnNpb25zIjoge30sCi0gICAgICAgICAgICB9CisgICAgICAgICAgICBkb3NzaWVyID0gX2N1cnJlbnRfZG9zc2llcl9lbnZlbG9wZSgpCiAgICAgICAgICAgICBkb3NzaWVyX3BhdGggPSByZXBvcnRzIC8gImZ1bmN0aW9uX2Rvc3NpZXIuanNvbiIKICAgICAgICAgICAgIGRvc3NpZXJfcGF0aC53cml0ZV90ZXh0KGpzb24uZHVtcHMoZG9zc2llciksIGVuY29kaW5nPSJ1dGYtOCIpCiAK    steps:
+    steps:
       - name: Checkout bootstrap branch
         uses: actions/checkout@v4
         with:
@@ -40,6 +39,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git fetch --no-tags origin \
+            +refs/heads/codex/bootstrap-integrate-all-plans:refs/remotes/origin/codex/bootstrap-integrate-all-plans \
             +refs/heads/codex/bootstrap-p1t6-v3:refs/remotes/origin/codex/bootstrap-p1t6-v3 \
             +refs/heads/codex/p1t6-review-decisions-readiness-clean:refs/remotes/origin/codex/p1t6-review-decisions-readiness-clean \
             +refs/heads/main:refs/remotes/origin/main
@@ -83,7 +83,10 @@ jobs:
           git diff --cached --check
           git commit -m "merge: integrate Phase 1 Task 6 implementation"
 
-          printf '%s' "$FIX_PATCH_B64" | base64 --decode > "$RUNNER_TEMP/integration-fix.patch"
+          git show \
+            origin/codex/bootstrap-integrate-all-plans:.github/bootstrap/merged-current-dossier-fix.patch.b64 \
+            | tr -d '\r\n' \
+            | base64 --decode > "$RUNNER_TEMP/integration-fix.patch"
           test "$(sha256sum "$RUNNER_TEMP/integration-fix.patch" | awk '{print $1}')" = \
             "aef4c6392879d09f2c2e26fa8f78ce2a4a3b5a07055acca7e366d61c2c42d4e7"
           git apply --check "$RUNNER_TEMP/integration-fix.patch"
