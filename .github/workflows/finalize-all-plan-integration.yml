@@ -1,0 +1,72 @@
+name: Finalize all planned changes integration
+
+on:
+  push:
+    branches:
+      - codex/finalize-all-plans-20260716
+
+permissions:
+  actions: read
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify merged head, require exact main CI success, and close superseded PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          integration_pr=20
+
+          pr_json="$(gh api "repos/$repo/pulls/$integration_pr")"
+          merged="$(jq -r '.merged' <<<"$pr_json")"
+          merged_at="$(jq -r '.merged_at // empty' <<<"$pr_json")"
+          pr_head="$(jq -r '.head.sha' <<<"$pr_json")"
+          merge_sha="$(jq -r '.merge_commit_sha // empty' <<<"$pr_json")"
+          [[ "$merged" == "true" && -n "$merged_at" && -n "$merge_sha" ]]
+
+          main_sha="$(gh api "repos/$repo/git/ref/heads/main" --jq '.object.sha')"
+          compare_status="$(gh api "repos/$repo/compare/$pr_head...$main_sha" --jq '.status')"
+          [[ "$compare_status" == "behind" || "$compare_status" == "identical" ]]
+
+          run_id=""
+          run_url=""
+          conclusion=""
+          for attempt in $(seq 1 180); do
+            runs_json="$(gh api "repos/$repo/actions/runs?branch=main&event=push&per_page=50")"
+            run_id="$(jq -r --arg sha "$main_sha" '[.workflow_runs[] | select(.name == "CI" and .head_sha == $sha)] | sort_by(.created_at) | last | .id // empty' <<<"$runs_json")"
+            if [[ -n "$run_id" ]]; then
+              status="$(gh api "repos/$repo/actions/runs/$run_id" --jq '.status')"
+              conclusion="$(gh api "repos/$repo/actions/runs/$run_id" --jq '.conclusion // empty')"
+              run_url="$(gh api "repos/$repo/actions/runs/$run_id" --jq '.html_url')"
+              if [[ "$status" == "completed" ]]; then
+                break
+              fi
+            fi
+            sleep 10
+          done
+
+          [[ -n "$run_id" ]]
+          [[ "$conclusion" == "success" ]]
+
+          jobs_json="$(gh api --paginate "repos/$repo/actions/runs/$run_id/jobs?per_page=100")"
+          failed_jobs="$(jq -r '[.jobs[] | select(.conclusion != "success" and .conclusion != "skipped") | .name] | join(", ")' <<<"$jobs_json")"
+          [[ -z "$failed_jobs" ]]
+
+          for pr in 11 12 13 14 15 16; do
+            state="$(gh api "repos/$repo/pulls/$pr" --jq '.state')"
+            if [[ "$state" == "open" ]]; then
+              gh pr comment "$pr" --repo "$repo" --body "PR #20 により、現行 main 向けに再構成・検証された変更群が統合されました。このPRは旧ベース上の回復用・搬送用・重複実装であり、直接マージしない方針のためクローズします。main の統合後CI: $run_url"
+              gh pr close "$pr" --repo "$repo"
+            fi
+          done
+
+          gh pr comment "$integration_pr" --repo "$repo" --body "統合後の main CI が成功しました。main: $main_sha / run: $run_url。旧ベース上の回復用・搬送用・重複PR #11–#16 もクローズ済みです。"
+
+          gh api --method DELETE "repos/$repo/git/refs/heads/codex/finalize-all-plans-20260716"
