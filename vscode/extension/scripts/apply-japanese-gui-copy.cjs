@@ -45,6 +45,56 @@ function runGit(args) {
   return run('git', args, { cwd: REPO_ROOT });
 }
 
+function replaceExactInFile(relativePath, oldText, newText, expected = 1) {
+  const filePath = path.join(REPO_ROOT, ...relativePath.split('/'));
+  const text = fs.readFileSync(filePath, 'utf8');
+  const actual = text.split(oldText).length - 1;
+  if (actual !== expected) {
+    throw new Error(`${relativePath}: expected ${expected} occurrence(s) of ${JSON.stringify(oldText)}, found ${actual}`);
+  }
+  fs.writeFileSync(filePath, text.split(oldText).join(newText), 'utf8');
+}
+
+function applyCompatibilityAdjustments() {
+  const oldSuiteDescription = '複数の関数をまとめて実行するテストスイートの定義ファイルです。';
+  const newSuiteDescription = '複数の関数をまとめて実行するスイート定義ファイルです。';
+  replaceExactInFile(
+    'vscode/extension/src/config/settingsViewModel.ts',
+    oldSuiteDescription,
+    newSuiteDescription,
+  );
+  replaceExactInFile(
+    'vscode/extension/package.json',
+    oldSuiteDescription,
+    newSuiteDescription,
+  );
+  replaceExactInFile(
+    'vscode/extension/src/cli/cliResultParser.ts',
+    "const exitText = `UnitTestRunner CLIが終了コード${exitCode ?? '不明'}で終了しました。`;",
+    "const exitText = `UnitTestRunner CLIが終了コード ${exitCode ?? '不明'} で終了しました。`;",
+  );
+  replaceExactInFile(
+    'vscode/extension/src/test/adapter.test.ts',
+    '/本番リポジトリへ生成物が混入/',
+    '/生成物が本番ソースへ混在/',
+  );
+  replaceExactInFile(
+    'vscode/extension/src/test/cliEnvelope.test.ts',
+    "warning.includes('JSON envelope')",
+    "warning.includes('JSON形式ではない')",
+  );
+  replaceExactInFile(
+    'vscode/extension/src/test/cliEnvelope.test.ts',
+    '/全件GREENではありません/',
+    '/全件の合格条件を満たしていません/',
+  );
+  replaceExactInFile(
+    'vscode/extension/src/test/cliEnvelope.test.ts',
+    '/GREEN 1 \\/ Not GREEN 1 \\/ Total 2/',
+    '/合計2件 \\/ 合格1件 \\/ 不合格1件/',
+  );
+}
+
 function downloadPatchBlob() {
   const options = {
     hostname: 'api.github.com',
@@ -149,6 +199,7 @@ async function prepare() {
   } finally {
     fs.rmSync(scriptPath, { force: true });
   }
+  applyCompatibilityAdjustments();
   run('npm.cmd', ['run', 'compile'], {
     cwd: EXTENSION_ROOT,
     shell: process.platform === 'win32',
