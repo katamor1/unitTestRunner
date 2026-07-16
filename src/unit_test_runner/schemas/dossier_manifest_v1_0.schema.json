@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://unit-test-runner.local/schemas/function_dossier.schema.json",
-  "title": "Function Dossier",
+  "$id": "https://unit-test-runner.local/schemas/dossier_manifest_v1_0.schema.json",
+  "title": "Dossier Manifest",
   "allOf": [
     {
       "$ref": "common.schema.json"
@@ -10,13 +10,13 @@
       "type": "object",
       "properties": {
         "artifact_kind": {
-          "const": "function_dossier"
+          "const": "dossier_manifest"
         },
         "schema_version": {
-          "const": "1.1.0"
+          "const": "1.0.0"
         },
         "data": {
-          "$ref": "common.schema.json#/$defs/functionDossierDataV1_1"
+          "$ref": "common.schema.json#/$defs/dossierManifestData"
         }
       }
     }

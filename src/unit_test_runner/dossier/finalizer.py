@@ -4,13 +4,22 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from unit_test_runner import __version__
+from unit_test_runner.execution.test_result_writer import current_producer_commit
+
 from .artifact_collector import collect_artifacts
 from .dossier_models import DossierGenerationPolicy, FunctionDossier
 from .dossier_validator import validate_artifacts
 from .dossier_writer import write_dossier_reports, write_review_files_from_payload
 from .next_actions import build_next_actions
 from .readiness import assess_readiness
-from .review_workflow import build_review_items
+from .review_assessment import assess_review_decisions
+from .review_decision_models import ReviewSnapshot
+from .review_decision_repository import (
+    InvalidReviewDecisionLedgerError,
+    ReviewDecisionRepository,
+)
+from .review_workflow import build_review_item_collection, build_review_items
 from .summary_builder import build_summaries
 from .traceability import build_traceability
 
@@ -40,15 +49,37 @@ def finalize_function_dossier(
     source_path = source_path or _existing_source_path(analysis_dossier)
     summaries = build_summaries(payloads)
     traceability = build_traceability(payloads)
-    review_items, unresolved_items = build_review_items(
-        payloads,
-        artifacts=artifacts,
+    review_items, unresolved_items = build_review_items(payloads, artifacts)
+    review_collection = build_review_item_collection(review_items)
+    review_snapshot = _build_review_snapshot(review_items, review_collection)
+    review_assessment = None
+    if review_snapshot is not None:
+        repository = ReviewDecisionRepository(
+            workspace,
+            current_items=review_snapshot.items,
+            producer_version=__version__,
+            producer_commit=current_producer_commit(),
+        )
+        decisions = None
+        if repository.path.exists():
+            try:
+                decisions = repository.load().decision_set
+            except InvalidReviewDecisionLedgerError as error:
+                blocked_reasons.append(f"Review decision ledger is invalid: {error}")
+        review_assessment = assess_review_decisions(
+            review_snapshot.items,
+            decisions,
+            workspace=workspace,
+        )
+        source_path = Path(review_snapshot.source_path)
+
+    readiness = assess_readiness(
+        artifacts,
+        blocked_reasons,
+        unresolved_items,
+        review_assessment=review_assessment,
+        execution_outcome=_execution_outcome(payloads),
     )
-    if not review_items:
-        reason = "No eligible decisionable review subject is available."
-        if reason not in blocked_reasons:
-            blocked_reasons.append(reason)
-    readiness = assess_readiness(artifacts, blocked_reasons, unresolved_items)
     if mvp_level != "auto" and not readiness.blocked:
         readiness.mvp_level = mvp_level
     next_actions = build_next_actions(unresolved_items)
@@ -79,6 +110,9 @@ def finalize_function_dossier(
         function=contract_fields["function"],
         test_design=contract_fields["test_design"],
         diagnostics=contract_fields["diagnostics"],
+        function_id=(review_snapshot.function_id if review_snapshot else None),
+        source_sha256=(review_snapshot.source_sha256 if review_snapshot else None),
+        schema_version="1.1.0" if review_snapshot is not None else "0.1",
     )
     write_dossier_reports(workspace, dossier, out)
     return dossier
@@ -108,7 +142,45 @@ def _read_existing_dossier(path: Path) -> dict:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    return payload if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        return {}
+    data = payload.get("data")
+    if payload.get("artifact_kind") == "function_dossier" and isinstance(data, dict):
+        return dict(data)
+    return payload
+
+
+def _build_review_snapshot(
+    review_items,
+    collection,
+) -> ReviewSnapshot | None:
+    if not review_items or len(collection.items) != len(review_items):
+        return None
+    first_subject = collection.items[0].subject_artifacts[0]
+    if first_subject.source_path is None or first_subject.source_sha256 is None:
+        return None
+    return ReviewSnapshot(
+        items=collection,
+        function_id=collection.items[0].function_id,
+        source_path=first_subject.source_path,
+        source_sha256=first_subject.source_sha256,
+    )
+
+
+def _execution_outcome(payloads: dict[str, dict]) -> str | None:
+    execution = payloads.get("test_execution_report")
+    if not isinstance(execution, dict):
+        return None
+    for key in ("outcome", "status"):
+        value = execution.get(key)
+        if isinstance(value, str) and value:
+            return value
+    lifecycle = execution.get("lifecycle")
+    if isinstance(lifecycle, dict):
+        value = lifecycle.get("outcome")
+        if isinstance(value, str) and value:
+            return value
+    return None
 
 
 def _dict_field(payload: dict, key: str) -> dict:
@@ -144,6 +216,8 @@ def _contract_fields(
     target = _dict_field(analysis_dossier, "target")
     target.setdefault("source", source_path.as_posix() if source_path else "")
     target.setdefault("function", function_name)
+    target.setdefault("configuration", "")
+    target.setdefault("project", "")
     function = _dict_field(analysis_dossier, "function")
     function.setdefault("name", function_name)
     if source_path is not None:

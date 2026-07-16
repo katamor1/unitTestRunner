@@ -197,6 +197,35 @@ def build_parser() -> argparse.ArgumentParser:
     update_spec.add_argument("--patch", required=True)
     update_spec.add_argument("--expected-revision", required=True, type=int)
 
+    get_review = subcommands.add_parser(
+        "get-review-status",
+        help="Discover current review items, exact guards, decisions, and readiness.",
+    )
+    get_review.add_argument("--workspace", required=True)
+
+    record_review = subcommands.add_parser(
+        "record-review-decision",
+        help="Persist a revision-checked decision for one current review item.",
+    )
+    record_review.add_argument("--workspace", required=True)
+    record_review.add_argument("--review-id", required=True)
+    record_review.add_argument(
+        "--resolution",
+        required=True,
+        choices=("open", "approved", "changes_requested", "waived"),
+    )
+    record_review.add_argument("--reviewer", default="")
+    record_review.add_argument("--rationale", default="")
+    record_review.add_argument("--decided-at")
+    record_review.add_argument("--expected-revision", required=True, type=int)
+    record_review.add_argument(
+        "--expected-subject-fingerprint",
+        "--expected-subject-sha256",
+        dest="expected_subject_fingerprint",
+        required=True,
+        help="Aggregate fingerprint from get-review-status; the SHA256 spelling is a compatibility alias.",
+    )
+
     reconcile = subcommands.add_parser("reconcile-test-cases", help="Reconcile previous and current test case design reports.")
     previous_spec = reconcile.add_mutually_exclusive_group(required=True)
     previous_spec.add_argument("--previous-test-spec")

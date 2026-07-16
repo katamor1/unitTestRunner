@@ -13,10 +13,10 @@
           "const": "dossier_manifest"
         },
         "schema_version": {
-          "const": "1.0.0"
+          "const": "1.1.0"
         },
         "data": {
-          "$ref": "common.schema.json#/$defs/dossierManifestData"
+          "$ref": "common.schema.json#/$defs/dossierManifestDataV1_1"
         }
       }
     }

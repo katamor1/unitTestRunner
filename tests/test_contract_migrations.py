@@ -507,7 +507,7 @@ class ContractMigrationTests(unittest.TestCase):
         migrated = migrate_payload(
             ArtifactKind.FUNCTION_DOSSIER,
             legacy,
-            target_version="1.0.0",
+            target_version="1.1.0",
         )
 
         self.assertEqual("src/control.c", migrated["subject"]["source_path"])
@@ -540,7 +540,7 @@ class ContractMigrationTests(unittest.TestCase):
         migrated = migrate_payload(
             ArtifactKind.FUNCTION_DOSSIER,
             legacy,
-            target_version="1.0.0",
+            target_version="1.1.0",
         )
 
         self.assertNotIn("source_path", migrated["subject"])
@@ -590,7 +590,7 @@ class ContractMigrationTests(unittest.TestCase):
         migrated = migrate_payload(
             ArtifactKind.FUNCTION_DOSSIER,
             legacy,
-            target_version="1.0.0",
+            target_version="1.1.0",
         )
 
         self.assertEqual("src/control.c", migrated["subject"]["source_path"])

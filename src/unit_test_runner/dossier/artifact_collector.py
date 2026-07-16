@@ -66,6 +66,9 @@ def collect_artifacts(
         artifact_warnings: list[DossierWarning] = []
         contract_violations: list[ContractViolation] = []
         schema_version = None
+        compatible_migrated = False
+        contract_subject: dict[str, Any] = {}
+        contract_revision: int | None = None
         exists = absolute.exists()
         modified_at = _modified_at(absolute) if exists else None
         stale_candidate = False
@@ -90,6 +93,15 @@ def collect_artifacts(
                     ),
                 )
                 schema_version = loaded.source_version or None
+                compatible_migrated = loaded.migrated
+                raw_subject = loaded.payload.get("subject")
+                if isinstance(raw_subject, dict):
+                    contract_subject = dict(raw_subject)
+                raw_data = loaded.payload.get("data")
+                if isinstance(raw_data, dict):
+                    raw_revision = raw_data.get("revision")
+                    if isinstance(raw_revision, int) and not isinstance(raw_revision, bool):
+                        contract_revision = raw_revision
                 contract_violations.extend(loaded.violations)
                 for violation in loaded.violations:
                     warning = DossierWarning(
@@ -124,6 +136,9 @@ def collect_artifacts(
             required_level=required_level,
             contract_status=contract_status,
             contract_violations=contract_violations,
+            compatible_migrated=compatible_migrated,
+            contract_subject=contract_subject,
+            contract_revision=contract_revision,
             stale_candidate=stale_candidate,
             modified_at=modified_at,
             warnings=artifact_warnings,
