@@ -8,6 +8,7 @@ from .kinds import ArtifactKind
 
 CURRENT_CONTRACT_VERSION = "1.0.0"
 CURRENT_TEST_SPEC_VERSION = "1.1.0"
+CURRENT_TASK6_CONTRACT_VERSION = "1.1.0"
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,12 @@ class ContractDefinition:
     semantic_validator: str
 
 
+_TASK6_KINDS = (
+    ArtifactKind.REVIEW_DECISIONS,
+    ArtifactKind.FUNCTION_DOSSIER,
+    ArtifactKind.DOSSIER_MANIFEST,
+)
+
 _DEFAULT_CONTRACTS = tuple(
     ContractDefinition(
         kind=kind,
@@ -28,7 +35,7 @@ _DEFAULT_CONTRACTS = tuple(
         semantic_validator=kind.value,
     )
     for kind in ArtifactKind
-    if kind is not ArtifactKind.TEST_SPEC
+    if kind is not ArtifactKind.TEST_SPEC and kind not in _TASK6_KINDS
 )
 
 _TEST_SPEC_V1 = ContractDefinition(
@@ -47,8 +54,30 @@ _TEST_SPEC_CURRENT = ContractDefinition(
     semantic_validator=ArtifactKind.TEST_SPEC.value,
 )
 
-_CONTRACTS = _DEFAULT_CONTRACTS + (_TEST_SPEC_CURRENT,)
-_CONTRACT_VERSIONS = _CONTRACTS + (_TEST_SPEC_V1,)
+_TASK6_V1_CONTRACTS = tuple(
+    ContractDefinition(
+        kind=kind,
+        current_version="1.0.0",
+        schema_resource=f"{kind.value}_v1_0.schema.json",
+        compatible_source_versions=("0.1",),
+        semantic_validator=kind.value,
+    )
+    for kind in _TASK6_KINDS
+)
+
+_TASK6_CURRENT_CONTRACTS = tuple(
+    ContractDefinition(
+        kind=kind,
+        current_version=CURRENT_TASK6_CONTRACT_VERSION,
+        schema_resource=f"{kind.value}.schema.json",
+        compatible_source_versions=("1.0.0", "0.1"),
+        semantic_validator=kind.value,
+    )
+    for kind in _TASK6_KINDS
+)
+
+_CONTRACTS = _DEFAULT_CONTRACTS + _TASK6_CURRENT_CONTRACTS + (_TEST_SPEC_CURRENT,)
+_CONTRACT_VERSIONS = _CONTRACTS + _TASK6_V1_CONTRACTS + (_TEST_SPEC_V1,)
 
 _BY_KIND = {contract.kind: contract for contract in _CONTRACTS}
 _BY_KIND_AND_VERSION = {

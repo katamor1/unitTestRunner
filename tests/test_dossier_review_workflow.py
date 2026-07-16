@@ -27,15 +27,25 @@ from unit_test_runner.reports.unresolved_items_markdown import render_unresolved
 def run_module(*args):
     env = os.environ.copy()
     env["PYTHONPATH"] = str(SRC_ROOT)
-    return subprocess.run(
-        [sys.executable, "-m", "unit_test_runner", *args],
-        cwd=REPO_ROOT,
-        env=env,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
+    command = [sys.executable, "-m", "unit_test_runner", *args]
+    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        completed = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            env=env,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            check=False,
+            timeout=120,
+        )
+        stdout_file.seek(0)
+        stderr_file.seek(0)
+        return subprocess.CompletedProcess(
+            command,
+            completed.returncode,
+            stdout_file.read().decode("utf-8", errors="replace"),
+            stderr_file.read().decode("utf-8", errors="replace"),
+        )
 
 
 class DossierReviewWorkflowTests(unittest.TestCase):
@@ -359,26 +369,21 @@ class DossierReviewWorkflowTests(unittest.TestCase):
                 expected_kind=ArtifactKind.FUNCTION_DOSSIER,
                 mode=ContractMode.COMPATIBLE,
             )
-            self.assertTrue(loaded_dossier.migrated)
-            self.assertIn(
-                ("missing_provenance", "$.subject.source_sha256", "blocking"),
-                {
-                    (item.code, item.json_path, item.severity)
-                    for item in loaded_dossier.violations
-                },
-            )
+            self.assertFalse(loaded_dossier.migrated)
+            self.assertEqual("1.1.0", loaded_dossier.source_version)
+            self.assertEqual((), loaded_dossier.violations)
             self.assertNotIn(
                 "0" * 64,
                 json.dumps(loaded_dossier.payload, sort_keys=True),
             )
-            self.assertNotIn(
-                "invalid_relative_path",
-                {item.code for item in loaded_dossier.violations},
-            )
-            self.assertEqual("src/control.c", final_dossier["target"]["source"])
-            self.assertEqual("Control_Update", final_dossier["target"]["function"])
-            self.assertIn("defines", final_dossier["build_context"])
-            self.assertIn("branch_coverage_items", final_dossier["test_design"])
+            self.assertEqual("function_dossier", final_dossier["artifact_kind"])
+            self.assertEqual("1.1.0", final_dossier["schema_version"])
+            self.assertEqual("src/control.c", final_dossier["subject"]["source_path"])
+            dossier_data = final_dossier["data"]
+            self.assertEqual("src/control.c", dossier_data["target"]["source"])
+            self.assertEqual("Control_Update", dossier_data["target"]["function"])
+            self.assertIn("defines", dossier_data["build_context"])
+            self.assertIn("branch_coverage_items", dossier_data["test_design"])
 
             probe = run_module("--json", "build-probe", "--dossier", str(final_dossier_path), "--dry-run")
             self.assertEqual(0, probe.returncode, probe.stderr)

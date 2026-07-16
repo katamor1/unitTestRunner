@@ -4,6 +4,8 @@ import copy
 from collections import defaultdict
 from typing import Any, Mapping
 
+from unit_test_runner.review_ids import StableReviewIdRegistry
+
 from .identity import signature_sha256, stable_function_id
 from .models import (
     ArtifactReference,
@@ -36,13 +38,31 @@ def create_test_spec_from_design(
     unresolved_items = copy.deepcopy(list(design_payload.get("unresolved_items") or []))
     review_by_case: dict[str, list[str]] = defaultdict(list)
     all_review_ids: list[str] = []
+    review_registry = StableReviewIdRegistry()
     for item in unresolved_items:
-        if not isinstance(item, Mapping) or not item.get("item_id"):
+        if not isinstance(item, dict) or not item.get("item_id"):
             continue
-        item_id = str(item["item_id"])
-        all_review_ids.append(item_id)
-        for case_id in item.get("related_test_case_ids") or []:
-            review_by_case[str(case_id)].append(item_id)
+        semantic_subject_key = str(item["item_id"])
+        category = str(item.get("item_kind") or "test_spec_review")
+        related_case_ids = [
+            str(case_id)
+            for case_id in item.get("related_test_case_ids") or []
+            if str(case_id).strip()
+        ]
+        semantic_case_ids: list[str | None] = related_case_ids or [None]
+        item_review_ids: list[str] = []
+        for semantic_case_id in semantic_case_ids:
+            review_id = review_registry.register(
+                category=category,
+                function_id=function_id,
+                case_id=semantic_case_id,
+                semantic_subject_key=semantic_subject_key,
+            )
+            item_review_ids.append(review_id)
+            all_review_ids.append(review_id)
+            if semantic_case_id is not None:
+                review_by_case[semantic_case_id].append(review_id)
+        item["review_item_ids"] = list(dict.fromkeys(item_review_ids))
 
     executable: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
@@ -58,7 +78,12 @@ def create_test_spec_from_design(
         legacy_status = case.pop("review_status", None)
         case_review_ids = list(review_by_case.get(case_id, ()))
         if legacy_status in {"review_required", "candidate"} and not case_review_ids:
-            generated_review_id = f"review-{case_id.lower()}-generated"
+            generated_review_id = review_registry.register(
+                category="generated_case_review",
+                function_id=function_id,
+                case_id=case_id or None,
+                semantic_subject_key="legacy/review-required",
+            )
             case_review_ids.append(generated_review_id)
             all_review_ids.append(generated_review_id)
         elif legacy_status not in {None, "review_required", "candidate"}:
