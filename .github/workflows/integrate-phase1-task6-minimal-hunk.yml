@@ -1,0 +1,212 @@
+name: Integrate Phase 1 Task 6 with minimal lock reconciliation
+
+on:
+  push:
+    branches:
+      - codex/task6-integration-orchestrator
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: integrate-phase1-task6-minimal-hunk
+  cancel-in-progress: false
+
+jobs:
+  integrate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 115
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PRODUCT_BRANCH: codex/p1t6-review-decisions-main-integration-v2
+      TARGET_TREE: 363ddb6f86a4508eb5f4dd2a26013b837a5e26d6
+      PR20_HEAD: a204f3aec3015fdb6eea26cf7e566cc9523ba046
+      WRITER_RETRY_MERGE: 969ce9462a688e94c887d6e77359e40296d8927b
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Derive, test, and publish minimal reconciliation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$(gh pr view 21 --repo "$GITHUB_REPOSITORY" --json mergedAt --jq '.mergedAt // empty' 2>/dev/null || true)" != '' ]; then
+            echo 'PR #21 is already merged; no replacement branch is needed.'
+            exit 0
+          fi
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+          git merge-base --is-ancestor "$PR20_HEAD" origin/main
+          git merge-base --is-ancestor "$WRITER_RETRY_MERGE" origin/main
+
+          mapfile -t targets < <(git log --all --pretty='%H %T' | awk -v tree="$TARGET_TREE" '$2 == tree { print $1 }' | sort -u)
+          [ "${#targets[@]}" -ge 1 ] || { echo 'Task 6 checkpoint tree is unreachable' >&2; exit 61; }
+          target="${targets[0]}"
+          merge_base="$(git merge-base origin/main "$target")"
+
+          git switch --force-create "$PRODUCT_BRANCH" origin/main
+          git merge --no-ff --no-edit -X ours "$target"
+          merged_head="$(git rev-parse HEAD)"
+
+          python -m pip install --upgrade pip build
+          python -m pip install -e .
+
+          mapfile -t task6_modules < <(
+            git diff --name-only "$merge_base" "$target" -- 'tests/test_*.py' |
+              sort -u | sed -E 's#^tests/(test_[^/]+)\.py$#tests.\1#'
+          )
+          mapfile -t writer_modules < <(
+            git diff --name-only "${WRITER_RETRY_MERGE}^1" "$WRITER_RETRY_MERGE" -- 'tests/test_*.py' |
+              sort -u | sed -E 's#^tests/(test_[^/]+)\.py$#tests.\1#'
+          )
+          mapfile -t focused_modules < <(printf '%s\n' "${task6_modules[@]}" "${writer_modules[@]}" | awk 'NF && !seen[$0]++')
+          [ "${#task6_modules[@]}" -gt 0 ]
+
+          run_modules() {
+            local log="$1"
+            shift
+            : > "$log"
+            local module
+            for module in "$@"; do
+              echo "===== $module =====" | tee -a "$log"
+              if ! timeout --signal=TERM --kill-after=20s 360s \
+                  env PYTHONPATH="$PWD/src" python -X faulthandler -m unittest "$module" -v \
+                  2>&1 | tee -a "$log"; then
+                echo "FAILED_OR_TIMED_OUT=$module" | tee -a "$log"
+                return 1
+              fi
+            done
+          }
+
+          selected_file=''
+          selected_hunk=''
+          if ! run_modules /tmp/task6-initial.log "${focused_modules[@]}"; then
+            mapfile -t product_files < <(
+              git diff --name-only "${WRITER_RETRY_MERGE}^1" "$WRITER_RETRY_MERGE" -- |
+                grep -Ev '^(docs/|tests/|\.github/)' || true
+            )
+            passing_files=()
+            for candidate in "${product_files[@]}"; do
+              git reset --hard "$merged_head"
+              git revert --no-commit -m 1 "$WRITER_RETRY_MERGE"
+              temp="$(mktemp)"
+              cp "$candidate" "$temp"
+              git reset --hard "$merged_head"
+              mkdir -p "$(dirname "$candidate")"
+              cp "$temp" "$candidate"
+              rm -f "$temp"
+              if run_modules "/tmp/task6-file-$(basename "$candidate").log" "${task6_modules[@]}"; then
+                passing_files+=("$candidate")
+              fi
+            done
+            [ "${#passing_files[@]}" -eq 1 ] || {
+              printf 'expected one file-level interaction; got %s\n' "${#passing_files[@]}" >&2
+              printf '%s\n' "${passing_files[@]}" >&2
+              exit 62
+            }
+            selected_file="${passing_files[0]}"
+
+            git reset --hard "$merged_head"
+            git revert --no-commit -m 1 "$WRITER_RETRY_MERGE"
+            git commit -m 'test: materialize writer-retry reversal for hunk isolation'
+            reverted_head="$(git rev-parse HEAD)"
+            run_modules /tmp/task6-reverted-base.log "${task6_modules[@]}"
+
+            git diff --no-ext-diff --unified=0 "$reverted_head" "$merged_head" -- "$selected_file" > /tmp/interaction.diff
+            rm -rf /tmp/interaction-hunks
+            mkdir -p /tmp/interaction-hunks
+            python - <<'PY'
+          from pathlib import Path
+          lines = Path('/tmp/interaction.diff').read_text(encoding='utf-8').splitlines(keepends=True)
+          header, hunks, current = [], [], None
+          for line in lines:
+              if line.startswith('@@ '):
+                  if current is not None:
+                      hunks.append(current)
+                  current = [line]
+              elif current is None:
+                  header.append(line)
+              else:
+                  current.append(line)
+          if current is not None:
+              hunks.append(current)
+          if not hunks:
+              raise SystemExit('no hunks found for interaction file')
+          root = Path('/tmp/interaction-hunks')
+          for index, hunk in enumerate(hunks):
+              (root / f'{index:04d}.patch').write_text(''.join(header + hunk), encoding='utf-8')
+          print(f'wrote {len(hunks)} hunk patches')
+          PY
+
+            failing_hunks=()
+            for patch in /tmp/interaction-hunks/*.patch; do
+              git reset --hard "$reverted_head"
+              if ! git apply --recount "$patch"; then
+                echo "Skipping non-independent hunk $patch"
+                continue
+              fi
+              if ! run_modules "/tmp/task6-hunk-$(basename "$patch").log" "${task6_modules[@]}"; then
+                failing_hunks+=("$patch")
+              fi
+            done
+            [ "${#failing_hunks[@]}" -eq 1 ] || {
+              printf 'expected one independently failing hunk; got %s\n' "${#failing_hunks[@]}" >&2
+              printf '%s\n' "${failing_hunks[@]}" >&2
+              exit 63
+            }
+            selected_hunk="${failing_hunks[0]}"
+
+            git reset --hard "$merged_head"
+            git apply -R --recount "$selected_hunk"
+            git add "$selected_file"
+            git commit -m 'fix: reconcile Task 6 write guard with bounded writer retries'
+          else
+            git reset --hard "$merged_head"
+          fi
+
+          run_modules /tmp/task6-focused-final.log "${focused_modules[@]}"
+          mapfile -t all_modules < <(
+            find tests -maxdepth 1 -type f -name 'test_*.py' -printf '%f\n' |
+              sort | sed -E 's#^(test_[^/]+)\.py$#tests.\1#'
+          )
+          run_modules /tmp/task6-full-isolated.log "${all_modules[@]}"
+
+          env PYTHONPATH="$PWD/src" python -m compileall -q src tests
+          env PYTHONPATH="$PWD/src" python -m unit_test_runner --help >/tmp/task6-cli-help.txt
+          git diff --check origin/main...HEAD
+
+          rm -rf /tmp/task6-dist /tmp/task6-wheel-venv
+          python -m build --wheel --outdir /tmp/task6-dist
+          python -m venv /tmp/task6-wheel-venv
+          /tmp/task6-wheel-venv/bin/python -m pip install --upgrade pip
+          /tmp/task6-wheel-venv/bin/python -m pip install /tmp/task6-dist/*.whl
+          /tmp/task6-wheel-venv/bin/python -m unit_test_runner --help >/tmp/task6-wheel-help.txt
+          /tmp/task6-wheel-venv/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+          import unit_test_runner
+          root = Path(unit_test_runner.__file__).resolve().parent / 'schemas'
+          files = sorted(root.glob('*.json'))
+          if not files:
+              raise SystemExit(f'no installed schemas under {root}')
+          for path in files:
+              json.loads(path.read_text(encoding='utf-8'))
+          print(f'loaded {len(files)} installed schemas')
+          PY
+
+          echo "selected_file=${selected_file:-none}"
+          echo "selected_hunk=${selected_hunk:-none}"
+          echo "test_modules=${#all_modules[@]}"
+          git status --short
+          test -z "$(git status --porcelain)"
+          git push --force-with-lease origin "HEAD:refs/heads/$PRODUCT_BRANCH"
