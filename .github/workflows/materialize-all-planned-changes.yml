@@ -25,14 +25,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Reconstruct, verify, and publish product branch
+      - name: Reconstruct and verify final product tree
         shell: bash
-        env:
-          PYTHONPATH: ${{ github.workspace }}/src
-          OPENBLAS_NUM_THREADS: "1"
-          OMP_NUM_THREADS: "1"
-          MKL_NUM_THREADS: "1"
-          NUMEXPR_NUM_THREADS: "1"
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -108,9 +102,20 @@ jobs:
           git add src/unit_test_runner/reanalysis/workflow.py
           git diff --cached --check
           git commit -m "fix: consume finalized dossier envelopes during reanalysis"
-          test "$(git rev-parse HEAD^{tree})" = \
-            "812c6334d5894decfd76103f0d32b97f3495d8e1"
+          actual_tree=$(git rev-parse HEAD^{tree})
+          echo "Final product tree: $actual_tree"
+          test "$actual_tree" = "812c6334d5894decfd76103f0d32b97f3495d8e1"
 
+      - name: Run integration-focused verification
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+          OPENBLAS_NUM_THREADS: "1"
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
+        run: |
+          set -euo pipefail
           python -m pip install "setuptools>=61" wheel
           python -m pip install -e .
           python -m unittest \
@@ -127,4 +132,9 @@ jobs:
           python -m compileall -q src tests
           python -m unit_test_runner --help >/dev/null
           git diff --check origin/main...HEAD
+
+      - name: Publish verified product branch
+        shell: bash
+        run: |
+          set -euo pipefail
           git push --force origin HEAD:refs/heads/codex/integrate-all-plans
