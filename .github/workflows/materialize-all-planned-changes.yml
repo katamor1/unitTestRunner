@@ -97,6 +97,20 @@ jobs:
           test "$(git rev-parse HEAD^{tree})" = \
             "eab459fc47683c9e8129426ebc27029ccde4805e"
 
+          git show \
+            origin/codex/bootstrap-integrate-all-plans:.github/bootstrap/finalized-dossier-reanalysis-fix.patch.b64 \
+            | tr -d '\r\n' \
+            | base64 --decode > "$RUNNER_TEMP/reanalysis-fix.patch"
+          test "$(sha256sum "$RUNNER_TEMP/reanalysis-fix.patch" | awk '{print $1}')" = \
+            "d55022a69c921fab4af3adbd216846ac6b336d2b47df307412cb9533747ce359"
+          git apply --check "$RUNNER_TEMP/reanalysis-fix.patch"
+          git apply "$RUNNER_TEMP/reanalysis-fix.patch"
+          git add src/unit_test_runner/reanalysis/workflow.py
+          git diff --cached --check
+          git commit -m "fix: consume finalized dossier envelopes during reanalysis"
+          test "$(git rev-parse HEAD^{tree})" = \
+            "812c6334d5894decfd76103f0d32b97f3495d8e1"
+
           python -m pip install "setuptools>=61" wheel
           python -m pip install -e .
           python -m unittest \
@@ -107,6 +121,7 @@ jobs:
             tests.test_review_decision_staleness \
             tests.test_review_decision_integration \
             tests.test_review_decision_cli \
+            tests.test_reanalysis_cli \
             tests.test_reanalysis_snapshot_builder \
             -v
           python -m compileall -q src tests
