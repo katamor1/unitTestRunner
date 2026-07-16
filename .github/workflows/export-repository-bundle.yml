@@ -1,0 +1,34 @@
+name: Export repository bundle
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/export-repository-bundle.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout all repository refs
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create and verify complete Git bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          git bundle create unitTestRunner.bundle --all
+          git bundle verify unitTestRunner.bundle
+
+      - name: Upload Git bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: unitTestRunner-git-bundle
+          path: unitTestRunner.bundle
+          if-no-files-found: error
+          retention-days: 1
