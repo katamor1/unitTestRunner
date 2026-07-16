@@ -1,0 +1,34 @@
+name: Export Japanese GUI copy patch
+
+on:
+  push:
+    branches:
+      - chore/japanese-gui-copy
+    paths:
+      - .github/workflows/export-japanese-gui-copy-patch.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode patch script
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/git/blobs/80280b54dafb9a80e19f6af5973901c9e38aec1a" --jq .content \
+            | tr -d '\n' \
+            | base64 --decode \
+            | gzip --decompress \
+            > japanese-gui-copy.patch.py
+          python -m py_compile japanese-gui-copy.patch.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: japanese-gui-copy-patch
+          path: japanese-gui-copy.patch.py
+          if-no-files-found: error
+          retention-days: 1
