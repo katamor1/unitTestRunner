@@ -1,0 +1,182 @@
+name: Materialize all planned changes
+
+on:
+  push:
+    branches:
+      - codex/bootstrap-integrate-all-plans
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: materialize-all-planned-changes
+  cancel-in-progress: true
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bootstrap branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch verified source refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin \
+            +refs/heads/codex/bootstrap-p1t6-v3:refs/remotes/origin/codex/bootstrap-p1t6-v3 \
+            +refs/heads/codex/p1t6-review-decisions-readiness-clean:refs/remotes/origin/codex/p1t6-review-decisions-readiness-clean \
+            +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse origin/main)" = "969ce9462a688e94c887d6e77359e40296d8927b"
+          test "$(git rev-parse origin/codex/p1t6-review-decisions-readiness-clean)" = "a204f3aec3015fdb6eea26cf7e566cc9523ba046"
+
+      - name: Reconstruct exact Task 6 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          carrier=origin/codex/bootstrap-p1t6-v3
+          git ls-tree -r --name-only "$carrier" .github/bootstrap/p1t6-v3-b64 \
+            | sort \
+            | while IFS= read -r path; do git show "$carrier:$path"; done \
+            | tr -d '\r\n' \
+            | base64 --decode > "$RUNNER_TEMP/p1t6.patch.gz"
+          test "$(stat -c%s "$RUNNER_TEMP/p1t6.patch.gz")" = "41476"
+          test "$(sha256sum "$RUNNER_TEMP/p1t6.patch.gz" | awk '{print $1}')" = \
+            "121bfc6fdcbb6e8728402997f291a0ef3af000d775d3c8bca791e0de28d13123"
+          gzip -t "$RUNNER_TEMP/p1t6.patch.gz"
+          gzip -dc "$RUNNER_TEMP/p1t6.patch.gz" > "$RUNNER_TEMP/p1t6.patch"
+          test "$(sha256sum "$RUNNER_TEMP/p1t6.patch" | awk '{print $1}')" = \
+            "8aaa74a87b2e1ea64087726bbcbfd8c998d5940c458d04768b63f969fe461ef0"
+
+      - name: Materialize exact Task 6 tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C task6-exact b66790165a2d4f82943cd199b3b499e1f1725fc3
+          git apply --check "$RUNNER_TEMP/p1t6.patch"
+          git apply "$RUNNER_TEMP/p1t6.patch"
+          git add -A
+          test "$(git write-tree)" = "363ddb6f86a4508eb5f4dd2a26013b837a5e26d6"
+          git diff --cached --check
+          git commit -m "feat: complete phase 1 task 6 review decisions"
+          echo "TASK6_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Merge Task 6 with the current planned compatibility changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git switch -C codex/integrate-all-plans \
+            origin/codex/p1t6-review-decisions-readiness-clean
+          set +e
+          git merge --no-ff --no-commit "$TASK6_COMMIT"
+          merge_status=$?
+          set -e
+          test "$merge_status" = "1"
+          test "$(git diff --name-only --diff-filter=U)" = \
+            "src/unit_test_runner/build_probe.py"
+          git checkout --ours -- src/unit_test_runner/build_probe.py
+          git add src/unit_test_runner/build_probe.py
+          git diff --cached --check
+          git commit -m "merge: integrate Phase 1 Task 6 implementation"
+
+      - name: Resolve the merged current-dossier contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path("src/unit_test_runner/build_probe.py")
+          text = source.read_text(encoding="utf-8")
+          old = '''    compatibility_envelope = copy.deepcopy(dict(document))
+              compatibility_envelope.pop("target", None)
+              compatibility_envelope.pop("build_context", None)
+              compatibility_envelope["schema_version"] = "1.0.0"
+              return normalize_consumer_data(
+                  compatibility_envelope,
+                  expected_kind=ArtifactKind.FUNCTION_DOSSIER,
+              )
+          '''
+          new = '''    validated_envelope = copy.deepcopy(dict(document))
+              validated_envelope.pop("target", None)
+              validated_envelope.pop("build_context", None)
+              return normalize_consumer_data(
+                  validated_envelope,
+                  expected_kind=ArtifactKind.FUNCTION_DOSSIER,
+              )
+          '''
+          if old not in text:
+              raise SystemExit("current dossier compatibility block not found")
+          source.write_text(text.replace(old, new), encoding="utf-8")
+
+          tests = Path("tests/test_build_probe.py")
+          text = tests.read_text(encoding="utf-8")
+          old = '''            dossier = {
+                  "artifact_kind": "function_dossier",
+                  "schema_version": "1.1.0",
+                  "producer": {
+                      "name": "unit-test-runner",
+                      "version": "0.1.0",
+                      "commit": "b66790165a2d4f82943cd199b3b499e1f1725fc3",
+                  },
+                  "subject": {
+                      "function_id": "fn_target",
+                      "source_path": "src/control.c",
+                      "source_sha256": "a" * 64,
+                  },
+                  "data": {
+                      "target": {"source": "src/control.c", "function": "Target"},
+                      "build_context": {"include_dirs": [], "defines": []},
+                  },
+                  "extensions": {},
+              }
+          '''
+          new = '''            dossier = _current_dossier_envelope()
+          '''
+          if old not in text:
+              raise SystemExit("stale minimal current dossier fixture not found")
+          tests.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+          git add src/unit_test_runner/build_probe.py tests/test_build_probe.py
+          git diff --cached --check
+          git commit -m "fix: validate merged current dossier contract"
+          test "$(git rev-parse HEAD^{tree})" = \
+            "eab459fc47683c9e8129426ebc27029ccde4805e"
+
+      - name: Run integration-focused verification
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+          OPENBLAS_NUM_THREADS: "1"
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
+        run: |
+          set -euo pipefail
+          python -m pip install "setuptools>=61" wheel
+          python -m pip install -e .
+          python -m unittest \
+            tests.test_build_probe \
+            tests.test_contract_registry \
+            tests.test_contract_validation \
+            tests.test_review_decisions \
+            tests.test_review_decision_staleness \
+            tests.test_review_decision_integration \
+            tests.test_review_decision_cli \
+            tests.test_reanalysis_snapshot_builder \
+            -v
+          python -m compileall -q src tests
+          python -m unit_test_runner --help >/dev/null
+          git diff --check origin/main...HEAD
+
+      - name: Publish the product branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push --force-with-lease origin \
+            HEAD:refs/heads/codex/integrate-all-plans
