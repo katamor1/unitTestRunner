@@ -8,13 +8,15 @@ on:
       - .github/workflows/export-japanese-gui-copy-patch.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   export:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Decode patch script
         env:
           GH_TOKEN: ${{ github.token }}
@@ -24,11 +26,22 @@ jobs:
             | tr -d '\n' \
             | base64 --decode \
             | gzip --decompress \
-            > japanese-gui-copy.patch.py
-          python -m py_compile japanese-gui-copy.patch.py
+            > .github/japanese-gui-copy.patch.py
+          python -m py_compile .github/japanese-gui-copy.patch.py
       - uses: actions/upload-artifact@v4
         with:
           name: japanese-gui-copy-patch
-          path: japanese-gui-copy.patch.py
+          path: .github/japanese-gui-copy.patch.py
           if-no-files-found: error
           retention-days: 1
+      - name: Publish decoded patch for deterministic repair
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/japanese-gui-copy.patch.py
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "chore: expose Japanese GUI copy patch for repair"
+          git push origin HEAD:chore/japanese-gui-copy
