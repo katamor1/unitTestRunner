@@ -85,11 +85,12 @@
 再生成の削除前に次をすべて検証する。
 
 - 出力先が `--root` 配下である
+- 出力先が `unitTestRunner` リポジトリの外側である
 - basename が `unit-test-runner-large-` で始まる
 - `--root` 自体ではない
 - base と output が同一、親子、包含関係にない
 
-違反時は削除前に中止する。
+違反時は削除前に中止する。明示的な `--root` または `--output` でも、リポジトリ内の出力は許可しない。
 
 ## 7. manifest 契約
 
@@ -115,9 +116,9 @@
 
 `tests/test_large_vc6_fixture_generator.py` は production 規模を生成せず、小さな一時 fixture で次を検証する。
 
-- tier 解析と不正値拒否
+- tier 解析、空指定、不正値拒否
 - `--tiers` 値省略時の既定段階
-- 性能 root と prefix による削除境界
+- 性能 root、リポジトリ外、prefix による削除境界
 - base の非破壊コピー
 - DSP source entry 追加
 - manifest 件数と実在ファイル数の一致
@@ -138,7 +139,7 @@
 
 - Python 3.12 互換構文で生成器が起動する
 - 小規模単体テストが全件通る
-- 出力境界外の削除を拒否する
+- 出力境界外とリポジトリ内の削除を拒否する
 - 既存実用 fixture を変更しない
 - 7,000 / 16,000 / 31,000 の各出力先を生成できる
 - 生成後の CLI smoke 手順が文書化されている
