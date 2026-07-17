@@ -132,11 +132,12 @@ py -m unit_test_runner build-probe `
 再生成時は対象出力ディレクトリをいったん削除します。削除は次の条件をすべて満たす場合だけ実行します。
 
 - 出力先が選択した性能 fixture root の配下である
+- 出力先が `unitTestRunner` リポジトリの外側である
 - basename が `unit-test-runner-large-` で始まる
 - 性能 fixture root 自体ではない
 - base と output が同一または親子関係ではない
 
-条件に合わないパスでは処理を中止します。`--root` にリポジトリルートや本番ソースルートを指定しないでください。
+条件に合わないパスでは処理を中止します。リポジトリ内を `--root` または `--output` に指定した場合も拒否します。
 
 ## エンコーディング
 
