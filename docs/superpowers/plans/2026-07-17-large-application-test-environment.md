@@ -11,6 +11,7 @@
 ## Global Constraints
 
 - Do not modify the base fixture or any production source tree.
+- Keep every generated fixture outside the `unitTestRunner` repository.
 - Delete only directories beneath the selected performance root whose basename starts with `unit-test-runner-large-`.
 - Preserve detected DSP encoding for UTF-8 BOM, UTF-8, CP932, and Shift-JIS inputs.
 - Keep generated C compatible with C90/VC6 syntax.
@@ -54,11 +55,14 @@ self.assertEqual(4, summary["source_entries_in_target_project"])
 self.assertEqual(actual_file_count, summary["total_files_on_disk"])
 ```
 
-- [x] **Step 4: Add a failing CLI test for an explicitly empty tier list**
+- [x] **Step 4: Add failing CLI and repository-boundary tests**
 
 ```python
 with self.assertRaisesRegex(ValueError, "at least one positive integer"):
     main(["--base", str(base), "--root", str(perf_root), "--tiers", ""])
+
+with self.assertRaisesRegex(ValueError, "inside the repository"):
+    assert_safe_output(repository_root / "unit-test-runner-large-inside-repo", repository_root)
 ```
 
 - [x] **Step 5: Verify each new assertion fails for the intended missing behavior**
@@ -85,12 +89,18 @@ def output_root_for_entries(perf_root, entries):
     return Path(perf_root) / f"{OUTPUT_PREFIX}{entries}"
 ```
 
-- [x] **Step 2: Implement the deletion boundary before any reset**
+- [x] **Step 2: Implement every deletion boundary before any reset**
 
 ```python
 relative = output.resolve().relative_to(perf_root.resolve())
 if not relative.parts or not output.name.startswith(OUTPUT_PREFIX):
     raise ValueError("unsafe output")
+try:
+    output.resolve().relative_to(repository_root().resolve())
+except ValueError:
+    pass
+else:
+    raise ValueError("repository-local output")
 ```
 
 - [x] **Step 3: Copy the base, generate C90 sources, and update the Source Files group**
