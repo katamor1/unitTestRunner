@@ -92,9 +92,11 @@ Invoke-Native -FilePath $venvPython -Arguments @("-m", "pip", "install", "-e", "
 Invoke-Native -FilePath $venvPython -Arguments @("-m", "pip", "install", "pyinstaller")
 
 if (-not $SkipTests) {
-    $testModules = Get-ChildItem -LiteralPath (Join-Path $repoRoot "tests") -Filter "test_*.py" -File |
-        Sort-Object Name |
-        ForEach-Object { "tests." + $_.BaseName }
+    $testModules = @(
+        Get-ChildItem -LiteralPath (Join-Path $repoRoot "tests") -Filter "test_*.py" -File |
+            Sort-Object Name |
+            ForEach-Object { "tests." + $_.BaseName }
+    )
     if ($testModules.Count -eq 0) {
         throw "No Python test modules were found."
     }
