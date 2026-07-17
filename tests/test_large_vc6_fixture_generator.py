@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,10 @@ from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "generate_large_vc6_fixture.py"
+sys.path.insert(0, str(REPO_ROOT / "src"))
+
+from unit_test_runner.vc6.dsp_parser import parse_dsp
+from unit_test_runner.vc6.source_membership import map_source_membership
 
 spec = importlib.util.spec_from_file_location("generate_large_vc6_fixture", SCRIPT_PATH)
 if spec is None or spec.loader is None:
@@ -125,6 +130,33 @@ class LargeVc6FixtureGeneratorTests(unittest.TestCase):
                 REPO_ROOT,
             )
 
+    def test_append_dsp_sources_uses_the_matching_source_group_end(self):
+        nested = "\n".join(
+            [
+                '# Begin Group "Source Files"',
+                '# Begin Group "Existing Sources"',
+                "# Begin Source File",
+                r"SOURCE=..\src\device_control.c",
+                "# End Source File",
+                "# End Group",
+                "# End Group",
+                '# Begin Group "Header Files"',
+                "# End Group",
+                "",
+            ]
+        )
+
+        updated = generator.append_dsp_sources(
+            nested,
+            [r"..\src\generated\large_module_00000.c"],
+        )
+
+        nested_end = updated.index("# End Group", updated.index("Existing Sources"))
+        generated = updated.index(r"SOURCE=..\src\generated\large_module_00000.c")
+        source_group_end = updated.index("# End Group", nested_end + 1)
+        self.assertLess(nested_end, generated)
+        self.assertLess(generated, source_group_end)
+
     def test_generate_fixture_copies_base_adds_sources_and_writes_manifest(self):
         output = self.perf_root / "unit-test-runner-large-4"
 
@@ -139,6 +171,8 @@ class LargeVc6FixtureGeneratorTests(unittest.TestCase):
 
         self.assertEqual(4, summary["source_entries_in_target_project"])
         self.assertEqual(3, summary["generated_source_files"])
+        self.assertEqual(4, summary["dsp_registration"]["source_entries"])
+        self.assertEqual(3, summary["dsp_registration"]["generated_source_entries"])
         self.assertEqual("DeviceControl_Update", summary["target"]["function"])
         self.assertEqual(
             base_source_before,
@@ -150,15 +184,51 @@ class LargeVc6FixtureGeneratorTests(unittest.TestCase):
         self.assertIn(r"SOURCE=..\src\generated\large_module_00002.c", dsp)
         self.assertEqual(3, len(list((output / "src" / "generated").glob("*.c"))))
 
+        parsed = parse_dsp(
+            output / "DeviceControl" / "DeviceControl.dsp",
+            output,
+        )
+        parsed_sources = [entry for entry in parsed.files if entry.file_kind == "source"]
+        self.assertEqual(4, len(parsed_sources))
+        self.assertTrue(all(entry.exists for entry in parsed_sources))
+
+        membership = map_source_membership(
+            output / "Product.dsw",
+            "src/generated/large_module_00002.c",
+            project_name="DeviceControl",
+            configuration="DeviceControl - Win32 Debug",
+        )
+        self.assertEqual("ok", membership.status)
+
         manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(1, manifest["schema_version"])
         self.assertEqual("Product.dsw", manifest["workspace_file"])
         self.assertEqual("src/device_control.c", manifest["target"]["source"])
         self.assertEqual(4, manifest["source_entries_in_target_project"])
+        self.assertEqual(4, manifest["dsp_registration"]["source_entries"])
+        self.assertEqual(3, manifest["dsp_registration"]["generated_source_entries"])
         self.assertEqual(
             sum(1 for path in output.rglob("*") if path.is_file()),
             manifest["total_files_on_disk"],
         )
+
+    def test_generate_fixture_fails_closed_if_dsp_registration_is_incomplete(self):
+        output = self.perf_root / "unit-test-runner-large-4"
+        with mock.patch.object(
+            generator,
+            "append_dsp_sources",
+            side_effect=lambda text, _paths: text,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "DSP registration verification failed",
+            ):
+                generator.generate_fixture(
+                    base_root=self.base,
+                    output_root=output,
+                    source_entries=4,
+                    perf_root=self.perf_root,
+                )
 
     def test_generate_fixture_preserves_cp932_dsp_encoding(self):
         dsp_path = self.base / "DeviceControl" / "DeviceControl.dsp"
@@ -169,12 +239,14 @@ class LargeVc6FixtureGeneratorTests(unittest.TestCase):
         dsp_path.write_bytes(dsp_text.encode("cp932"))
         output = self.perf_root / "unit-test-runner-large-2"
 
-        generator.generate_fixture(self.base, output, 2, self.perf_root)
+        summary = generator.generate_fixture(self.base, output, 2, self.perf_root)
 
         output_bytes = (output / "DeviceControl" / "DeviceControl.dsp").read_bytes()
         output_text = output_bytes.decode("cp932")
         self.assertIn("# 日本語のVC6プロジェクト", output_text)
         self.assertIn(r"SOURCE=..\src\generated\large_module_00000.c", output_text)
+        self.assertEqual(2, summary["dsp_registration"]["source_entries"])
+        self.assertEqual(1, summary["dsp_registration"]["generated_source_entries"])
 
     def test_regeneration_removes_stale_files_and_rebuilds_requested_scale(self):
         output = self.perf_root / "unit-test-runner-large-4"
@@ -187,6 +259,8 @@ class LargeVc6FixtureGeneratorTests(unittest.TestCase):
         self.assertFalse(stale.exists())
         self.assertEqual(1, summary["generated_source_files"])
         self.assertEqual(1, len(list((output / "src" / "generated").glob("*.c"))))
+        self.assertEqual(2, summary["dsp_registration"]["source_entries"])
+        self.assertEqual(1, summary["dsp_registration"]["generated_source_entries"])
 
 
 if __name__ == "__main__":
