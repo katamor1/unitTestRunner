@@ -54,7 +54,14 @@ self.assertEqual(4, summary["source_entries_in_target_project"])
 self.assertEqual(actual_file_count, summary["total_files_on_disk"])
 ```
 
-- [x] **Step 4: Verify each new assertion fails for the intended missing behavior**
+- [x] **Step 4: Add a failing CLI test for an explicitly empty tier list**
+
+```python
+with self.assertRaisesRegex(ValueError, "at least one positive integer"):
+    main(["--base", str(base), "--root", str(perf_root), "--tiers", ""])
+```
+
+- [x] **Step 5: Verify each new assertion fails for the intended missing behavior**
 
 Run the focused test method after each assertion is introduced and confirm the failure message identifies the missing contract.
 
@@ -117,7 +124,14 @@ manifest = {
 }
 ```
 
-- [x] **Step 6: Run the generator tests**
+- [x] **Step 6: Distinguish an omitted tier flag from an explicitly empty value**
+
+```python
+if args.tiers is not None:
+    tiers = parse_tier_entries(args.tiers)
+```
+
+- [x] **Step 7: Run the generator tests**
 
 Run:
 
@@ -125,7 +139,7 @@ Run:
 py -m unittest tests.test_large_vc6_fixture_generator -v
 ```
 
-Expected: six tests pass.
+Expected: seven tests pass.
 
 ### Task 3: Document generation and smoke execution
 
@@ -183,7 +197,7 @@ Expected: exit code 0.
 py -m unittest tests.test_large_vc6_fixture_generator -v
 ```
 
-Expected: six tests pass with zero failures.
+Expected: seven tests pass with zero failures.
 
 - [x] **Step 3: Generate an eight-entry temporary fixture**
 
