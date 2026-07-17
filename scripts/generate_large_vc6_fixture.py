@@ -74,6 +74,12 @@ def assert_safe_output(output_root: Path | str, perf_root: Path | str) -> None:
         raise ValueError(f"refusing output outside performance root: {output}") from exc
     if not relative.parts:
         raise ValueError(f"refusing to use performance root itself as output: {output}")
+    try:
+        output.relative_to(repository_root().resolve())
+    except ValueError:
+        pass
+    else:
+        raise ValueError(f"refusing output inside the repository: {output}")
     if not output.name.startswith(OUTPUT_PREFIX):
         raise ValueError(f"output directory must use expected prefix {OUTPUT_PREFIX!r}: {output}")
 
