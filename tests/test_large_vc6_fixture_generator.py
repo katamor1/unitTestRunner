@@ -119,6 +119,11 @@ class LargeVc6FixtureGeneratorTests(unittest.TestCase):
             generator.assert_safe_output(self.temp / "unit-test-runner-large-8", self.perf_root)
         with self.assertRaisesRegex(ValueError, "expected prefix"):
             generator.assert_safe_output(self.perf_root / "unexpected", self.perf_root)
+        with self.assertRaisesRegex(ValueError, "inside the repository"):
+            generator.assert_safe_output(
+                REPO_ROOT / "unit-test-runner-large-inside-repo",
+                REPO_ROOT,
+            )
 
     def test_generate_fixture_copies_base_adds_sources_and_writes_manifest(self):
         output = self.perf_root / "unit-test-runner-large-4"
