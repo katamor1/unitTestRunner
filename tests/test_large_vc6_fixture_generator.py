@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -95,6 +96,20 @@ class LargeVc6FixtureGeneratorTests(unittest.TestCase):
         args = generator.build_parser().parse_args(["--tiers"])
 
         self.assertEqual("7000,16000,31000", args.tiers)
+
+    def test_empty_tiers_value_is_rejected_instead_of_using_default_entries(self):
+        with mock.patch.dict("os.environ", {"UNIT_TEST_RUNNER_LARGE_ENTRIES": "1"}):
+            with self.assertRaisesRegex(ValueError, "at least one positive integer"):
+                generator.main(
+                    [
+                        "--base",
+                        str(self.base),
+                        "--root",
+                        str(self.perf_root),
+                        "--tiers",
+                        "",
+                    ]
+                )
 
     def test_safe_output_requires_perf_root_and_expected_prefix(self):
         valid = self.perf_root / "unit-test-runner-large-8"
