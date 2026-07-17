@@ -16,8 +16,8 @@ from unit_test_runner.dossier.artifact_collector import collect_artifacts
 from unit_test_runner.harness.harness_models import HarnessGenerationPolicy, HarnessSkeletonReport
 from unit_test_runner.harness.harness_report_writer import write_harness_report
 from tests.windows_path_alias_support import (
-    WINDOWS_8DOT3_PREFIX,
     require_windows_path_alias_pair,
+    temporary_windows_alias_directory,
 )
 
 
@@ -28,10 +28,8 @@ def sha256(path):
 class ArtifactProvenanceHashTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "win32", "Windows 8.3 aliases require Windows")
     def test_build_report_records_long_generated_path_under_short_output_alias(self):
-        with tempfile.TemporaryDirectory(
-            prefix=WINDOWS_8DOT3_PREFIX
-        ) as temp_dir:
-            pair = require_windows_path_alias_pair(self, Path(temp_dir))
+        with temporary_windows_alias_directory() as temp_dir:
+            pair = require_windows_path_alias_pair(self, temp_dir)
             build = BuildWorkspaceReport(
                 source_path=Path("src/control.c"),
                 function_name="Control_Update",
