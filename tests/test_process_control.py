@@ -57,6 +57,14 @@ class ProcessControlTests(unittest.TestCase):
         with mock.patch("os.kill", side_effect=invalid_pid):
             self.assertFalse(process_exists(999999))
 
+    @unittest.skipUnless(os.name == "nt", "Windows process probing requires Windows")
+    def test_process_exists_uses_non_destructive_windows_probe(self):
+        with mock.patch(
+            "os.kill",
+            side_effect=AssertionError("Windows process existence checks must not call os.kill"),
+        ):
+            self.assertTrue(process_exists(os.getpid()))
+
     def test_preserves_output_and_return_code_for_normal_completion(self):
         result = run_process_tree(
             [
