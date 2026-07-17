@@ -178,7 +178,7 @@ if (-not $SkipTests) {
     Invoke-Native -FilePath $npmCommand -Arguments @("test") -WorkingDirectory $extensionRoot
 }
 
-$extensionManifest = Get-Content -LiteralPath (Join-Path $extensionRoot "package.json") -Raw | ConvertFrom-Json
+$extensionManifest = Get-Content -LiteralPath (Join-Path $extensionRoot "package.json") -Raw -Encoding UTF8 | ConvertFrom-Json
 $vsixPath = Join-Path $distRoot ("unit-test-runner-vscode-{0}.vsix" -f $extensionManifest.version)
 if (Test-Path -LiteralPath $vsixPath) {
     Remove-Item -LiteralPath $vsixPath -Force
