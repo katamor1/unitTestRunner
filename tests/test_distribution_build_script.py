@@ -54,6 +54,10 @@ class DistributionBuildScriptTests(unittest.TestCase):
         self.assertIn('$ErrorActionPreference = "Stop"', self.text)
         self.assertRegex(self.text, r'if \(\$LASTEXITCODE -ne 0\)')
 
+    def test_native_failure_message_delimits_last_exit_code_before_colon(self):
+        self.assertNotIn("$LASTEXITCODE:", self.text)
+        self.assertIn("${LASTEXITCODE}:", self.text)
+
     def test_powershell_parser_accepts_script_when_available(self):
         shell = shutil.which("pwsh") or shutil.which("powershell")
         if shell is None:
