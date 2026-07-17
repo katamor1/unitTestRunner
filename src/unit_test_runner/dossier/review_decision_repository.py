@@ -318,13 +318,15 @@ def _assert_safe_repository_paths(root: Path, *paths: Path) -> None:
                     raise ValueError(
                         f"Review repository path contains a symlink or reparse point: {current}"
                     )
-        resolved = lexical.resolve(strict=False)
-        try:
-            resolved.relative_to(resolved_root)
-        except ValueError as error:
+        # Ledger, lock, and temporary leaf files are intentionally volatile. A
+        # concurrent writer may create or remove one between the component check
+        # above and Path.resolve(), so resolve only the stable parent directory.
+        resolved_parent = lexical.parent.resolve(strict=False)
+        expected_parent = resolved_root / relative.parent
+        if resolved_parent != expected_parent:
             raise ValueError(
                 "Review repository path escapes through a symlink or reparse point."
-            ) from error
+            )
 
 
 def _is_symlink_or_reparse(path: Path) -> bool:
