@@ -10,6 +10,7 @@ import os
 import shutil
 import sys
 import tempfile
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -137,6 +138,12 @@ def generate_fixture(
 
     output_dsp = output / TARGET_DSP
     output_dsp.write_bytes(append_dsp_sources(base_dsp, generated_paths).encode(dsp_encoding))
+    registration = verify_dsp_registration(
+        output_root=output,
+        dsp_path=output_dsp,
+        expected_source_entries=source_entries,
+        generated_paths=generated_paths,
+    )
 
     manifest_path = output / "manifest.json"
     manifest = {
@@ -150,6 +157,7 @@ def generate_fixture(
         "base_source_entries": base_source_entries,
         "source_entries_in_target_project": source_entries,
         "generated_source_files": generated_count,
+        "dsp_registration": registration,
         "total_files_on_disk": count_files(output) + (0 if manifest_path.exists() else 1),
         "target": dict(TARGET),
         "note": "Generated outside the repository as a disposable, read-only large-application fixture.",
@@ -174,11 +182,17 @@ def read_legacy_text(path: Path | str) -> tuple[str, str]:
 
 
 def count_dsp_source_entries(text: str) -> int:
-    return sum(
-        1
-        for line in text.splitlines()
-        if line.strip().upper().startswith("SOURCE=") and _is_c_source(line)
-    )
+    return len(_dsp_source_values(text))
+
+
+def _dsp_source_values(text: str) -> list[str]:
+    values: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.upper().startswith("SOURCE=") or not _is_c_source(stripped):
+            continue
+        values.append(stripped.split("=", 1)[1].strip().strip('"'))
+    return values
 
 
 def _is_c_source(source_line: str) -> bool:
@@ -189,16 +203,24 @@ def _is_c_source(source_line: str) -> bool:
 def append_dsp_sources(text: str, source_paths: Sequence[str]) -> str:
     if not source_paths:
         return text
-    newline = "\r\n" if "\r\n" in text else "\n"
-    marker = '# Begin Group "Source Files"'
-    group_start = text.find(marker)
-    if group_start < 0:
-        raise ValueError('target DSP does not contain a "Source Files" group')
-    group_end = text.find("# End Group", group_start)
-    if group_end < 0:
-        raise ValueError('target DSP "Source Files" group is not terminated')
 
+    newline = "\r\n" if "\r\n" in text else "\n"
+    had_final_newline = text.endswith(("\n", "\r"))
+    lines = text.splitlines()
+    marker = '# Begin Group "Source Files"'
+    try:
+        group_start = next(
+            index
+            for index, line in enumerate(lines)
+            if line.strip() == marker
+        )
+    except StopIteration as exc:
+        raise ValueError('target DSP does not contain a "Source Files" group') from exc
+
+    group_end = _matching_group_end(lines, group_start)
     block_lines: list[str] = []
+    if group_end > 0 and lines[group_end - 1].strip():
+        block_lines.append("")
     for source_path in source_paths:
         block_lines.extend(
             [
@@ -208,10 +230,95 @@ def append_dsp_sources(text: str, source_paths: Sequence[str]) -> str:
                 "",
             ]
         )
-    block = newline.join(block_lines)
-    before = text[:group_end].rstrip("\r\n")
-    after = text[group_end:]
-    return f"{before}{newline}{newline}{block}{after}"
+
+    updated = newline.join(lines[:group_end] + block_lines + lines[group_end:])
+    if had_final_newline:
+        updated += newline
+    return updated
+
+
+def _matching_group_end(lines: Sequence[str], group_start: int) -> int:
+    nested_depth = 0
+    for index in range(group_start + 1, len(lines)):
+        stripped = lines[index].strip()
+        if stripped.startswith("# Begin Group"):
+            nested_depth += 1
+            continue
+        if not stripped.startswith("# End Group"):
+            continue
+        if nested_depth == 0:
+            return index
+        nested_depth -= 1
+    raise ValueError('target DSP "Source Files" group is not terminated')
+
+
+def verify_dsp_registration(
+    output_root: Path | str,
+    dsp_path: Path | str,
+    expected_source_entries: int,
+    generated_paths: Sequence[str],
+) -> dict[str, object]:
+    output = Path(output_root).resolve()
+    dsp = Path(dsp_path).resolve()
+    text, _encoding = read_legacy_text(dsp)
+    registered = _dsp_source_values(text)
+    registered_counts = Counter(_normalized_dsp_source_path(value) for value in registered)
+    expected_generated = [_normalized_dsp_source_path(value) for value in generated_paths]
+
+    missing = [
+        source_path
+        for source_path, normalized in zip(generated_paths, expected_generated)
+        if registered_counts[normalized] == 0
+    ]
+    duplicate = [
+        source_path
+        for source_path, normalized in zip(generated_paths, expected_generated)
+        if registered_counts[normalized] > 1
+    ]
+    missing_files = [
+        source_path
+        for source_path in generated_paths
+        if not _resolve_dsp_source(dsp.parent, source_path).is_file()
+    ]
+
+    problems: list[str] = []
+    if len(registered) != expected_source_entries:
+        problems.append(
+            f"expected {expected_source_entries} C/C++ SOURCE entries but found {len(registered)}"
+        )
+    if missing:
+        problems.append(f"missing generated SOURCE entries: {_sample_paths(missing)}")
+    if duplicate:
+        problems.append(f"duplicate generated SOURCE entries: {_sample_paths(duplicate)}")
+    if missing_files:
+        problems.append(f"registered generated files missing on disk: {_sample_paths(missing_files)}")
+    if problems:
+        raise ValueError("DSP registration verification failed: " + "; ".join(problems))
+
+    try:
+        project_file = dsp.relative_to(output).as_posix()
+    except ValueError:
+        project_file = slash(dsp)
+    return {
+        "verified": True,
+        "project_file": project_file,
+        "source_entries": len(registered),
+        "generated_source_entries": len(expected_generated),
+    }
+
+
+def _normalized_dsp_source_path(value: str) -> str:
+    return value.strip().strip('"').replace("/", "\\").casefold()
+
+
+def _resolve_dsp_source(dsp_dir: Path, value: str) -> Path:
+    return (dsp_dir / value.strip().strip('"').replace("\\", "/")).resolve()
+
+
+def _sample_paths(paths: Sequence[str], limit: int = 5) -> str:
+    sample = list(paths[:limit])
+    suffix = "" if len(paths) <= limit else f" (+{len(paths) - limit} more)"
+    return ", ".join(sample) + suffix
 
 
 def render_generated_source(index: int, generated_count: int, width: int) -> str:
