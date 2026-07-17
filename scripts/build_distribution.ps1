@@ -143,7 +143,7 @@ try {
         "--dsw", (Join-Path $fixtureRoot "Product.dsw"),
         "--source", "src\control.c",
         "--function", "Control_Update",
-        "--configuration", "Win32 Debug",
+        "--configuration", "Control - Win32 Debug",
         "--project", "Control",
         "--out", $smokeRoot,
         "--finalize-dossier"
