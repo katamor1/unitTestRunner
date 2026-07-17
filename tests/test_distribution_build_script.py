@@ -58,13 +58,23 @@ class DistributionBuildScriptTests(unittest.TestCase):
         self.assertNotIn("$LASTEXITCODE:", self.text)
         self.assertIn("${LASTEXITCODE}:", self.text)
 
+    def test_extension_manifest_is_read_as_utf8_before_json_parsing(self):
+        self.assertRegex(
+            self.text,
+            re.compile(
+                r'Get-Content\s+-LiteralPath\s+'
+                r'\(Join-Path \$extensionRoot "package\.json"\)\s+'
+                r'-Raw\s+-Encoding\s+UTF8\s+\|\s+ConvertFrom-Json'
+            ),
+        )
+
     def test_powershell_parser_accepts_script_when_available(self):
         shell = shutil.which("pwsh") or shutil.which("powershell")
         if shell is None:
             self.skipTest("PowerShell is not available")
         escaped = str(SCRIPT).replace("'", "''")
         command = (
-            f"$text = Get-Content -LiteralPath '{escaped}' -Raw; "
+            f"$text = Get-Content -LiteralPath '{escaped}' -Raw -Encoding UTF8; "
             "[void][scriptblock]::Create($text)"
         )
         completed = subprocess.run(
