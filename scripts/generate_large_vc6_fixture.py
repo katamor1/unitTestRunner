@@ -279,12 +279,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Iterable[str] | None = None) -> int:
     args = build_parser().parse_args(list(argv) if argv is not None else None)
-    if args.tiers and (args.entries is not None or args.output is not None):
+    if args.tiers is not None and (args.entries is not None or args.output is not None):
         raise ValueError("--tiers cannot be combined with --entries or --output")
 
     perf_root = args.root.expanduser().resolve()
     base_root = args.base.expanduser().resolve()
-    if args.tiers:
+    if args.tiers is not None:
         summaries = [
             generate_fixture(
                 base_root=base_root,
