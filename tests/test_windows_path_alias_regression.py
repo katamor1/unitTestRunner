@@ -44,6 +44,58 @@ class WindowsPathAliasPolicyTests(unittest.TestCase):
         ):
             alias_support.require_windows_path_alias_pair(self, Path("."))
 
+    def test_cleanup_retries_one_transient_windows_sharing_violation(self):
+        with tempfile.TemporaryDirectory() as parent_dir:
+            root = Path(parent_dir) / "alias-root"
+            root.mkdir()
+            original_rmtree = alias_support.shutil.rmtree
+            attempts = 0
+            sharing_violation = PermissionError(13, "injected Windows sharing violation")
+            sharing_violation.winerror = 32
+
+            def transient_rmtree(path):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise sharing_violation
+                return original_rmtree(path)
+
+            with mock.patch.object(
+                alias_support.shutil,
+                "rmtree",
+                side_effect=transient_rmtree,
+            ), mock.patch.object(alias_support.time, "sleep") as sleep:
+                alias_support._remove_tree_with_windows_retries(
+                    root,
+                    timeout_seconds=1.0,
+                )
+
+            self.assertEqual(2, attempts)
+            self.assertFalse(root.exists())
+            sleep.assert_called_once_with(
+                alias_support.WINDOWS_TEMP_CLEANUP_RETRY_SECONDS
+            )
+
+    def test_cleanup_does_not_hide_non_transient_errors(self):
+        with tempfile.TemporaryDirectory() as parent_dir:
+            root = Path(parent_dir) / "alias-root"
+            root.mkdir()
+            unrelated = PermissionError(13, "injected unrelated permission error")
+            unrelated.winerror = 3
+
+            with mock.patch.object(
+                alias_support.shutil,
+                "rmtree",
+                side_effect=unrelated,
+            ), mock.patch.object(alias_support.time, "sleep") as sleep:
+                with self.assertRaises(PermissionError):
+                    alias_support._remove_tree_with_windows_retries(
+                        root,
+                        timeout_seconds=1.0,
+                    )
+
+            sleep.assert_not_called()
+
 
 class ResolvedRelativePathContractTests(unittest.TestCase):
     def test_strict_relative_primitive_is_public_and_rejects_outside_root(self):
