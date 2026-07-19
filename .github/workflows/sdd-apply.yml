@@ -25,7 +25,8 @@ jobs:
         id: staged
         shell: bash
         run: |
-          if [[ -f .sdd/next.patch && -f .sdd/verify.sh && -f .sdd/commit-message.txt ]]; then
+          if [[ -f .sdd/verify.sh && -f .sdd/commit-message.txt ]] && \
+             { [[ -f .sdd/next.patch ]] || compgen -G '.sdd/next.patch.b64.*' > /dev/null; }; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
@@ -55,8 +56,13 @@ jobs:
         if: steps.staged.outputs.present == 'true'
         shell: bash
         run: |
-          git apply --check .sdd/next.patch
-          git apply .sdd/next.patch
+          patch_path=.sdd/next.patch
+          if [[ ! -f "$patch_path" ]]; then
+            cat .sdd/next.patch.b64.* | base64 --decode > /tmp/next.patch
+            patch_path=/tmp/next.patch
+          fi
+          git apply --check "$patch_path"
+          git apply "$patch_path"
           bash .sdd/verify.sh
       - name: Commit verified task
         if: steps.staged.outputs.present == 'true'
@@ -66,7 +72,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           message="$(cat .sdd/commit-message.txt)"
-          rm -f .sdd/next.patch .sdd/verify.sh .sdd/commit-message.txt .sdd/task*-reviewed
+          rm -f .sdd/next.patch .sdd/next.patch.b64.* .sdd/verify.sh .sdd/commit-message.txt .sdd/task*-reviewed
           rmdir .sdd 2>/dev/null || true
           git config user.name "OpenAI"
           git config user.email "noreply@openai.com"
