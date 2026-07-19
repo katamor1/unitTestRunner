@@ -11,6 +11,9 @@ export interface ReportPaths {
   testCaseDesignMd?: string;
   testCaseDesignJson?: string;
   testCaseDesignCsv?: string;
+  testSpecJson?: string;
+  testSpecMd?: string;
+  testSpecCsv?: string;
   functionSignatureJson?: string;
   globalAccessJson?: string;
   callReportJson?: string;
@@ -38,6 +41,9 @@ export function resolveReportPaths(workspace: string): ReportPaths {
     testCaseDesignMd: dialect.join(reports, 'test_case_design.md'),
     testCaseDesignJson: dialect.join(reports, 'test_case_design.json'),
     testCaseDesignCsv: dialect.join(reports, 'test_case_design.csv'),
+    testSpecJson: dialect.join(reports, 'test_spec.json'),
+    testSpecMd: dialect.join(reports, 'test_spec.md'),
+    testSpecCsv: dialect.join(reports, 'test_spec.csv'),
     functionSignatureJson: dialect.join(reports, 'function_signature.json'),
     globalAccessJson: dialect.join(reports, 'global_access.json'),
     callReportJson: dialect.join(reports, 'call_report.json'),
