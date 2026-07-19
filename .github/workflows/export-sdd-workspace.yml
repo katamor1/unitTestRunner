@@ -12,10 +12,26 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: vscode/extension/package-lock.json
+      - name: Install VS Code dependencies
+        working-directory: vscode/extension
+        run: npm ci
       - name: Upload isolated workspace
         uses: actions/upload-artifact@v4
         with:
           name: sdd-workspace-${{ github.event.pull_request.head.sha || github.sha }}
           path: .
+          include-hidden-files: true
+          retention-days: 1
+      - name: Upload Node dependencies
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdd-node-modules-${{ github.event.pull_request.head.sha || github.sha }}
+          path: vscode/extension/node_modules
           include-hidden-files: true
           retention-days: 1
