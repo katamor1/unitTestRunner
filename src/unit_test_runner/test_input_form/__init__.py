@@ -1,4 +1,5 @@
 from .field_catalog import (
+    ALL_EDITABLE_CONTROL_NAMES,
     FIELD_RULES,
     ControlRule,
     FieldRule,
@@ -7,18 +8,9 @@ from .field_catalog import (
     label_for_parent,
     required_for_confirmation,
 )
-from .field_locator import (
-    CASE_COLLECTIONS,
-    LocatedFormItem,
-    canonical_bytes,
-    digest,
-    locate_form_items,
-)
 from .models import (
     FORM_ERROR_CODES,
     FORM_SCHEMA_VERSION,
-    MAX_CHANGED_LEAVES,
-    MAX_CHANGES,
     FormCase,
     FormControl,
     FormItem,
@@ -30,32 +22,46 @@ from .models import (
     TestInputFormError,
     parse_test_input_change_request,
 )
+from .field_locator import (
+    CASE_LOCATIONS,
+    LocatedFormItem,
+    canonical_bytes,
+    digest,
+    locate_form_items,
+)
+from .service import (
+    CurrentFormSnapshot,
+    build_test_input_form,
+    load_current_form_snapshot,
+)
 
 __all__ = [
-    "CASE_COLLECTIONS",
-    "LocatedFormItem",
-    "canonical_bytes",
-    "digest",
-    "locate_form_items",
+    "ALL_EDITABLE_CONTROL_NAMES",
+    "CASE_LOCATIONS",
     "FIELD_RULES",
     "FORM_ERROR_CODES",
     "FORM_SCHEMA_VERSION",
-    "MAX_CHANGED_LEAVES",
-    "MAX_CHANGES",
     "ControlRule",
+    "CurrentFormSnapshot",
     "FieldRule",
     "FormCase",
     "FormControl",
     "FormItem",
     "FormSuggestion",
     "FormSummary",
+    "LocatedFormItem",
     "TestInputChange",
     "TestInputChangeRequest",
     "TestInputFormDocument",
     "TestInputFormError",
+    "build_test_input_form",
+    "canonical_bytes",
+    "digest",
     "editable_control_names",
     "execution_value_required",
     "label_for_parent",
+    "load_current_form_snapshot",
+    "locate_form_items",
     "parse_test_input_change_request",
     "required_for_confirmation",
 ]

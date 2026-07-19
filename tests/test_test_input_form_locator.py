@@ -9,205 +9,227 @@ from unit_test_runner.test_input_form.field_locator import (
     digest,
     locate_form_items,
 )
-from unit_test_runner.test_spec import TestSpec
-from tests.spec_support import copied_payload
+
+
+def case(case_id: str = "TC_Control_Update_001") -> dict:
+    return {
+        "test_case_id": case_id,
+        "input_assignments": [
+            {
+                "target_kind": "parameter",
+                "target_name": "mode",
+                "source_candidate_id": "CAND_MODE",
+                "value_expression": "TBD_VALID_VALUE",
+                "review_required": True,
+            },
+            {
+                "target_kind": "parameter",
+                "target_name": "flags",
+                "source_candidate_id": "CAND_FLAGS",
+                "value_expression": "0",
+                "review_required": False,
+            },
+        ],
+        "state_setups": [
+            {
+                "scope": "global",
+                "variable_name": "g_state",
+                "source_candidate_id": "CAND_STATE",
+                "value_expression": "STATE_IDLE",
+                "setup_method_hint": "direct assignment",
+                "review_required": True,
+            }
+        ],
+        "stub_setups": [
+            {
+                "stub_name": "ReadSensor",
+                "setup_kind": "return_value",
+                "related_call_id": "CALL_SENSOR",
+                "source_candidate_id": "CAND_SENSOR",
+                "value_expression": "SENSOR_OK",
+                "call_behavior": None,
+                "review_required": True,
+            }
+        ],
+        "expected_observations": [
+            {
+                "observation_kind": "return_value",
+                "target_name": "return",
+                "source": "coverage_design",
+                "expected_expression": "OK",
+                "note": None,
+                "review_required": True,
+            }
+        ],
+        "preconditions": [
+            {
+                "source": "build_context",
+                "description": "VC6 target configuration is selected.",
+                "review_required": True,
+            }
+        ],
+        "execution_steps": [
+            {
+                "order": 1,
+                "action": "setup_state",
+                "detail": "Apply fixtures.",
+                "review_required": True,
+            }
+        ],
+        "dependency_overrides": [
+            {
+                "callee": "ReadSensor",
+                "mode": "inherit",
+                "rationale": "",
+                "review_required": True,
+            }
+        ],
+        "coverage_links": [{"coverage_id": "cov-1"}],
+    }
+
+
+def spec(*, executable: list[dict] | None = None, candidates: list[dict] | None = None) -> dict:
+    return {
+        "test_cases": executable or [],
+        "additional_case_candidates": candidates or [],
+    }
 
 
 class TestInputFormLocatorTests(unittest.TestCase):
-    def make_spec(self, case: dict, *, candidate: bool = False) -> TestSpec:
-        payload = copied_payload()
-        data = payload["data"]
-        data["test_cases"] = [] if candidate else [copy.deepcopy(case)]
-        data["additional_case_candidates"] = [copy.deepcopy(case)] if candidate else []
-        return TestSpec.from_payload(payload, validate=False)
+    def test_item_id_survives_case_and_item_reordering_and_case_location_change(self):
+        original_case = case()
+        original = locate_form_items(spec(candidates=[original_case]))
+        original_mode = next(item for item in original if item.parent.get("target_name") == "mode")
 
-    def full_case(self) -> dict:
-        return {
-            "test_case_id": "TC_Control_Update_001",
-            "title": "locator fixture",
-            "target_function": "Control_Update",
-            "purpose": "exercise semantic locators",
-            "priority": "high",
-            "case_kind": "branch",
-            "preconditions": [
-                {
-                    "description": "VC6 target selected",
-                    "source": "build_context",
-                    "review_required": True,
-                }
-            ],
-            "input_assignments": [
-                {
-                    "target_kind": "parameter",
-                    "target_name": "mode",
-                    "source_candidate_id": "CAND_MODE_AUTO",
-                    "value_expression": "TBD_VALID_VALUE",
-                    "review_required": True,
-                },
-                {
-                    "target_kind": "parameter",
-                    "target_name": "limit",
-                    "source_candidate_id": "CAND_LIMIT_0",
-                    "value_expression": "0",
-                    "review_required": False,
-                },
-            ],
-            "state_setups": [
-                {
-                    "scope": "global",
-                    "variable_name": "g_state",
-                    "source_candidate_id": "CAND_STATE_IDLE",
-                    "value_expression": "STATE_IDLE",
-                    "setup_method_hint": "direct assignment",
-                    "review_required": True,
-                }
-            ],
-            "stub_setups": [
-                {
-                    "stub_name": "ReadSensor",
-                    "setup_kind": "return_value",
-                    "related_call_id": "CALL_READ_SENSOR",
-                    "source_candidate_id": "CAND_SENSOR_OK",
-                    "value_expression": "SENSOR_OK",
-                    "call_behavior": "return once",
-                    "review_required": True,
-                }
-            ],
-            "dependency_overrides": [
-                {
-                    "callee": "ReadSensor",
-                    "mode": "inherit",
-                    "rationale": "",
-                    "review_required": True,
-                }
-            ],
-            "execution_steps": [
-                {
-                    "order": 1,
-                    "action": "call_function",
-                    "detail": "Call Control_Update",
-                    "review_required": True,
-                }
-            ],
-            "expected_observations": [
-                {
-                    "observation_kind": "return_value",
-                    "target_name": "return",
-                    "source": "coverage_design",
-                    "expected_expression": "OK",
-                    "note": "",
-                    "review_required": True,
-                }
-            ],
-            "coverage_links": [{"coverage_id": "cov-normal"}],
-        }
-
-    def by_identity(self, spec: TestSpec) -> dict[tuple[str, tuple[tuple[str, object], ...]], object]:
-        result = {}
-        for item in locate_form_items(spec):
-            identity = tuple(sorted(item.locator["identity"].items()))
-            result[(item.collection, identity)] = item
-        return result
-
-    def test_item_ids_survive_case_and_item_reordering_and_case_location_move(self):
-        case = self.full_case()
-        first = self.by_identity(self.make_spec(case))
-
-        reordered = copy.deepcopy(case)
-        reordered["input_assignments"].reverse()
-        reordered["preconditions"].reverse()
-        second = self.by_identity(self.make_spec(reordered))
-        candidate = self.by_identity(self.make_spec(reordered, candidate=True))
-
-        self.assertEqual(set(first), set(second))
-        self.assertEqual(set(first), set(candidate))
-        for key in first:
-            with self.subTest(key=key):
-                self.assertEqual(first[key].item_id, second[key].item_id)
-                self.assertEqual(first[key].item_id, candidate[key].item_id)
-                self.assertEqual("test_cases", first[key].case_location)
-                self.assertEqual("additional_case_candidates", candidate[key].case_location)
-
-    def test_locator_uses_exact_catalog_identity_fields_and_excludes_case_location(self):
-        case = self.full_case()
-        items = locate_form_items(self.make_spec(case))
-
-        expected_fields = {
-            "input_assignments": ("target_kind", "target_name", "source_candidate_id"),
-            "state_setups": ("scope", "variable_name", "source_candidate_id"),
-            "stub_setups": ("stub_name", "setup_kind", "related_call_id", "source_candidate_id"),
-            "expected_observations": ("observation_kind", "target_name", "source"),
-            "dependency_overrides": ("callee",),
-            "preconditions": ("source",),
-            "execution_steps": ("order", "action"),
-        }
-        self.assertEqual(expected_fields, {name: rule.locator_fields for name, rule in FIELD_RULES.items()})
-
-        for item in items:
-            with self.subTest(collection=item.collection, item_id=item.item_id):
-                self.assertEqual(
-                    set(expected_fields[item.collection]),
-                    set(item.locator["identity"]),
-                )
-                self.assertEqual(case["test_case_id"], item.locator["case_id"])
-                self.assertEqual(item.collection, item.locator["collection"])
-                self.assertEqual(FIELD_RULES[item.collection].kind, item.locator["kind"])
-                self.assertNotIn("case_location", item.locator)
-                self.assertNotIn("case_index", item.locator)
-                self.assertNotIn("item_index", item.locator)
-                self.assertEqual("item-" + digest(item.locator), item.item_id)
-
-    def test_duplicate_semantic_locators_are_ambiguous_and_never_made_unique_by_index(self):
-        case = self.full_case()
-        duplicate = copy.deepcopy(case["input_assignments"][0])
-        duplicate["value_expression"] = "MODE_MANUAL"
-        case["input_assignments"].append(duplicate)
-
-        matching = [
+        reordered_case = copy.deepcopy(original_case)
+        reordered_case["input_assignments"].reverse()
+        reordered = locate_form_items(
+            spec(
+                executable=[case("TC_Unrelated")],
+                candidates=[reordered_case],
+            )
+        )
+        reordered_mode = next(
             item
-            for item in locate_form_items(self.make_spec(case))
+            for item in reordered
+            if item.case_id == original_mode.case_id
+            and item.parent.get("target_name") == "mode"
+        )
+
+        moved = locate_form_items(spec(executable=[copy.deepcopy(reordered_case)]))
+        moved_mode = next(item for item in moved if item.parent.get("target_name") == "mode")
+
+        self.assertEqual(original_mode.item_id, reordered_mode.item_id)
+        self.assertEqual(original_mode.item_id, moved_mode.item_id)
+        self.assertEqual("additional_case_candidates", original_mode.case_location)
+        self.assertEqual("test_cases", moved_mode.case_location)
+        self.assertNotIn("case_location", original_mode.locator)
+        self.assertNotIn("case_index", original_mode.locator)
+        self.assertNotIn("item_index", original_mode.locator)
+
+    def test_locator_uses_the_exact_semantic_identity_fields_for_every_rule(self):
+        located = locate_form_items(spec(executable=[case()]))
+        by_collection = {}
+        for item in located:
+            by_collection.setdefault(item.collection, []).append(item)
+
+        expected = {
+            "input_assignments": {
+                "target_kind": "parameter",
+                "target_name": "mode",
+                "source_candidate_id": "CAND_MODE",
+            },
+            "state_setups": {
+                "scope": "global",
+                "variable_name": "g_state",
+                "source_candidate_id": "CAND_STATE",
+            },
+            "stub_setups": {
+                "stub_name": "ReadSensor",
+                "setup_kind": "return_value",
+                "related_call_id": "CALL_SENSOR",
+                "source_candidate_id": "CAND_SENSOR",
+            },
+            "expected_observations": {
+                "observation_kind": "return_value",
+                "target_name": "return",
+                "source": "coverage_design",
+            },
+            "dependency_overrides": {"callee": "ReadSensor"},
+            "preconditions": {"source": "build_context"},
+            "execution_steps": {"order": 1, "action": "setup_state"},
+        }
+
+        for collection, identity in expected.items():
+            with self.subTest(collection=collection):
+                selected = by_collection[collection][0]
+                self.assertEqual(identity, selected.locator["identity"])
+                self.assertEqual(collection, selected.locator["collection"])
+                self.assertEqual(FIELD_RULES[collection].kind, selected.locator["kind"])
+                self.assertEqual("TC_Control_Update_001", selected.locator["case_id"])
+
+    def test_duplicate_semantic_locators_are_ambiguous_and_never_writable(self):
+        duplicate_case = case()
+        duplicate_case["input_assignments"].append(
+            copy.deepcopy(duplicate_case["input_assignments"][0])
+        )
+
+        located = locate_form_items(spec(executable=[duplicate_case]))
+        duplicates = [
+            item
+            for item in located
             if item.collection == "input_assignments"
-            and item.locator["identity"]["target_name"] == "mode"
+            and item.parent.get("target_name") == "mode"
         ]
 
-        self.assertEqual(2, len(matching))
-        self.assertEqual(1, len({item.item_id for item in matching}))
-        self.assertTrue(all(item.ambiguous for item in matching))
-        self.assertTrue(all(not item.editable for item in matching))
-        self.assertEqual({0, 2}, {item.item_index for item in matching})
+        self.assertEqual(2, len(duplicates))
+        self.assertEqual(1, len({item.item_id for item in duplicates}))
+        self.assertTrue(all(item.ambiguous for item in duplicates))
+        self.assertTrue(all(not item.editable for item in duplicates))
+        self.assertEqual([0, 2], [item.item_index for item in duplicates])
 
-    def test_subject_fingerprint_tracks_parent_meaning_not_sibling_order(self):
-        case = self.full_case()
-        original = self.by_identity(self.make_spec(case))
-        mode_key = next(
-            key
-            for key in original
-            if key[0] == "input_assignments" and dict(key[1])["target_name"] == "mode"
+    def test_parent_change_updates_fingerprint_without_changing_item_identity(self):
+        first_case = case()
+        first = locate_form_items(spec(executable=[first_case]))
+        first_mode = next(item for item in first if item.parent.get("target_name") == "mode")
+
+        changed_case = copy.deepcopy(first_case)
+        changed_case["input_assignments"][0]["value_expression"] = "MODE_AUTO"
+        changed_case["input_assignments"][0]["review_required"] = False
+        changed = locate_form_items(spec(executable=[changed_case]))
+        changed_mode = next(item for item in changed if item.parent.get("target_name") == "mode")
+
+        self.assertEqual(first_mode.item_id, changed_mode.item_id)
+        self.assertNotEqual(first_mode.subject_fingerprint, changed_mode.subject_fingerprint)
+
+        reordered_case = copy.deepcopy(first_case)
+        reordered_case["input_assignments"].reverse()
+        reordered = locate_form_items(spec(executable=[reordered_case]))
+        reordered_mode = next(item for item in reordered if item.parent.get("target_name") == "mode")
+        self.assertEqual(first_mode.subject_fingerprint, reordered_mode.subject_fingerprint)
+
+    def test_scans_both_case_collections_and_preserves_internal_coordinates(self):
+        executable = case("TC_Executable")
+        candidate = case("TC_Candidate")
+        located = locate_form_items(spec(executable=[executable], candidates=[candidate]))
+
+        self.assertTrue(any(item.case_id == "TC_Executable" for item in located))
+        self.assertTrue(any(item.case_id == "TC_Candidate" for item in located))
+        executable_items = [item for item in located if item.case_id == "TC_Executable"]
+        candidate_items = [item for item in located if item.case_id == "TC_Candidate"]
+        self.assertTrue(all(item.case_location == "test_cases" for item in executable_items))
+        self.assertTrue(
+            all(item.case_location == "additional_case_candidates" for item in candidate_items)
         )
+        self.assertTrue(all(item.case_index == 0 for item in executable_items + candidate_items))
 
-        reordered = copy.deepcopy(case)
-        reordered["input_assignments"].reverse()
-        reordered_items = self.by_identity(self.make_spec(reordered))
-        self.assertEqual(
-            original[mode_key].subject_fingerprint,
-            reordered_items[mode_key].subject_fingerprint,
-        )
-
-        changed = copy.deepcopy(case)
-        changed["input_assignments"][0]["value_expression"] = "MODE_AUTO"
-        changed_items = self.by_identity(self.make_spec(changed))
-        self.assertNotEqual(
-            original[mode_key].subject_fingerprint,
-            changed_items[mode_key].subject_fingerprint,
-        )
-        self.assertEqual(original[mode_key].item_id, changed_items[mode_key].item_id)
-
-    def test_canonical_hashing_ignores_mapping_key_order(self):
-        left = {"case_id": "TC", "identity": {"b": 2, "a": 1}}
-        right = {"identity": {"a": 1, "b": 2}, "case_id": "TC"}
+    def test_canonical_hashing_is_key_order_independent_and_unicode_preserving(self):
+        left = {"b": "日本語", "a": 1}
+        right = {"a": 1, "b": "日本語"}
 
         self.assertEqual(canonical_bytes(left), canonical_bytes(right))
         self.assertEqual(digest(left), digest(right))
+        self.assertIn("日本語".encode("utf-8"), canonical_bytes(left))
 
 
 if __name__ == "__main__":
