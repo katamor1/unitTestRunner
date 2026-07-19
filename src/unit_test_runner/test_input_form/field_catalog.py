@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Callable, Mapping, Any
+from typing import Any, Callable, Mapping
 
 Parent = Mapping[str, Any]
 Requirement = bool | Callable[[Parent], bool]
