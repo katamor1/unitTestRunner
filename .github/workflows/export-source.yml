@@ -1,0 +1,38 @@
+name: Export source workspace
+
+on:
+  push:
+    branches:
+      - codex/execute-hardening-task38
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out full repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Archive working tree and Git metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -czf /tmp/unitTestRunner-repo.tar.gz \
+            --exclude='./.git/index.lock' \
+            --exclude='./.git/shallow.lock' \
+            .
+          sha256sum /tmp/unitTestRunner-repo.tar.gz
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-runner-source-${{ github.sha }}
+          path: /tmp/unitTestRunner-repo.tar.gz
+          if-no-files-found: error
+          retention-days: 1
