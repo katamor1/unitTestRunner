@@ -7,6 +7,13 @@ from .field_catalog import (
     label_for_parent,
     required_for_confirmation,
 )
+from .field_locator import (
+    CASE_COLLECTIONS,
+    LocatedFormItem,
+    canonical_bytes,
+    digest,
+    locate_form_items,
+)
 from .models import (
     FORM_ERROR_CODES,
     FORM_SCHEMA_VERSION,
@@ -25,6 +32,11 @@ from .models import (
 )
 
 __all__ = [
+    "CASE_COLLECTIONS",
+    "LocatedFormItem",
+    "canonical_bytes",
+    "digest",
+    "locate_form_items",
     "FIELD_RULES",
     "FORM_ERROR_CODES",
     "FORM_SCHEMA_VERSION",
