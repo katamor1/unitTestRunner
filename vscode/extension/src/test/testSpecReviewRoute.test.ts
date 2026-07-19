@@ -17,7 +17,9 @@ describe('canonical TestSpec review route', () => {
         .map((action) => action.reportKey),
       ['testSpecCsv', 'testSpecMd', 'testSpecJson'],
     );
-    assert.doesNotMatch(`${review.purpose}\n${review.requiredAction}`, /test_case_design\.json/);
+    const copy = `${review.purpose}\n${review.requiredAction}`;
+    assert.match(copy, /test_spec\.json/);
+    assert.doesNotMatch(copy, /test_case_design\.json/);
 
     const testSpecJson = 'D:\\unit-test-output\\Control_Update\\reports\\test_spec.json';
     const availability = reportAvailabilityFromPaths(
