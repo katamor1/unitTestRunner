@@ -25,8 +25,12 @@ jobs:
         id: staged
         shell: bash
         run: |
+          has_payload=false
+          has_patch=false
+          compgen -G '.sdd/payload.tar.gz.b64.*' > /dev/null && has_payload=true
+          { [[ -f .sdd/next.patch ]] || compgen -G '.sdd/next.patch.b64.*' > /dev/null; } && has_patch=true
           if [[ -f .sdd/ready && -f .sdd/verify.sh && -f .sdd/commit-message.txt ]] && \
-             { [[ -f .sdd/next.patch ]] || compgen -G '.sdd/next.patch.b64.*' > /dev/null; }; then
+             { [[ "$has_payload" == true ]] || [[ "$has_patch" == true ]]; }; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
@@ -59,15 +63,22 @@ jobs:
           set -o pipefail
           mkdir -p .sdd/diagnostics
           {
-            patch_path=.sdd/next.patch
-            if [[ ! -f "$patch_path" ]]; then
-              cat .sdd/next.patch.b64.* | base64 --decode > /tmp/next.patch
-              patch_path=/tmp/next.patch
+            if compgen -G '.sdd/payload.tar.gz.b64.*' > /dev/null; then
+              cat .sdd/payload.tar.gz.b64.* | base64 --decode > /tmp/payload.tar.gz
+              cp /tmp/payload.tar.gz .sdd/diagnostics/payload.tar.gz
+              wc -c /tmp/payload.tar.gz
+              tar -xzf /tmp/payload.tar.gz -C .
+            else
+              patch_path=.sdd/next.patch
+              if [[ ! -f "$patch_path" ]]; then
+                cat .sdd/next.patch.b64.* | base64 --decode > /tmp/next.patch
+                patch_path=/tmp/next.patch
+              fi
+              cp "$patch_path" .sdd/diagnostics/next.patch
+              wc -c "$patch_path"
+              git apply --check "$patch_path"
+              git apply "$patch_path"
             fi
-            cp "$patch_path" .sdd/diagnostics/next.patch
-            wc -c "$patch_path"
-            git apply --check "$patch_path"
-            git apply "$patch_path"
             bash .sdd/verify.sh
           } 2>&1 | tee .sdd/diagnostics/apply.log
       - name: Upload apply diagnostics
@@ -86,7 +97,7 @@ jobs:
         run: |
           message="$(cat .sdd/commit-message.txt)"
           rm -rf .sdd/diagnostics
-          rm -f .sdd/ready .sdd/next.patch .sdd/next.patch.b64.* .sdd/verify.sh .sdd/commit-message.txt .sdd/task*-reviewed
+          rm -f .sdd/ready .sdd/payload.tar.gz.b64.* .sdd/next.patch .sdd/next.patch.b64.* .sdd/verify.sh .sdd/commit-message.txt .sdd/task*-reviewed
           rmdir .sdd 2>/dev/null || true
           git config user.name "OpenAI"
           git config user.email "noreply@openai.com"
