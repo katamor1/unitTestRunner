@@ -64,7 +64,20 @@ jobs:
           mkdir -p .sdd/diagnostics
           {
             if compgen -G '.sdd/payload.tar.gz.b64.*' > /dev/null; then
-              cat .sdd/payload.tar.gz.b64.* | base64 --decode > /tmp/payload.tar.gz
+              cp .sdd/payload.tar.gz.b64.* .sdd/diagnostics/
+              cat .sdd/payload.tar.gz.b64.* > .sdd/diagnostics/concatenated.b64
+              python - <<'PY'
+          import base64
+          from pathlib import Path
+
+          path = Path('.sdd/diagnostics/concatenated.b64')
+          data = path.read_bytes()
+          allowed = b'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=\r\n\t '
+          invalid = [(index, byte) for index, byte in enumerate(data) if byte not in allowed]
+          print(f'encoded_bytes={len(data)} invalid_count={len(invalid)} invalid_head={invalid[:20]}')
+          decoded = base64.b64decode(data, validate=True)
+          Path('/tmp/payload.tar.gz').write_bytes(decoded)
+          PY
               cp /tmp/payload.tar.gz .sdd/diagnostics/payload.tar.gz
               wc -c /tmp/payload.tar.gz
               tar -xzf /tmp/payload.tar.gz -C .
