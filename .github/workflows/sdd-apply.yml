@@ -1,0 +1,76 @@
+name: SDD Apply Verified Task
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: sdd-apply-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Detect staged task
+        id: staged
+        shell: bash
+        run: |
+          if [[ -f .sdd/next.patch && -f .sdd/verify.sh && -f .sdd/commit-message.txt ]]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Set up Python
+        if: steps.staged.outputs.present == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Set up Node
+        if: steps.staged.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: vscode/extension/package-lock.json
+      - name: Install dependencies
+        if: steps.staged.outputs.present == 'true'
+        shell: bash
+        run: |
+          python -m pip install "setuptools>=61" wheel
+          python -m pip install -e ".[test]"
+          pushd vscode/extension
+          npm ci
+          popd
+      - name: Apply and verify staged task
+        if: steps.staged.outputs.present == 'true'
+        shell: bash
+        run: |
+          git apply --check .sdd/next.patch
+          git apply .sdd/next.patch
+          bash .sdd/verify.sh
+      - name: Commit verified task
+        if: steps.staged.outputs.present == 'true'
+        shell: bash
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          message="$(cat .sdd/commit-message.txt)"
+          rm -f .sdd/next.patch .sdd/verify.sh .sdd/commit-message.txt .sdd/task1-reviewed
+          rmdir .sdd 2>/dev/null || true
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "$message"
+          git push origin "HEAD:$BRANCH"
+          gh workflow run ci.yml --ref "$BRANCH"
