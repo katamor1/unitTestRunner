@@ -9,6 +9,7 @@ def build_input_assignments(function_signature: dict, selected_candidates: list[
     source_candidates = [candidate for candidate in selected_candidates if candidate.get("_candidate_collection", "input_candidates") == "input_candidates"]
     if not source_candidates:
         source_candidates = fallback_candidates
+    source_candidates = _first_candidate_per_target(source_candidates)
     for candidate in source_candidates:
         assignments.append(
             TestInputAssignment(
@@ -59,3 +60,26 @@ def build_input_assignments(function_signature: dict, selected_candidates: list[
             )
         )
     return assignments, candidate_ids
+
+
+def _first_candidate_per_target(candidates: list[dict]) -> list[dict]:
+    result: list[dict] = []
+    positions: dict[tuple[str, str], int] = {}
+    for candidate in candidates:
+        key = (
+            str(candidate.get("target_kind") or "unknown"),
+            str(candidate.get("target_name") or "unknown"),
+        )
+        position = positions.get(key)
+        if position is None:
+            positions[key] = len(result)
+            result.append(candidate)
+            continue
+        current = result[position]
+        if _candidate_preference(candidate) < _candidate_preference(current):
+            result[position] = candidate
+    return result
+
+
+def _candidate_preference(candidate: dict) -> int:
+    return 0 if candidate.get("value_kind") == "boundary_at" else 1
