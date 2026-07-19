@@ -66,7 +66,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           message="$(cat .sdd/commit-message.txt)"
-          rm -f .sdd/next.patch .sdd/verify.sh .sdd/commit-message.txt .sdd/task1-reviewed
+          rm -f .sdd/next.patch .sdd/verify.sh .sdd/commit-message.txt .sdd/task*-reviewed
           rmdir .sdd 2>/dev/null || true
           git config user.name "OpenAI"
           git config user.email "noreply@openai.com"
