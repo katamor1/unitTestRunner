@@ -4,75 +4,69 @@
 
 **Goal:** Add a dedicated VS Code editor that lets users enter and confirm unresolved test inputs, state values, stub settings, expected values, and other review-required fields without directly editing canonical JSON.
 
-**Architecture:** Keep the VS Code extension as a thin adapter. A new Python `test_input_form` service reads and validates `reports/test_spec.json`, builds a strict GUI form model, applies revision- and fingerprint-guarded changes, and promotes or demotes test cases safely. The TypeScript side owns rendering, in-session drafts, conflict presentation, temporary request files, and asynchronous Workflow summary caching; it never writes canonical JSON directly.
+**Architecture:** Keep the VS Code extension as a thin adapter. A new Python `test_input_form` service reads and validates `reports/test_spec.json`, builds a strict GUI form model, applies revision- and fingerprint-guarded changes, and safely promotes or demotes cases. TypeScript owns rendering, in-session drafts, conflict presentation, temporary request files, and asynchronous Workflow summary caching; it never writes canonical JSON directly.
 
-**Tech Stack:** Python 3.12, `dataclasses`, `pathlib`, `hashlib`, `json`, existing `jsonschema` contracts, `unittest`; TypeScript 5.4, VS Code Webview API 1.85, Node.js 20 built-ins, `node:test`.
+**Tech Stack:** Python 3.12, `dataclasses`, `pathlib`, `hashlib`, `json`, existing TestSpec contracts, `unittest`; TypeScript 5.4, VS Code Webview API 1.85, Node.js 20 built-ins, `node:test`.
 
 ## Global Constraints
 
-- Treat `reports/test_spec.json` as the only editable source of truth. Do not import edits from `test_spec.md`, `test_spec.csv`, or legacy `test_case_design.json`.
-- Do not change canonical `test_spec` schema version `1.1.0` or add GUI-only fields to it.
-- Keep formal review authority unchanged: never edit `review_item_ids`, review decision ledgers, reviewer identity, decision resolution, readiness, provenance, source identity, function identity, schema version, or case identity.
-- The VS Code extension must not parse domain semantics or write canonical JSON. Validation, revision checks, fingerprint checks, confirmation state, promotion, demotion, and persistence belong to Python.
-- Do not run CLI commands from `renderWorkflowHtml()` or any other synchronous render path. Workflow summaries are fetched asynchronously and cached in `workspaceState`.
-- Use exact, bounded form contracts: input file at most 4 MiB, at most 1,000 changed items, at most 16 changed leaves per item, C expressions at most 4,096 Unicode code points, multiline text at most 16,384 Unicode code points.
-- Preserve the existing atomic canonical save path through `save_test_spec_snapshot()`. Validate all changes before the first canonical write.
-- If canonical JSON saves but Markdown/CSV view export fails, keep the new JSON revision, return a warning with `views_written: false`, and never roll back the canonical file.
-- Maintain VC6/C90 behavior. C expressions are stored as text and are never evaluated inside VS Code or Python form validation.
-- Use TDD for every task: add a focused failing test, run it and inspect the intended failure, add the minimum implementation, rerun the focused test, then commit.
-- Literal values beginning with `TBD`, `TODO`, `UNKNOWN`, or `UNRESOLVED` in this plan are domain placeholders under test, not unfinished implementation-plan sections.
+- `reports/test_spec.json` is the only editable source of truth. Do not import edits from generated Markdown/CSV or legacy `test_case_design.json`.
+- Keep canonical TestSpec schema version `1.1.0`; do not add GUI-only fields to it.
+- Never edit case/spec identity, source/function identity, provenance, `coverage_links`, `candidate_links`, `review_item_ids`, review-decision ledgers, reviewer identity, review resolution, or formal readiness.
+- The VS Code extension must not implement domain validation, confirmation semantics, promotion/demotion, or canonical persistence.
+- Never invoke the CLI from `renderWorkflowHtml()` or another synchronous render path. Fetch summaries asynchronously and cache them in `workspaceState`.
+- Validate every submitted item before the first canonical write. Persist through `save_test_spec_snapshot()` exactly once per successful save.
+- If canonical JSON saves but Markdown/CSV export fails, retain the new canonical revision and return `views_written: false`; do not roll back JSON.
+- Bound all inputs: request file ≤ 4 MiB, changes ≤ 1,000, changed leaves per item ≤ 16, C expression ≤ 4,096 Unicode code points, multiline text ≤ 16,384 Unicode code points.
+- C expressions are text. Neither Python nor VS Code evaluates them.
+- Use TDD task by task: add a focused failing test, run it and inspect the intended failure, implement the smallest complete behavior, rerun, then commit.
+- Literal prefixes `TBD`, `TODO`, `UNKNOWN`, and `UNRESOLVED` below are domain values under test, not unfinished plan sections.
 
 ## File Structure Map
 
-### Python core
+### Python
 
-- Create `src/unit_test_runner/test_input_form/__init__.py` — public query/apply interfaces and typed errors.
-- Create `src/unit_test_runner/test_input_form/models.py` — strict form-output and change-input data models.
-- Create `src/unit_test_runner/test_input_form/field_catalog.py` — allowlisted collections, editable leaves, control kinds, required rules, and locator attributes.
-- Create `src/unit_test_runner/test_input_form/field_locator.py` — semantic locators, opaque item IDs, subject fingerprints, and ambiguity detection.
-- Create `src/unit_test_runner/test_input_form/validation.py` — normalization, unresolved-value detection, hard validation, and C-expression warnings.
-- Create `src/unit_test_runner/test_input_form/suggestions.py` — evidence-backed candidate values from analysis artifacts and canonical siblings.
-- Create `src/unit_test_runner/test_input_form/service.py` — current-snapshot loading, form construction, summary calculation, change application, case reclassification, save, and view export.
-- Modify `src/unit_test_runner/cli/parser.py` — add `get-test-input-form` and `apply-test-input-form`.
-- Modify `src/unit_test_runner/cli/commands.py` — dispatch and handlers for both commands.
-- Modify `src/unit_test_runner/cli/errors.py` and `src/unit_test_runner/cli/main.py` — preserve structured form/conflict error codes in the v1 CLI envelope.
-- Modify `tests/spec_support.py` — reusable canonical workspaces with unresolved executable cases and intentional additional candidates.
-- Create focused Python test modules named in the tasks below.
+- Create `src/unit_test_runner/test_input_form/__init__.py` — public query/apply API and typed errors.
+- Create `src/unit_test_runner/test_input_form/models.py` — strict form and change-request contracts.
+- Create `src/unit_test_runner/test_input_form/field_catalog.py` — editable collection/leaf allowlist and dynamic required/blocking rules.
+- Create `src/unit_test_runner/test_input_form/field_locator.py` — semantic locators, opaque IDs, fingerprints, and ambiguity detection.
+- Create `src/unit_test_runner/test_input_form/validation.py` — normalization, unresolved detection, hard errors, and advisory C-expression warnings.
+- Create `src/unit_test_runner/test_input_form/suggestions.py` — evidence-backed values from current artifacts and canonical siblings.
+- Create `src/unit_test_runner/test_input_form/service.py` — strict snapshot load, form query, apply, reclassification, save, and view export.
+- Modify `src/unit_test_runner/cli/parser.py`, `commands.py`, `errors.py`, and `main.py` — two new CLI commands and structured error codes.
+- Modify `tests/spec_support.py`; create focused tests named in the tasks.
 
-### VS Code adapter
+### VS Code
 
-- Modify `vscode/extension/src/cli/commandBuilder.ts` — canonical consumer paths plus form query/apply invocations.
-- Modify `vscode/extension/src/reports/reportPathResolver.ts` — canonical `testSpecJson`, `testSpecMd`, and `testSpecCsv` paths.
-- Modify `vscode/extension/src/cli/cliEnvelope.ts` — map canonical TestSpec artifacts from v1 results.
-- Create `vscode/extension/src/testInputEditor/contracts.ts` — strict CLI details and Webview-message parsing.
-- Create `vscode/extension/src/testInputEditor/cliClient.ts` — CLI execution, typed failures, temporary request files, and cleanup.
-- Create `vscode/extension/src/testInputEditor/draftState.ts` — pure draft reducer and conflict merge rules.
-- Create `vscode/extension/src/testInputEditor/renderer.ts` — escaped, nonce-protected editor HTML.
-- Create `vscode/extension/src/testInputEditor/controller.ts` — testable save/discard/reload orchestration with injected ports.
-- Create `vscode/extension/src/testInputEditor/panel.ts` — thin VS Code Webview Panel wrapper and per-workspace singleton.
-- Create `vscode/extension/src/testInputEditor/summaryCache.ts` — summary cache model and refresh/invalidation helpers.
-- Modify `vscode/extension/src/workflow/workflowState.ts` and `workflowPanelBase.ts` — cached count, blocking emphasis, and editor action.
-- Modify `vscode/extension/src/extension.ts`, `commands/commandRegistry.ts`, and `package.json` — registration, activation, callbacks, and startup refresh.
-- Create focused TypeScript test modules named in the tasks below.
+- Modify `vscode/extension/src/cli/commandBuilder.ts` — canonical TestSpec consumers and form invocations.
+- Modify `vscode/extension/src/reports/reportPathResolver.ts`, `cli/cliEnvelope.ts`, and `cli/cliResultParser.ts` — canonical TestSpec paths.
+- Create `vscode/extension/src/testInputEditor/contracts.ts` — strict form/apply envelope and Webview-message parsing.
+- Create `vscode/extension/src/testInputEditor/cliClient.ts` — query/apply calls, typed errors, temporary request lifecycle.
+- Create `vscode/extension/src/testInputEditor/draftState.ts` — pure draft and conflict reducer.
+- Create `vscode/extension/src/testInputEditor/renderer.ts` — escaped nonce-protected HTML.
+- Create `vscode/extension/src/testInputEditor/controller.ts` — testable orchestration with injected ports.
+- Create `vscode/extension/src/testInputEditor/panel.ts` — thin VS Code wrapper and per-workspace singleton.
+- Create `vscode/extension/src/testInputEditor/summaryCache.ts` — asynchronous cache state and invalidation.
+- Modify Workflow, command registry, extension activation, manifest, and focused tests.
 
 ---
 
-### Task 1: Switch existing VS Code consumers to canonical TestSpec paths
+### Task 1: Switch existing VS Code consumers to canonical TestSpec
 
 **Files:**
 - Modify: `vscode/extension/src/cli/commandBuilder.ts`
 - Modify: `vscode/extension/src/reports/reportPathResolver.ts`
 - Modify: `vscode/extension/src/cli/cliEnvelope.ts`
+- Modify: `vscode/extension/src/cli/cliResultParser.ts`
 - Modify: `vscode/extension/src/test/adapter.test.ts`
 - Modify: `vscode/extension/src/test/cliEnvelope.test.ts`
 
 **Interfaces:**
-- `buildReanalyzeFunctionInvocation()` passes `--previous-test-spec <workspace>/reports/test_spec.json`.
-- `buildGenerateHarnessSkeletonInvocation()` passes `--test-spec <workspace>/reports/test_spec.json`.
-- `ReportPaths` exposes `testSpecJson`, `testSpecMd`, and `testSpecCsv` while retaining legacy view fields for compatibility.
-- V1 produced artifacts named `test_spec.json`, `test_spec.md`, and `test_spec.csv` resolve to canonical report keys.
+- Reanalysis uses `--previous-test-spec <workspace>/reports/test_spec.json`.
+- Harness generation uses `--test-spec <workspace>/reports/test_spec.json`.
+- `ReportPaths` exposes `testSpecJson`, `testSpecMd`, and `testSpecCsv`; legacy view fields remain for compatibility only.
 
-- [ ] **Step 1: Replace the legacy path expectations with failing canonical-path assertions**
+- [ ] **Step 1: Replace legacy expectations with failing canonical assertions**
 
 ```typescript
 assert.deepEqual(
@@ -90,16 +84,9 @@ assert.deepEqual(
 assert.equal(harness.args.includes('--test-case-design'), false);
 ```
 
-Add resolver and envelope assertions:
+Add resolver and v1 artifact assertions for all three canonical files.
 
-```typescript
-const reports = resolveReportPaths(target.outputWorkspace);
-assert.equal(reports.testSpecJson, path.join(target.outputWorkspace, 'reports', 'test_spec.json'));
-assert.equal(reports.testSpecMd, path.join(target.outputWorkspace, 'reports', 'test_spec.md'));
-assert.equal(reports.testSpecCsv, path.join(target.outputWorkspace, 'reports', 'test_spec.csv'));
-```
-
-- [ ] **Step 2: Run the focused adapter tests and verify they fail on the current legacy arguments**
+- [ ] **Step 2: Run the focused tests and verify the current legacy path fails**
 
 ```powershell
 Push-Location vscode\extension
@@ -108,23 +95,9 @@ node --test dist/test/adapter.test.js dist/test/cliEnvelope.test.js
 Pop-Location
 ```
 
-Expected: assertions report missing `--previous-test-spec`, missing `--test-spec`, or missing canonical report fields.
+- [ ] **Step 3: Implement the exact canonical arguments and mappings**
 
-- [ ] **Step 3: Change only the command arguments and canonical path mappings**
-
-Use these exact argument substitutions in `commandBuilder.ts`:
-
-```typescript
-'--previous-test-spec',
-path.join(reports, 'test_spec.json'),
-```
-
-```typescript
-'--test-spec',
-path.join(reports, 'test_spec.json'),
-```
-
-Add these conventional paths:
+In `commandBuilder.ts` replace only the legacy option/value pairs. In `reportPathResolver.ts` add:
 
 ```typescript
 testSpecJson: dialect.join(reports, 'test_spec.json'),
@@ -132,7 +105,7 @@ testSpecMd: dialect.join(reports, 'test_spec.md'),
 testSpecCsv: dialect.join(reports, 'test_spec.csv'),
 ```
 
-Add these filename mappings in `cliEnvelope.ts`:
+In `cliEnvelope.ts` add:
 
 ```typescript
 'test_spec.json': 'test_spec_json',
@@ -140,7 +113,13 @@ Add these filename mappings in `cliEnvelope.ts`:
 'test_spec.csv': 'test_spec_csv',
 ```
 
-Map those keys in `cliResultParser.ts` if its `reportsFromSource()` switch requires explicit fields.
+In `cliResultParser.ts` map those reported keys explicitly:
+
+```typescript
+testSpecJson: reportPath(reportSource.test_spec_json),
+testSpecMd: reportPath(reportSource.test_spec_md),
+testSpecCsv: reportPath(reportSource.test_spec_csv),
+```
 
 - [ ] **Step 4: Rerun the focused tests**
 
@@ -151,16 +130,16 @@ node --test dist/test/adapter.test.js dist/test/cliEnvelope.test.js
 Pop-Location
 ```
 
-Expected: both files pass and no assertion still references a legacy consumer argument.
+Expected: pass, with no normal-path legacy argument assertion.
 
-- [ ] **Step 5: Commit the canonical-path migration**
+- [ ] **Step 5: Commit**
 
 ```powershell
 git add vscode/extension/src/cli/commandBuilder.ts vscode/extension/src/reports/reportPathResolver.ts vscode/extension/src/cli/cliEnvelope.ts vscode/extension/src/cli/cliResultParser.ts vscode/extension/src/test/adapter.test.ts vscode/extension/src/test/cliEnvelope.test.ts
 git commit -m "refactor: use canonical test spec in vscode adapter"
 ```
 
-### Task 2: Define strict Python form contracts and the editable-field catalog
+### Task 2: Define strict Python form contracts and field catalog
 
 **Files:**
 - Create: `src/unit_test_runner/test_input_form/__init__.py`
@@ -169,14 +148,13 @@ git commit -m "refactor: use canonical test spec in vscode adapter"
 - Create: `tests/test_test_input_form_models.py`
 
 **Interfaces:**
-- `TestInputFormError(code: str, message: str)` carries a stable machine error code.
-- Immutable output models serialize to form schema version `1.0`.
-- `parse_test_input_change_request(value)` rejects missing, extra, mistyped, duplicate, or oversized data.
-- `FIELD_RULES` is the only authority for editable collections and leaves.
+- `TestInputFormError` carries stable `.code` and `.message`.
+- Output and input use transient schema version `1.0` with exact-key validation.
+- `FIELD_RULES` is the sole editable-field authority.
 
-- [ ] **Step 1: Write failing tests for strict change-request parsing**
+- [ ] **Step 1: Write failing strict-request tests**
 
-Cover a valid request, an unknown top-level field, a duplicate `item_id`, more than 1,000 changes, more than 16 leaves, a non-boolean `confirmed`, and an unsupported control leaf.
+Cover a valid request, extra/missing properties, wrong schema version, invalid hashes, duplicate IDs, >1,000 changes, >16 leaves, nonboolean `confirmed`, and invalid value types.
 
 ```python
 request = parse_test_input_change_request(
@@ -193,55 +171,39 @@ request = parse_test_input_change_request(
     }
 )
 self.assertEqual("MODE_AUTO", request.changes[0].values["value_expression"])
-
-with self.assertRaisesRegex(TestInputFormError, "unknown properties"):
-    parse_test_input_change_request(
-        {"schema_version": "1.0", "changes": [], "unexpected": True}
-    )
 ```
 
-- [ ] **Step 2: Write failing catalog tests for every approved collection and control**
+- [ ] **Step 2: Write failing allowlist tests**
 
-Assert the exact allowlist:
+Assert exact collections and leaves:
 
-```python
-self.assertEqual(
-    {
-        "input_assignments",
-        "state_setups",
-        "stub_setups",
-        "expected_observations",
-        "preconditions",
-        "execution_steps",
-        "dependency_overrides",
-    },
-    set(FIELD_RULES),
-)
-self.assertEqual(
-    ("value_expression", "setup_method_hint"),
-    tuple(control.name for control in FIELD_RULES["state_setups"].controls),
-)
+```text
+input_assignments: value_expression
+state_setups: value_expression, setup_method_hint
+stub_setups: value_expression, call_behavior
+expected_observations: expected_expression, note
+preconditions: description
+execution_steps: detail
+dependency_overrides: mode, rationale
 ```
 
 Also assert:
 
-- `dependency_overrides.mode` is enum `inherit|real|stub`.
-- `dependency_overrides.rationale` becomes required only for explicit `real` or `stub`.
-- `stub_setups.value_expression` is not execution-required for `call_count_observation` or `argument_capture`.
-- No rule exposes `review_item_ids`, `coverage_links`, `candidate_links`, identity, provenance, or warning evidence.
+- `mode` enum is exactly `inherit|real|stub`;
+- rationale is required only for explicit `real`/`stub`;
+- stub value is not execution-required for `call_count_observation` or `argument_capture`;
+- no identity, provenance, review authority, warning evidence, coverage, candidate, or call identity is editable.
 
-- [ ] **Step 3: Run the focused tests and verify import failures**
+- [ ] **Step 3: Run and confirm missing-package failure**
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path .\src).Path
 py -m unittest tests.test_test_input_form_models -v
 ```
 
-Expected: failure because `unit_test_runner.test_input_form` does not exist.
+- [ ] **Step 4: Implement immutable models**
 
-- [ ] **Step 4: Implement immutable models and strict parsers**
-
-Use these public shapes in `models.py`:
+Use these principal shapes and add exact `to_dict()` methods:
 
 ```python
 @dataclass(frozen=True)
@@ -309,92 +271,62 @@ class TestInputChangeRequest:
     schema_version: str = "1.0"
 ```
 
-`TestInputFormError` must expose `.code` and use codes from this finite set:
+Use only these form error codes:
 
 ```python
-FORM_ERROR_CODES = {
-    "test_input_form_invalid",
-    "test_input_revision_conflict",
-    "test_input_subject_conflict",
-    "test_input_validation",
-    "stale_test_spec",
-}
+FORM_ERROR_CODES = frozenset(
+    {
+        "test_input_form_invalid",
+        "test_input_revision_conflict",
+        "test_input_subject_conflict",
+        "test_input_validation",
+        "stale_test_spec",
+    }
+)
 ```
 
-- [ ] **Step 5: Implement the catalog as data plus small rule functions**
+- [ ] **Step 5: Implement catalog data and total rule functions**
 
-Use immutable rules:
+Define immutable `ControlRule` and `FieldRule`. Export these callable contracts:
 
-```python
-@dataclass(frozen=True)
-class ControlRule:
-    name: str
-    control_kind: str
-    required_by_default: bool
-    enum_values: tuple[str, ...] = ()
-
-@dataclass(frozen=True)
-class FieldRule:
-    collection: str
-    kind: str
-    locator_fields: tuple[str, ...]
-    controls: tuple[ControlRule, ...]
-    execution_value_field: str | None = None
+```text
+required_for_confirmation(rule, control, parent) -> bool
+execution_value_required(rule, parent) -> bool
+label_for_parent(rule, parent) -> str
+editable_control_names(rule) -> frozenset[str]
 ```
 
-Provide these total functions, with no caller-side special cases:
+Each function must return a value for every catalog rule; callers must not switch on collection names.
 
-```python
-def required_for_confirmation(rule: FieldRule, control: ControlRule, parent: Mapping[str, Any]) -> bool: ...
-def execution_value_required(rule: FieldRule, parent: Mapping[str, Any]) -> bool: ...
-def label_for_parent(rule: FieldRule, parent: Mapping[str, Any]) -> str: ...
-def editable_control_names(rule: FieldRule) -> frozenset[str]: ...
-```
-
-- [ ] **Step 6: Rerun the focused tests**
+- [ ] **Step 6: Rerun and commit**
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path .\src).Path
 py -m unittest tests.test_test_input_form_models -v
-```
-
-Expected: all strict parser and catalog tests pass.
-
-- [ ] **Step 7: Commit the form-contract foundation**
-
-```powershell
 git add src/unit_test_runner/test_input_form tests/test_test_input_form_models.py
 git commit -m "feat: define test input form contracts"
 ```
 
-### Task 3: Build semantic item locators, opaque IDs, and fingerprints
+### Task 3: Build semantic locators, stable item IDs, and fingerprints
 
 **Files:**
 - Create: `src/unit_test_runner/test_input_form/field_locator.py`
-- Create: `tests/test_test_input_form_locator.py`
 - Modify: `src/unit_test_runner/test_input_form/__init__.py`
+- Create: `tests/test_test_input_form_locator.py`
 
 **Interfaces:**
-- `locate_form_items(spec: TestSpec) -> tuple[LocatedFormItem, ...]` scans both case collections.
-- `item_id` is `item-` plus SHA256 of canonical semantic locator JSON.
-- `subject_fingerprint` is SHA256 of canonical parent-object JSON.
-- Array indices exist only as internal coordinates for the current snapshot; they are never serialized into `item_id`.
-- Duplicate semantic locators are marked ambiguous and are never writable.
+- `locate_form_items(spec)` scans both case collections.
+- `item_id` is independent of array index and independent of whether the case currently lives in `test_cases` or `additional_case_candidates`.
+- Internal mutation coordinates may contain current collection/index, but they are never hashed or serialized.
+- Duplicate semantic locators are ambiguous and not writable.
 
-- [ ] **Step 1: Write a stable-ID test that reorders cases and item arrays**
+- [ ] **Step 1: Write failing reorder and cross-location stability tests**
 
-```python
-first = {item.semantic_key: item.item_id for item in locate_form_items(spec)}
-reordered = copy.deepcopy(spec)
-reordered.test_cases.reverse()
-reordered.test_cases[0]["input_assignments"].reverse()
-second = {item.semantic_key: item.item_id for item in locate_form_items(reordered)}
-self.assertEqual(first, second)
-```
+Create the same case/item payload, reorder arrays, then move the case from candidates to executable cases. Assert the item ID remains identical in all three snapshots.
 
-- [ ] **Step 2: Write locator-identity tests for all collections**
+- [ ] **Step 2: Write locator identity tests**
 
-Assert these identity attributes:
+Use these exact identity fields:
 
 ```text
 input: target_kind, target_name, source_candidate_id
@@ -406,21 +338,21 @@ precondition: source
 execution step: order, action
 ```
 
-- [ ] **Step 3: Write an ambiguity test**
+- [ ] **Step 3: Write ambiguity and fingerprint tests**
 
-Create two parent objects with the same semantic locator and assert both entries have `ambiguous is True`, `editable is False`, and the resolver refuses that `item_id`.
+Assert duplicate locators are `ambiguous=True` and `editable=False`. Assert changing any parent-object meaning changes `subject_fingerprint`, while reordering sibling arrays does not.
 
-- [ ] **Step 4: Run the locator tests and verify missing implementation failures**
+- [ ] **Step 4: Run and confirm missing implementation**
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path .\src).Path
 py -m unittest tests.test_test_input_form_locator -v
 ```
 
-- [ ] **Step 5: Implement canonical hashing and current-snapshot coordinates**
+- [ ] **Step 5: Implement canonical hashing**
 
 ```python
-def _canonical_bytes(value: Mapping[str, Any]) -> bytes:
+def canonical_bytes(value: Mapping[str, Any]) -> bytes:
     return json.dumps(
         value,
         ensure_ascii=False,
@@ -429,119 +361,86 @@ def _canonical_bytes(value: Mapping[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
-def _digest(value: Mapping[str, Any]) -> str:
-    return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+def digest(value: Mapping[str, Any]) -> str:
+    return hashlib.sha256(canonical_bytes(value)).hexdigest()
 ```
 
-Use this serialized locator shape exactly:
+Hash this locator shape exactly; do **not** include case collection/location:
 
 ```python
 locator = {
     "case_id": case_id,
-    "case_location": case_location,
     "collection": rule.collection,
     "kind": rule.kind,
     "identity": {name: parent.get(name) for name in rule.locator_fields},
 }
-item_id = "item-" + _digest(locator)
-subject_fingerprint = _digest(parent)
+item_id = "item-" + digest(locator)
+subject_fingerprint = digest(parent)
 ```
 
-Define `LocatedFormItem` with `case_index` and `item_index` for mutation, plus `locator`, `item_id`, `subject_fingerprint`, `rule`, `parent`, and `ambiguous`.
+- [ ] **Step 6: Implement two-pass ambiguity detection**
 
-- [ ] **Step 6: Detect ambiguity in a second pass instead of appending an index**
+Build all current items with internal `case_location`, `case_index`, and `item_index`; group by `item_id`; mark every member of a non-singleton group ambiguous. Never append an index or location suffix.
 
-Group by `item_id`; if a group length is not one, replace each member with `ambiguous=True`. Do not invent suffixes or use array positions as fallback identities.
-
-- [ ] **Step 7: Rerun locator and model tests**
+- [ ] **Step 7: Rerun and commit**
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path .\src).Path
 py -m unittest tests.test_test_input_form_models tests.test_test_input_form_locator -v
-```
-
-- [ ] **Step 8: Commit the locator boundary**
-
-```powershell
 git add src/unit_test_runner/test_input_form/field_locator.py src/unit_test_runner/test_input_form/__init__.py tests/test_test_input_form_locator.py
 git commit -m "feat: locate editable test spec items safely"
 ```
 
-### Task 4: Query the current form, calculate summaries, warnings, and suggestions
+### Task 4: Query current form, summary, warnings, and suggestions
 
 **Files:**
 - Create: `src/unit_test_runner/test_input_form/validation.py`
 - Create: `src/unit_test_runner/test_input_form/suggestions.py`
 - Create: `src/unit_test_runner/test_input_form/service.py`
-- Create: `tests/test_test_input_form_query.py`
 - Modify: `tests/spec_support.py`
-- Modify: `src/unit_test_runner/test_input_form/__init__.py`
+- Create: `tests/test_test_input_form_query.py`
 
 **Interfaces:**
-- `build_test_input_form(workspace: Path, *, summary_only: bool = False) -> TestInputFormDocument`.
-- `is_unresolved(value)` recognizes `None`, blank text, and case-insensitive prefixes `TBD`, `TODO`, `UNKNOWN`, and `UNRESOLVED`.
-- Summary counts unique item cards, never editable leaves.
-- Suggestions always include `source` and `confidence`; absence of reliable evidence yields no suggestion.
+- `build_test_input_form(workspace, summary_only=False) -> TestInputFormDocument`.
+- Summary counts unique item IDs, not leaves.
+- Suggestions carry `source` and `confidence`; no evidence means no suggestion.
 
-- [ ] **Step 1: Extend fixture support with an unresolved canonical workspace**
+- [ ] **Step 1: Add an unresolved canonical fixture helper**
 
-Add a helper that writes:
+Write one unresolved generated main case in `additional_case_candidates`, one intentional additional candidate with no execution objects, current source/provenance files, and a boundary candidate linked by `source_candidate_id`. Return canonical path and case IDs.
 
-- one unresolved main case in `additional_case_candidates` with `input_assignments`, `state_setups`, `stub_setups`, and `expected_observations` carrying boolean `review_required`;
-- one intentional additional candidate with no execution-required objects;
-- current source and all provenance files required by `build_current_artifact_context()`;
-- a boundary candidate whose `source_candidate_id` maps to `MODE_AUTO`.
-
-Return the canonical path and expected case IDs so tests do not depend on hard-coded array positions.
-
-- [ ] **Step 2: Write failing query tests for item aggregation and forced unresolved extraction**
-
-Assert that one `state_setups` parent becomes one item with two controls:
-
-```python
-state_item = next(item for item in case.items if item.kind == "state_setup")
-self.assertEqual(
-    {"value_expression", "setup_method_hint"},
-    {control.name for control in state_item.controls},
-)
-```
-
-Also assert an unresolved execution value is shown even when its parent currently has `review_required: false`.
-
-- [ ] **Step 3: Write failing summary tests**
-
-Use overlapping unresolved, unconfirmed, warning, and blocking states and assert:
-
-```python
-self.assertEqual(4, form.summary.attention_count)
-self.assertEqual(2, form.summary.unresolved_count)
-self.assertEqual(3, form.summary.unconfirmed_count)
-self.assertEqual(2, form.summary.execution_blocking_count)
-self.assertEqual(1, form.summary.warning_count)
-```
-
-Each count must be based on a set of `item_id` values.
-
-- [ ] **Step 4: Write failing tests for summary-only, promotion eligibility, suggestions, and stale artifacts**
+- [ ] **Step 2: Write failing extraction and grouping tests**
 
 Assert:
 
-- `summary_only=True` returns `cases is None` but performs the same strict freshness validation.
-- the unresolved main candidate is `promotion_eligible=True`.
-- the intentional empty additional candidate is absent from the case list and never promotion-eligible.
-- the input control suggests `MODE_AUTO` from `boundary_candidate` with its confidence.
-- pointer input suggests `NULL` only when signature evidence says pointer.
-- an obvious flag target suggests `0` and `1`.
-- stale source bytes raise `TestInputFormError` with code `stale_test_spec`.
+- `review_required: true` parents appear;
+- unresolved execution values appear even if `review_required` is false;
+- one state parent produces one card with `value_expression` and `setup_method_hint` controls;
+- an execution object missing boolean `review_required` is read-only with warning;
+- cases with no visible items are omitted.
 
-- [ ] **Step 5: Run the query tests and confirm the service is missing**
+- [ ] **Step 3: Write failing summary tests**
+
+Build overlapping unresolved, unconfirmed, blocking, and warning states. Calculate each count using a set of `item_id`; assert `attention_count` is their union.
+
+- [ ] **Step 4: Write failing summary-only, eligibility, suggestion, and stale tests**
+
+Assert:
+
+- summary-only validates freshness but serializes no `cases` key;
+- unresolved generated main candidate is promotion-eligible;
+- intentional empty candidate is not eligible and is absent from the form;
+- boundary candidate, proven pointer `NULL`, obvious flag `0/1`, unique enum values, and concrete same-target canonical values are suggested only with evidence;
+- stale source raises `TestInputFormError.code == "stale_test_spec"`.
+
+- [ ] **Step 5: Run and confirm missing service**
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path .\src).Path
 py -m unittest tests.test_test_input_form_query -v
 ```
 
-- [ ] **Step 6: Implement normalization and warning primitives**
+- [ ] **Step 6: Implement normalization and unresolved detection**
 
 ```python
 UNRESOLVED_PREFIXES = ("TBD", "TODO", "UNKNOWN", "UNRESOLVED")
@@ -554,320 +453,154 @@ def is_unresolved(value: Any) -> bool:
     return not text or text.upper().startswith(UNRESOLVED_PREFIXES)
 ```
 
-Provide:
+Implement and test:
 
-```python
-def normalize_c_expression(value: Any) -> str: ...
-def normalize_multiline(value: Any) -> str: ...
-def normalize_enum(value: Any, allowed: tuple[str, ...]) -> str: ...
-def c_expression_warnings(value: str, *, type_hint: Mapping[str, Any] | None, suggestions: tuple[FormSuggestion, ...]) -> tuple[dict[str, str], ...]: ...
+```text
+normalize_c_expression(value): trim; reject CR/LF/NUL; enforce 4,096 code points
+normalize_multiline(value): normalize CRLF/CR to LF; reject NUL; enforce 16,384 code points
+normalize_enum(value, allowed): require exact ASCII member
+c_expression_warnings(value, type_hint, suggestions): return advisory warning records only
 ```
 
-Hard normalization rules:
-
-- C expression: trim, reject CR/LF and NUL, enforce 4,096 code points.
-- Multiline: normalize CRLF/CR to LF, reject NUL, enforce 16,384 code points.
-- Enum: exact ASCII token from the approved set.
-
-Warnings may cover unbalanced delimiters/quotes, likely scalar/string or pointer mismatch, unknown identifiers/macros, likely non-C90 constructs, missing type evidence, and free input outside suggestions. They must not block query or save by themselves.
+Warnings cover unbalanced delimiters/quotes, likely scalar/string or pointer mismatch, unknown identifiers/macros, likely non-C90 constructs, missing type evidence, and values outside suggestions.
 
 - [ ] **Step 7: Implement evidence-backed suggestions**
 
-Read only files already bound to the canonical snapshot:
+Read only current canonical provenance files. Index boundary candidates by ID, signature parameters by target, and concrete canonical values by semantic target. Deduplicate by value and prefer stronger evidence. Do not infer enums or pointers when evidence is ambiguous.
 
-```text
-reports/boundary_equivalence_candidates.json
-reports/function_signature.json
-reports/test_spec.json
-```
+- [ ] **Step 8: Implement strict form construction**
 
-Index boundary candidates by `candidate_id`; index concrete canonical values by semantic target. Add `NULL` only for proven pointer inputs, `0/1` only for explicit boolean/flag evidence, and enum constants only when a unique enum list is present in signature evidence. Deduplicate by value while preserving the strongest evidence order.
+Load strict snapshot, call `build_current_artifact_context()`, validate the TestSpec against that context, locate items, build controls, and calculate summary sets. Map freshness/contract mismatch to `stale_test_spec`.
 
-- [ ] **Step 8: Implement strict current-snapshot loading and form construction**
+Display an item when its parent has `review_required: true` or an execution-required control is unresolved. Set `confirmed` only from boolean `review_required is False`.
 
-Use the existing freshness path:
-
-```python
-snapshot = load_test_spec_snapshot(path, mode=ContractMode.STRICT)
-context = build_current_artifact_context(workspace, snapshot.spec)
-violations = validate_test_spec(snapshot.spec, current_context=context)
-if violations:
-    raise TestSpecContractError(violations)
-```
-
-For each located item:
-
-- show it when `review_required is True` or an execution-required control is unresolved;
-- emit a read-only warning when execution-required data has no boolean `review_required`;
-- set `confirmed` to the inverse of boolean `review_required`;
-- set `blocking` from the catalog execution rule;
-- omit cases with no visible item;
-- calculate `promotion_eligible` from the pre-save candidate snapshot;
-- build summary sets from the final item list.
-
-Map stale contract failures to `TestInputFormError("stale_test_spec", message)`.
-
-- [ ] **Step 9: Rerun query, locator, and model tests**
+- [ ] **Step 9: Rerun and commit**
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path .\src).Path
 py -m unittest tests.test_test_input_form_models tests.test_test_input_form_locator tests.test_test_input_form_query -v
-```
-
-- [ ] **Step 10: Commit the read/query service**
-
-```powershell
 git add src/unit_test_runner/test_input_form tests/spec_support.py tests/test_test_input_form_query.py
 git commit -m "feat: build test input form views"
 ```
 
-### Task 5: Apply partial changes with confirmation and conflict guards
+### Task 5: Apply partial changes, confirmation, reclassification, and durable views
 
 **Files:**
 - Modify: `src/unit_test_runner/test_input_form/service.py`
 - Modify: `src/unit_test_runner/test_input_form/validation.py`
 - Create: `tests/test_test_input_form_apply.py`
+- Create: `tests/test_test_input_form_reclassification.py`
 
 **Interfaces:**
-- `apply_test_input_form(workspace, request, *, expected_revision) -> TestInputApplyResult`.
-- All item IDs and fingerprints are resolved against one current strict snapshot before any mutation.
-- A value change defaults the parent to unconfirmed unless the same request explicitly sends `confirmed: true` and all required controls are concrete.
-- Partial saves modify only submitted items.
+- `apply_test_input_form(workspace, request, expected_revision) -> TestInputApplyResult`.
+- Resolve and validate all targets before mutating a copied TestSpec.
+- Promotion uses pre-save eligibility; demotion affects only touched execution items.
 
-- [ ] **Step 1: Write a failing partial-save test**
+- [ ] **Step 1: Write failing partial-save and confirmation tests**
 
-Change one input item while leaving all other unresolved items untouched. Assert:
+Assert one submitted item changes, unsent parents remain equal, revision increments once, `confirmed:false` writes `review_required:true`, and same-save concrete value plus `confirmed:true` writes `review_required:false`.
 
-- exactly one parent object changes;
-- canonical revision increments exactly once;
-- unsent parents remain byte-for-byte equal inside the payload;
-- the changed parent has `review_required: true` when `confirmed` is false.
+- [ ] **Step 2: Write failing rejection and atomicity tests**
 
-- [ ] **Step 2: Write failing confirmation tests**
+Reject without byte changes:
 
-Cover:
-
-```python
-# Value change and explicit confirmation in the same save.
-change = TestInputChange(
-    item_id=item.item_id,
-    subject_fingerprint=item.subject_fingerprint,
-    values={"value_expression": "MODE_AUTO"},
-    confirmed=True,
-)
-```
-
-Assert `review_required` becomes false. Then assert these operations are rejected without any canonical byte change:
-
-- `confirmed=True` with blank or placeholder required control;
-- unknown or ambiguous item ID;
+- confirmed required control blank or prefixed by an unresolved marker;
+- missing/ambiguous/noneditable item;
 - fingerprint mismatch;
-- duplicate item ID in one request;
-- enum value outside `inherit|real|stub`;
-- parent `review_required` is not boolean;
-- a leaf not present in the catalog.
+- duplicate change ID;
+- unsupported leaf or enum;
+- nonboolean current `review_required`;
+- stale revision/source;
+- oversized request/control;
+- second item invalid in a multi-item request.
 
-- [ ] **Step 3: Write a failing formal-authority invariance test**
+- [ ] **Step 3: Write formal-authority invariance tests**
 
-Capture before/after projections of:
+Capture and compare before/after:
 
 ```text
-spec.review_item_ids
-case.review_item_ids
+spec and case review_item_ids
 unresolved_items
 source
 function
 generated_from
 coverage_links
 candidate_links
+warning identity/evidence
 ```
 
-Assert all are equal after a successful form save.
-
-- [ ] **Step 4: Write limits and atomicity tests**
-
-Assert the entire operation fails before writing when:
-
-- the request has 1,001 changes;
-- one item has 17 values;
-- a C expression exceeds 4,096 code points or contains newline/NUL;
-- multiline text exceeds 16,384 code points or contains NUL;
-- the second change in a multi-change request is invalid.
-
-For the last case compare the complete canonical bytes before and after.
-
-- [ ] **Step 5: Run the apply tests and verify missing behavior**
-
-```powershell
-$env:PYTHONPATH = (Resolve-Path .\src).Path
-py -m unittest tests.test_test_input_form_apply -v
-```
-
-- [ ] **Step 6: Implement all-target resolution before mutation**
-
-Use this order inside `apply_test_input_form()`:
-
-```text
-load strict snapshot
-build and validate current artifact context
-compare expected revision
-locate every current item
-validate request IDs, uniqueness, editability, fingerprints, leaves, and value shapes
-copy the TestSpec payload
-apply every normalized change to the copy
-validate every requested confirmation
-validate the candidate canonical contract
-save once
-```
-
-Do not call `save_test_spec_snapshot()` until all request items have passed validation.
-
-- [ ] **Step 7: Apply confirmation state at the parent-object boundary**
-
-```python
-parent["review_required"] = not change.confirmed
-```
-
-If any value changes and `change.confirmed` is false, the parent remains review-required. If `change.confirmed` is true, validate all controls whose catalog rule returns `required_for_confirmation=True`; reject unresolved required values.
-
-- [ ] **Step 8: Save through the canonical repository and return an exact snapshot**
-
-```python
-saved_snapshot, canonical_artifact = save_test_spec_snapshot(
-    path,
-    candidate,
-    expected_revision=expected_revision,
-    current_context=context,
-)
-```
-
-Return updated count, confirmed count, canonical snapshot/artifact, empty promotion/demotion arrays for now, and the latest summary built from the saved snapshot.
-
-- [ ] **Step 9: Rerun apply and query tests**
-
-```powershell
-$env:PYTHONPATH = (Resolve-Path .\src).Path
-py -m unittest tests.test_test_input_form_apply tests.test_test_input_form_query -v
-```
-
-- [ ] **Step 10: Commit guarded partial updates**
-
-```powershell
-git add src/unit_test_runner/test_input_form/service.py src/unit_test_runner/test_input_form/validation.py tests/test_test_input_form_apply.py
-git commit -m "feat: apply guarded test input changes"
-```
-
-### Task 6: Promote ready candidates, demote touched unsafe cases, and export views durably
-
-**Files:**
-- Modify: `src/unit_test_runner/test_input_form/service.py`
-- Create: `tests/test_test_input_form_reclassification.py`
-- Modify: `tests/test_test_input_form_apply.py`
-
-**Interfaces:**
-- Promotion uses eligibility captured from the pre-save snapshot.
-- Demotion is limited to executable cases whose execution-required item was touched in this request.
-- Case order and all formal/provenance fields are preserved.
-- Markdown/CSV export is attempted after canonical save and may yield a warning without rolling back JSON.
-
-- [ ] **Step 1: Write a failing intentional-candidate test**
-
-An additional candidate with no execution-required parent objects must remain in `additional_case_candidates` even when every visible review field is confirmed.
-
-- [ ] **Step 2: Write a failing promotion test**
-
-For an unresolved main candidate, submit concrete confirmed values for all execution-required parents. Assert:
-
-- the case moves to the end of `test_cases`;
-- it is removed from `additional_case_candidates`;
-- its case payload, review IDs, coverage links, and provenance fields are otherwise unchanged;
-- `coverage_summary` and canonical `unresolved_items` are unchanged;
-- `promoted_case_ids` contains only that ID.
-
-- [ ] **Step 3: Write failing demotion and no-op classification tests**
+- [ ] **Step 4: Write promotion/demotion tests**
 
 Assert:
 
-- changing an executable input to an unresolved value demotes the touched case;
-- changing confirmation to false on a touched execution-required parent demotes it;
-- editing only `note`, `setup_method_hint`, `call_behavior`, precondition text, execution detail, or dependency rationale does not move the case;
-- untouched legacy executable cases are never reclassified;
-- duplicate case IDs across source and destination cause total failure before save.
+- intentional additional candidate with no execution objects never promotes;
+- eligible candidate promotes only when every execution-required parent is concrete and confirmed;
+- promotion appends in original candidate order and preserves all nonlocation data;
+- touched executable case demotes if an execution value becomes unresolved or its execution parent becomes unconfirmed;
+- nonexecution edits and untouched executable cases never move;
+- duplicate case IDs reject the entire save;
+- `coverage_summary` and historical `unresolved_items` remain unchanged.
 
-- [ ] **Step 4: Write a view-export failure test**
-
-Patch `export_test_spec_snapshot_views()` to raise after canonical save. Assert:
-
-- canonical revision advanced and contains the requested values;
-- result has `views_written is False`;
-- result warnings include code `test_spec_view_export_failed`;
-- the old revision is not restored.
-
-- [ ] **Step 5: Run reclassification tests and verify failures**
-
-```powershell
-$env:PYTHONPATH = (Resolve-Path .\src).Path
-py -m unittest tests.test_test_input_form_reclassification -v
-```
-
-- [ ] **Step 6: Implement execution-object helpers**
-
-Provide total helpers:
-
-```python
-def execution_objects(case: Mapping[str, Any]) -> tuple[tuple[str, Mapping[str, Any], str], ...]: ...
-def candidate_is_promotion_eligible(case: Mapping[str, Any], executable_ids: frozenset[str]) -> bool: ...
-def execution_case_is_ready(case: Mapping[str, Any]) -> bool: ...
-def reclassify_cases(spec: TestSpec, *, eligible_before: frozenset[str], touched_execution_case_ids: frozenset[str]) -> tuple[list[str], list[str]]: ...
-```
-
-Execution values are exactly:
+Execution fields are exactly:
 
 ```text
 input_assignments[].value_expression
 state_setups[].value_expression
-stub_setups[].value_expression, except call_count_observation and argument_capture
+stub_setups[].value_expression except call_count_observation and argument_capture
 expected_observations[].expected_expression
 ```
 
-- [ ] **Step 7: Implement stable-order promotion and demotion**
+- [ ] **Step 5: Write view-export failure test**
 
-Promotions append eligible ready candidates in their original candidate order. Demotions append touched unsafe executable cases in their original executable order. Validate case IDs are unique before and after movement.
+Patch view export to fail after canonical save. Assert canonical revision/value remain, `views_written` is false, warning code is `test_spec_view_export_failed`, and JSON is not rolled back.
 
-- [ ] **Step 8: Export views after the canonical save**
+- [ ] **Step 6: Run and inspect failures**
 
-```python
-try:
-    view_export = export_test_spec_snapshot_views(
-        saved_snapshot,
-        path.parent,
-        canonical_path=path,
-    )
-    views_written = view_export.written
-except (OSError, ValueError, TestSpecViewDurabilityError) as error:
-    views_written = False
-    warnings.append(
-        {"code": "test_spec_view_export_failed", "message": str(error)}
-    )
+```powershell
+$env:PYTHONPATH = (Resolve-Path .\src).Path
+py -m unittest tests.test_test_input_form_apply tests.test_test_input_form_reclassification -v
 ```
 
-Do not catch canonical save failures in this block.
+- [ ] **Step 7: Implement all-target validation before mutation**
 
-- [ ] **Step 9: Run all Python form tests**
+Use this exact order:
+
+```text
+strict load and current-context validation
+expected revision check
+current semantic location of every submitted item
+unique/editable/fingerprint/leaf/type/length validation for every change
+copy TestSpec payload
+normalize and apply every value
+write parent review_required from confirmed
+validate every confirmed required control
+reclassify eligible/touched cases
+validate canonical contract
+save once with save_test_spec_snapshot
+export views
+build latest summary/result
+```
+
+If a value changes, the request’s mandatory `confirmed` value controls the new parent state. `confirmed:true` is accepted only after all required controls are concrete.
+
+- [ ] **Step 8: Implement reclassification with stable item identity**
+
+Precompute eligible candidate case IDs before mutation. Promote ready eligible cases; demote only cases whose execution item appears in the submitted change set and is unsafe afterward. Moving a case must not alter its item IDs because location is absent from the semantic hash.
+
+- [ ] **Step 9: Export views after canonical save**
+
+Catch only expected view-export exceptions after save. Return the canonical artifact always; return Markdown/CSV artifacts only when the pair was written. Never catch canonical save errors in the view block.
+
+- [ ] **Step 10: Rerun all form tests and commit**
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path .\src).Path
 py -m unittest tests.test_test_input_form_models tests.test_test_input_form_locator tests.test_test_input_form_query tests.test_test_input_form_apply tests.test_test_input_form_reclassification -v
+git add src/unit_test_runner/test_input_form/service.py src/unit_test_runner/test_input_form/validation.py tests/test_test_input_form_apply.py tests/test_test_input_form_reclassification.py
+git commit -m "feat: apply and reclassify test input changes"
 ```
 
-- [ ] **Step 10: Commit safe case reclassification**
-
-```powershell
-git add src/unit_test_runner/test_input_form/service.py tests/test_test_input_form_apply.py tests/test_test_input_form_reclassification.py
-git commit -m "feat: reclassify completed test input cases"
-```
-
-### Task 7: Expose strict form query/apply commands through the CLI
+### Task 6: Expose form query/apply through the CLI
 
 **Files:**
 - Modify: `src/unit_test_runner/cli/parser.py`
@@ -880,62 +613,24 @@ git commit -m "feat: reclassify completed test input cases"
 **Interfaces:**
 - `get-test-input-form --workspace <path> [--summary-only]`.
 - `apply-test-input-form --workspace <path> --input <json> --expected-revision <int>`.
-- Success details use the exact form/apply keys from the design.
-- Expected failures carry a stable error code in `data.errors[].code`.
+- Expected failures preserve form error code in v1 `data.errors[].code`.
 
-- [ ] **Step 1: Write failing parser tests**
+- [ ] **Step 1: Write failing parser and success-envelope tests**
 
-```python
-args = build_parser().parse_args(
-    ["get-test-input-form", "--workspace", "out", "--summary-only"]
-)
-self.assertTrue(args.summary_only)
+Assert parser attributes, form schema/revision/SHA/summary, apply counts, promotion/demotion arrays, `views_written`, and produced canonical/view artifacts.
 
-args = build_parser().parse_args(
-    [
-        "apply-test-input-form",
-        "--workspace", "out",
-        "--input", "changes.json",
-        "--expected-revision", "3",
-    ]
-)
-self.assertEqual(3, args.expected_revision)
-```
+- [ ] **Step 2: Write failing structured-error tests**
 
-- [ ] **Step 2: Write failing subprocess tests for successful query and apply**
+Cover stale revision, subject conflict, validation error, >4 MiB file, malformed JSON, and stale source. Assert exact code and unchanged canonical bytes.
 
-Use the existing v1 CLI envelope pattern and assert values under `payload["data"]["details"]`:
-
-```python
-self.assertEqual("1.0", details["schema_version"])
-self.assertEqual(1, details["revision"])
-self.assertRegex(details["spec_sha256"], r"^[0-9a-f]{64}$")
-self.assertIn("summary", details)
-```
-
-For apply, assert revision, updated count, promoted/demoted arrays, summary, `views_written`, and produced TestSpec artifacts.
-
-- [ ] **Step 3: Write failing structured-error tests**
-
-Cover stale revision, fingerprint conflict, invalid confirmation, oversized input file, malformed JSON, and stale source. Assert nonzero exit and exact codes such as:
-
-```python
-self.assertEqual(
-    "test_input_revision_conflict",
-    payload["data"]["errors"][0]["code"],
-)
-```
-
-Compare canonical bytes before/after every rejected apply call.
-
-- [ ] **Step 4: Run the CLI tests and verify missing subcommands**
+- [ ] **Step 3: Run and confirm missing subcommands**
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path .\src).Path
 py -m unittest tests.test_test_input_form_cli -v
 ```
 
-- [ ] **Step 5: Add parser entries beside `get-test-spec` and `update-test-spec`**
+- [ ] **Step 4: Add parser entries**
 
 ```python
 get_form = subcommands.add_parser(
@@ -954,132 +649,66 @@ apply_form.add_argument("--input", required=True)
 apply_form.add_argument("--expected-revision", required=True, type=int)
 ```
 
-- [ ] **Step 6: Preserve machine error codes through `CLIError`**
+- [ ] **Step 5: Add structured `CLIError.code` without breaking existing callers**
 
-```python
-class CLIError(Exception):
-    def __init__(
-        self,
-        message: str,
-        exit_code: int,
-        command: str = "unknown",
-        code: str = "error",
-    ) -> None:
-        super().__init__(message)
-        self.message = message
-        self.exit_code = exit_code
-        self.command = command
-        self.code = code
-```
+Default the new constructor argument to `"error"`; emit `{"code": exc.code, "message": exc.message}` for caught `CLIError`. Keep argument-parse and unexpected-error behavior compatible.
 
-In `main.py`, emit:
+- [ ] **Step 6: Implement handlers**
 
-```python
-errors=[{"code": exc.code, "message": exc.message}],
-```
+`get` returns `document.to_dict()`. `apply` checks file size before UTF-8-sig JSON parsing, parses an object through the strict request parser, calls the service, reports canonical artifact always, and reports view artifacts only when written. Convert every `TestInputFormError` to `CLIError` with the same code and `EXIT_INPUT_ERROR`.
 
-Keep the default code so existing callers remain compatible.
-
-- [ ] **Step 7: Implement handlers and dispatch mapping**
-
-`handle_get_test_input_form()` returns `document.to_dict()` directly in CLI details. `handle_apply_test_input_form()` must:
-
-- reject input files larger than 4 MiB before JSON parsing;
-- parse UTF-8-sig JSON as an object;
-- call the strict request parser;
-- call `apply_test_input_form()`;
-- return canonical artifact always and Markdown/CSV artifacts only when written;
-- convert `TestInputFormError.code` into structured `CLIError.code`.
-
-Use `EXIT_INPUT_ERROR` for form, conflict, stale, and validation failures; keep unexpected failures on the existing internal-error path.
-
-- [ ] **Step 8: Rerun CLI and existing TestSpec CLI tests**
+- [ ] **Step 7: Rerun CLI contracts and commit**
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path .\src).Path
-py -m unittest tests.test_test_input_form_cli tests.test_test_spec_cli -v
-```
-
-- [ ] **Step 9: Commit the CLI surface**
-
-```powershell
+py -m unittest tests.test_test_input_form_cli tests.test_test_spec_cli tests.test_cli_entry_point_contract -v
 git add src/unit_test_runner/cli src/unit_test_runner/test_input_form/__init__.py tests/test_test_input_form_cli.py
 git commit -m "feat: expose test input form cli commands"
 ```
 
-### Task 8: Prove the canonical Python workflow end to end
+### Task 7: Prove the canonical Python workflow end to end
 
 **Files:**
 - Create: `tests/test_test_input_form_end_to_end.py`
 - Modify: `tests/spec_support.py`
 
 **Interfaces:**
-- Exercises the real CLI sequence from form query through harness and build-probe dry-run.
-- Verifies the legacy `test_case_design.json` file is not used or modified.
+- Real sequence: analyze/harness workspace → query → apply → get canonical spec → regenerate harness with `--test-spec` → build-probe dry-run.
+- Legacy design file bytes remain unchanged.
 
-- [ ] **Step 1: Create an analysis-backed fixture workspace**
+- [ ] **Step 1: Write the failing integration test**
 
-Use `tests/fixtures/vc6_project` and run:
+Use `tests/fixtures/vc6_project`. Query real item IDs/fingerprints, submit concrete confirmed values for every blocking item, then assert:
 
-```text
-analyze-function --phase harness
-get-test-input-form
-apply-test-input-form
-generate-harness-skeleton --test-spec
-build-probe --workspace --dry-run
-```
+- revision advances once;
+- generated main candidate moves to `test_cases`;
+- intentional empty candidate remains additional;
+- Markdown/CSV identities match saved revision/SHA;
+- generated C contains concrete values instead of replaced placeholders;
+- build-probe dry-run succeeds;
+- legacy `test_case_design.json` bytes are unchanged.
 
-Before apply, add one intentional additional candidate with no execution objects using the canonical repository fixture helper, not a raw text replacement.
-
-- [ ] **Step 2: Write the failing end-to-end test**
-
-The test must:
-
-1. query the form and collect every execution-blocking item;
-2. build a valid request using concrete expressions (`0`, `1`, `NULL`, or an existing suggestion) and `confirmed: true`;
-3. apply at the queried revision;
-4. query `get-test-spec` and assert the main case moved to `test_cases`;
-5. assert the intentional additional candidate stayed in `additional_case_candidates`;
-6. regenerate the harness with `--test-spec reports/test_spec.json`;
-7. assert generated C contains the concrete expressions and no replaced domain placeholder;
-8. run `build-probe --workspace <out> --dry-run --overwrite` successfully;
-9. assert canonical revision advanced once and Markdown/CSV identities match that revision/SHA;
-10. assert legacy `test_case_design.json` bytes are unchanged.
-
-- [ ] **Step 3: Run the end-to-end test and diagnose the first missing link**
+- [ ] **Step 2: Run and identify the first real seam failure**
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path .\src).Path
 py -m unittest tests.test_test_input_form_end_to_end -v
 ```
 
-- [ ] **Step 4: Fix only integration seams exposed by the test**
+- [ ] **Step 3: Fix only canonical integration seams**
 
-Acceptable fixes are limited to:
+Allowed changes: fixture completeness, CLI artifact paths, canonical consumer input, and existing build-probe prerequisites. Do not add a legacy fallback.
 
-- service data passed to the existing harness consumer;
-- CLI artifact reporting;
-- fixture completeness;
-- canonical report paths;
-- build-probe prerequisites already generated by the harness-phase analysis.
-
-Do not add a legacy fallback to make the test pass.
-
-- [ ] **Step 5: Rerun focused Python integration and consumer tests**
+- [ ] **Step 4: Run adjacent consumers and commit**
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path .\src).Path
 py -m unittest tests.test_test_input_form_end_to_end tests.test_test_spec_consumers tests.test_dependency_policy_end_to_end -v
-```
-
-- [ ] **Step 6: Commit the canonical end-to-end proof**
-
-```powershell
 git add tests/test_test_input_form_end_to_end.py tests/spec_support.py
 git commit -m "test: cover canonical test input workflow"
 ```
 
-### Task 9: Add strict TypeScript form contracts and the CLI client
+### Task 8: Add strict TypeScript form contracts and CLI client
 
 **Files:**
 - Modify: `vscode/extension/src/cli/commandBuilder.ts`
@@ -1088,12 +717,11 @@ git commit -m "test: cover canonical test input workflow"
 - Create: `vscode/extension/src/test/testInputCliClient.test.ts`
 
 **Interfaces:**
-- `buildGetTestInputFormInvocation(settings, workspace, summaryOnly)`.
-- `buildApplyTestInputFormInvocation(settings, workspace, inputPath, expectedRevision)`.
-- Strict parsers expose typed `TestInputFormModel`, `TestInputApplyResult`, and structured `TestInputCliError`.
-- Apply requests are written under a supplied storage root and deleted in `finally`.
+- Query/apply command builders.
+- Strict parsers for v1 details and Webview-independent client types.
+- Temporary input deleted in `finally` on every outcome.
 
-- [ ] **Step 1: Write failing command-builder tests**
+- [ ] **Step 1: Write failing builder tests**
 
 ```typescript
 const get = buildGetTestInputFormInvocation(settings, workspace, true);
@@ -1107,23 +735,15 @@ assert.deepEqual(
 );
 ```
 
-- [ ] **Step 2: Write strict parser tests using complete v1 envelopes**
+- [ ] **Step 2: Write strict envelope-parser tests**
 
-Assert accepted query/apply results, and reject:
+Accept complete query/apply v1 envelopes. Reject unknown keys at every level, wrong form version, invalid SHA/count/revision, duplicate IDs, unknown control kind, and malformed structured errors.
 
-- unknown keys at every form level;
-- wrong schema version;
-- malformed SHA256 values;
-- duplicate item/control IDs;
-- unsupported control kind;
-- noninteger counts/revision;
-- an error envelope without a supported machine code.
+- [ ] **Step 3: Write temporary-file tests with injected filesystem/process functions**
 
-- [ ] **Step 3: Write a temporary-file cleanup test**
+Assert the random path is below supplied storage root and deletion runs after success, nonzero CLI, timeout, and parser failure.
 
-Inject fake `run`, `writeFile`, `mkdir`, and `rm` functions. Assert `rm` runs after success, CLI failure, timeout, and parser failure, and the path is below the configured storage root.
-
-- [ ] **Step 4: Run the focused TypeScript test and verify missing modules**
+- [ ] **Step 4: Run and confirm missing modules**
 
 ```powershell
 Push-Location vscode\extension
@@ -1132,41 +752,9 @@ node --test dist/test/testInputCliClient.test.js
 Pop-Location
 ```
 
-- [ ] **Step 5: Implement command builders**
+- [ ] **Step 5: Implement builders and strict types**
 
-```typescript
-export function buildGetTestInputFormInvocation(
-  settings: AdapterSettings,
-  workspace: string,
-  summaryOnly = false,
-): CliInvocation {
-  const args = jsonPrefix(settings).concat([
-    'get-test-input-form', '--workspace', workspace,
-  ]);
-  if (summaryOnly) {
-    args.push('--summary-only');
-  }
-  return invocation(settings, args, false);
-}
-
-export function buildApplyTestInputFormInvocation(
-  settings: AdapterSettings,
-  workspace: string,
-  inputPath: string,
-  expectedRevision: number,
-): CliInvocation {
-  return invocation(settings, jsonPrefix(settings).concat([
-    'apply-test-input-form',
-    '--workspace', workspace,
-    '--input', inputPath,
-    '--expected-revision', String(expectedRevision),
-  ]), false);
-}
-```
-
-- [ ] **Step 6: Implement strict contracts without `any`**
-
-Expose these principal types:
+Principal public types:
 
 ```typescript
 export interface TestInputFormSummary {
@@ -1194,45 +782,29 @@ export interface TestInputChangeDraft {
 }
 ```
 
-Parse CLI v1 `data.details` after `parseCliEnvelopeValue()`; do not trust `parsedJson` through casts.
+Parse v1 `data.details` after `parseCliEnvelopeValue()`; do not cast arbitrary `parsedJson` to a model.
 
-- [ ] **Step 7: Implement the injected CLI client and typed errors**
-
-The client must expose:
+- [ ] **Step 6: Implement client methods**
 
 ```typescript
 load(workspace: string, summaryOnly?: boolean): Promise<TestInputFormModel>
 apply(workspace: string, revision: number, changes: readonly TestInputChangeDraft[]): Promise<TestInputApplyResult>
 ```
 
-Serialize exactly:
+Serialize transient schema `1.0`, create filename with `crypto.randomUUID()`, write UTF-8 under supplied storage root, and delete in `finally`. Convert machine error codes to typed `TestInputCliError`.
 
-```typescript
-{
-  schema_version: '1.0',
-  changes: changes.map(toWireChange),
-}
-```
-
-Create a random JSON filename with `crypto.randomUUID()`, use UTF-8, and delete in `finally`.
-
-- [ ] **Step 8: Rerun client, adapter, and envelope tests**
+- [ ] **Step 7: Rerun and commit**
 
 ```powershell
 Push-Location vscode\extension
 npm run compile
 node --test dist/test/testInputCliClient.test.js dist/test/adapter.test.js dist/test/cliEnvelope.test.js
 Pop-Location
-```
-
-- [ ] **Step 9: Commit the TypeScript CLI boundary**
-
-```powershell
-git add vscode/extension/src/cli/commandBuilder.ts vscode/extension/src/testInputEditor vscode/extension/src/test/testInputCliClient.test.ts
+git add vscode/extension/src/cli/commandBuilder.ts vscode/extension/src/testInputEditor/contracts.ts vscode/extension/src/testInputEditor/cliClient.ts vscode/extension/src/test/testInputCliClient.test.ts
 git commit -m "feat: add test input editor cli client"
 ```
 
-### Task 10: Implement pure draft state and secure editor rendering
+### Task 9: Implement pure draft state and secure editor rendering
 
 **Files:**
 - Create: `vscode/extension/src/testInputEditor/draftState.ts`
@@ -1241,54 +813,24 @@ git commit -m "feat: add test input editor cli client"
 - Create: `vscode/extension/src/test/testInputEditorRenderer.test.ts`
 
 **Interfaces:**
-- Pure state updates do not import `vscode`.
-- Editing any control automatically clears that item’s confirmation in the draft.
-- Reload merge reuses a draft only when item ID exists and the original fingerprint still matches.
-- Renderer escapes all model text and emits nonce-protected CSP with no external resources or inline event attributes.
+- Pure modules do not import `vscode`.
+- Editing any control auto-unconfirms the item.
+- Reload reuses a draft only when baseline fingerprint still matches.
+- HTML escapes all data and uses nonce CSP with no external resources or inline handlers.
 
-- [ ] **Step 1: Write failing draft-state tests**
+- [ ] **Step 1: Write failing reducer tests**
 
-Cover:
+Cover select, edit, auto-unconfirm, explicit reconfirm, dirty-only request, discard, hide/show retention, and dirty title/footer.
 
-- select case;
-- edit a C expression and auto-unconfirm;
-- set confirmation explicitly after editing;
-- build a request containing only dirty items;
-- discard all drafts;
-- keep a draft across hide/show;
-- detect dirty title/footer state.
+- [ ] **Step 2: Write failing conflict-merge tests**
 
-```typescript
-const edited = editControl(state, item.itemId, 'value_expression', 'MODE_AUTO');
-assert.equal(edited.drafts[item.itemId].confirmed, false);
-assert.equal(edited.dirtyCount, 1);
-```
+Cover unchanged-fingerprint reapply, changed-fingerprint conflict, deleted/ambiguous orphan, choose latest, and choose draft rebased to latest fingerprint.
 
-- [ ] **Step 2: Write failing reload/conflict tests**
+- [ ] **Step 3: Write failing renderer tests**
 
-Assert:
+Require header/summary, case list, all eight item sections, suggestion buttons that leave the input editable, one confirmation checkbox per card, footer actions, zero-item state, `default-src 'none'`, nonce style/script, no `onclick=`, and escaped hostile values.
 
-- same item ID and unchanged baseline fingerprint reapply the draft;
-- changed fingerprint creates a conflict;
-- removed or ambiguous item becomes orphaned/read-only;
-- choosing latest deletes the draft;
-- choosing draft rebases it onto the latest fingerprint and keeps it dirty.
-
-- [ ] **Step 3: Write failing renderer security and layout tests**
-
-Assert the HTML contains:
-
-- header with function/workspace/revision/summary;
-- left case list and status counts;
-- right sections for input, state, stub, expected, preconditions, execution, dependency, and other review items;
-- editable input after a suggestion is chosen;
-- one confirmation checkbox per item card;
-- footer discard/save buttons and dirty count;
-- empty-state text when there are zero items;
-- `default-src 'none'`, nonce style/script, and no `onclick=`;
-- escaped malicious label, path, expression, and warning values.
-
-- [ ] **Step 4: Run focused state and renderer tests**
+- [ ] **Step 4: Run and confirm missing behavior**
 
 ```powershell
 Push-Location vscode\extension
@@ -1297,54 +839,38 @@ node --test dist/test/testInputEditorState.test.js dist/test/testInputEditorRend
 Pop-Location
 ```
 
-- [ ] **Step 5: Implement the pure reducer**
+- [ ] **Step 5: Implement immutable reducer API**
 
-Expose these functions:
-
-```typescript
-createDraftState(model, workspace): TestInputEditorState
-selectCase(state, caseId): TestInputEditorState
-editControl(state, itemId, controlName, value): TestInputEditorState
-setItemConfirmed(state, itemId, confirmed): TestInputEditorState
-discardDrafts(state): TestInputEditorState
-buildChangeDrafts(state): readonly TestInputChangeDraft[]
-mergeReloadedModel(state, latest): TestInputEditorState
-resolveConflictWithLatest(state, itemId): TestInputEditorState
-resolveConflictWithDraft(state, itemId): TestInputEditorState
+```text
+createDraftState
+selectCase
+editControl
+setItemConfirmed
+discardDrafts
+buildChangeDrafts
+mergeReloadedModel
+resolveConflictWithLatest
+resolveConflictWithDraft
 ```
 
-Use immutable copies so each transition is independently testable.
+Only dirty, nonorphaned, nonambiguous items may enter `buildChangeDrafts()`.
 
-- [ ] **Step 6: Implement the renderer and browser script**
+- [ ] **Step 6: Implement renderer and minimal browser script**
 
-`renderTestInputEditorHtml()` receives the model/state, workspace display string, and nonce. The browser script may only:
+Browser code may switch cases, edit controls, apply a suggestion, toggle confirmation, send save/discard/reload/conflict messages, and retain visual state with `getState()/setState()`. It must not calculate domain validity or mutate canonical data.
 
-- switch selected case;
-- update input/textarea/select controls;
-- apply a suggestion value to the still-editable input;
-- toggle confirmation;
-- send save/discard/reload/conflict-resolution messages;
-- persist visual selection/scroll state with `getState()/setState()`.
-
-All domain decisions remain outside the browser script.
-
-- [ ] **Step 7: Rerun focused tests**
+- [ ] **Step 7: Rerun and commit**
 
 ```powershell
 Push-Location vscode\extension
 npm run compile
 node --test dist/test/testInputEditorState.test.js dist/test/testInputEditorRenderer.test.js
 Pop-Location
-```
-
-- [ ] **Step 8: Commit pure editor state and HTML**
-
-```powershell
 git add vscode/extension/src/testInputEditor/draftState.ts vscode/extension/src/testInputEditor/renderer.ts vscode/extension/src/test/testInputEditorState.test.ts vscode/extension/src/test/testInputEditorRenderer.test.ts
 git commit -m "feat: render secure test input editor"
 ```
 
-### Task 11: Add the testable controller, VS Code panel, singleton, save, and conflict flow
+### Task 10: Add controller, panel singleton, save, and conflict flow
 
 **Files:**
 - Create: `vscode/extension/src/testInputEditor/controller.ts`
@@ -1354,41 +880,19 @@ git commit -m "feat: render secure test input editor"
 
 **Interfaces:**
 - One panel per normalized function workspace.
-- Closing and reopening in the same extension session restores drafts only when revision remains compatible.
-- Save keeps the panel open, reloads the latest model, and notifies Workflow through an injected callback.
-- Conflicts preserve drafts and require explicit latest/draft choice.
+- In-session draft cache only; no restart persistence.
+- Save keeps panel open, reloads latest model, and notifies Workflow.
+- Conflict never auto-resubmits.
 
-- [ ] **Step 1: Write strict Webview-message parser tests**
+- [ ] **Step 1: Write strict Webview-message tests**
 
-Allow only explicit message shapes such as:
+Allow exact shapes for select/edit/confirm/save/discard/reload/conflict resolution/open canonical. Reject unknown keys, unknown controls, malformed booleans, and overlong strings before dispatch.
 
-```typescript
-{ type: 'selectCase', caseId: 'TC_Control_Update_001' }
-{ type: 'editControl', itemId, controlName: 'value_expression', value: 'MODE_AUTO' }
-{ type: 'setConfirmed', itemId, confirmed: true }
-{ type: 'save' }
-{ type: 'discard' }
-{ type: 'reload' }
-{ type: 'resolveConflict', itemId, resolution: 'latest' }
-{ type: 'resolveConflict', itemId, resolution: 'draft' }
-```
+- [ ] **Step 2: Write controller tests with fake client/view ports**
 
-Reject unknown properties, overlong strings, unknown control names, and malformed booleans before controller dispatch.
+Cover initial load, dirty-only save, successful reload/callback, conflict preservation, discard confirmation, safe draft reapply, orphan display, zero-item canonical-open action, and CLI failure with drafts intact.
 
-- [ ] **Step 2: Write controller tests with fake ports**
-
-Inject a fake client and view port. Cover:
-
-- initial load and render;
-- save sends only dirty items;
-- save success reloads, clears saved drafts, retains panel, and calls `onSaved(workspace)`;
-- apply conflict preserves drafts and renders conflict actions;
-- discard asks for confirmation when dirty and reloads canonical values;
-- reload merges safe drafts and marks changed fingerprints as conflicts;
-- zero-item form remains usable and offers canonical spec open action;
-- CLI error keeps drafts and exposes an Output Channel action.
-
-- [ ] **Step 3: Run the focused controller test**
+- [ ] **Step 3: Run and confirm missing controller**
 
 ```powershell
 Push-Location vscode\extension
@@ -1397,9 +901,7 @@ node --test dist/test/testInputEditorController.test.js
 Pop-Location
 ```
 
-- [ ] **Step 4: Implement controller ports and orchestration**
-
-Define injected boundaries:
+- [ ] **Step 4: Implement injected ports**
 
 ```typescript
 export interface TestInputEditorClientPort {
@@ -1415,50 +917,28 @@ export interface TestInputEditorViewPort {
 }
 ```
 
-The controller owns state transitions and never imports `vscode`.
+Controller owns state and does not import `vscode`.
 
-- [ ] **Step 5: Implement the thin VS Code panel wrapper**
+- [ ] **Step 5: Implement thin panel wrapper**
 
-`TestInputEditorPanel.open()` must:
+Normalize workspace key; reveal existing panel; create a script-enabled Webview Panel; use `context.storageUri ?? context.globalStorageUri`; parse every message; retain drafts in a process-memory map on dispose; update unsaved title; dispose subscriptions and singleton entry.
 
-- normalize workspace key with platform path semantics;
-- reveal an existing panel for that workspace instead of creating another;
-- create `vscode.window.createWebviewPanel()` with scripts enabled and no retained external resource roots;
-- use `context.storageUri ?? context.globalStorageUri` for the CLI client’s temporary root;
-- parse every received message before controller dispatch;
-- preserve controller/draft state in an in-memory map on dispose;
-- restore only within the current extension process;
-- update title with an unsaved marker;
-- dispose subscriptions and remove the singleton entry cleanly.
+- [ ] **Step 6: Implement explicit conflict sequence**
 
-- [ ] **Step 6: Implement explicit conflict presentation**
+Keep drafts, load latest, merge by item ID and old fingerprint, render per-item `最新値を使う` / `下書きを採用`, never save automatically, and exclude unresolved orphan drafts from requests.
 
-When revision or fingerprint conflict is returned:
-
-1. keep current drafts;
-2. load the latest model;
-3. call `mergeReloadedModel()`;
-4. render per-item `最新値を使う` and `下書きを採用` actions;
-5. never resubmit automatically;
-6. keep deleted/ambiguous drafts visible but excluded from `buildChangeDrafts()`.
-
-- [ ] **Step 7: Rerun all editor tests**
+- [ ] **Step 7: Rerun and commit**
 
 ```powershell
 Push-Location vscode\extension
 npm run compile
 node --test dist/test/testInputCliClient.test.js dist/test/testInputEditorState.test.js dist/test/testInputEditorRenderer.test.js dist/test/testInputEditorController.test.js
 Pop-Location
-```
-
-- [ ] **Step 8: Commit the panel runtime**
-
-```powershell
 git add vscode/extension/src/testInputEditor vscode/extension/src/test/testInputEditorController.test.ts
 git commit -m "feat: add test input editor panel workflow"
 ```
 
-### Task 12: Integrate summary caching and the editor action into Workflow
+### Task 11: Integrate asynchronous summary and editor action into Workflow
 
 **Files:**
 - Create: `vscode/extension/src/testInputEditor/summaryCache.ts`
@@ -1474,46 +954,39 @@ git commit -m "feat: add test input editor panel workflow"
 - Create: `vscode/extension/src/test/testInputSummaryCache.test.ts`
 
 **Interfaces:**
-- Command ID: `unitTestRunner.openTestInputEditor`.
-- Workflow cache is keyed by workspace, revision, and canonical SHA256.
-- Button label is `未確定項目を入力（N件）`; zero becomes `入力内容を確認（0件）`.
-- Execution-blocking count applies warning emphasis, but never auto-opens the editor.
+- Command: `unitTestRunner.openTestInputEditor`.
+- Label: `未確定項目を入力（N件）`; zero: `入力内容を確認（0件）`.
+- Blocking or summary failure uses warning emphasis; editor never auto-opens.
 
-- [ ] **Step 1: Write failing summary-cache tests**
+- [ ] **Step 1: Write failing cache tests**
 
-Cover:
+Cover exact workspace/revision/SHA key, workspace change, analyze/reanalyze/save invalidation, late-response rejection, ready/error states, and proof that refresh is an explicit async operation.
 
-- store and retrieve by exact workspace/revision/SHA;
-- invalidate on workspace change;
-- invalidate after analyze, reanalyze, or TestSpec save;
-- reject a stale async response whose workspace is no longer current;
-- preserve an error state separately from a valid count;
-- summary refresh is an explicit async function, not part of HTML rendering.
-
-- [ ] **Step 2: Write failing Workflow rendering tests**
-
-Build `WorkflowState` values with cached summaries and assert:
+Use a discriminated state so an error never masquerades as a zero count:
 
 ```typescript
-assert.match(html, /未確定項目を入力（7件）/);
-assert.match(html, /data-command-id="unitTestRunner\.openTestInputEditor"/);
-assert.match(blockingHtml, /class="[^"]*danger/);
-assert.match(zeroHtml, /入力内容を確認（0件）/);
+export type TestInputSummaryState =
+  | {
+      status: 'ready';
+      workspace: string;
+      revision: number;
+      specSha256: string;
+      summary: TestInputFormSummary;
+      updatedAt: string;
+    }
+  | {
+      status: 'error';
+      workspace: string;
+      message: string;
+      updatedAt: string;
+    };
 ```
 
-Assert no editor button appears when canonical `test_spec.json` is unavailable, and summary failure shows a count-less action plus warning text.
+- [ ] **Step 2: Write failing Workflow/manifest/registry tests**
 
-- [ ] **Step 3: Write failing manifest and registry tests**
+Assert count label, zero label, danger class for blocking, count-less warning action for refresh failure, absence without canonical TestSpec, command data attribute, activation event, Japanese command title, and exact one-to-one registry.
 
-Add the command to activation events, contributed commands, `UNIT_TEST_RUNNER_COMMAND_IDS`, and the handler map. The existing registry test must still prove exact one-to-one registration.
-
-Use this Japanese title:
-
-```text
-UnitTestRunner: 未確定テスト項目を入力
-```
-
-- [ ] **Step 4: Run focused Workflow tests and verify failures**
+- [ ] **Step 3: Run and confirm missing integration**
 
 ```powershell
 Push-Location vscode\extension
@@ -1522,120 +995,54 @@ node --test dist/test/testInputSummaryCache.test.js dist/test/workflowPanel.test
 Pop-Location
 ```
 
-- [ ] **Step 5: Extend state and availability without starting CLI work in render**
+- [ ] **Step 4: Extend state/availability without render-time I/O**
 
-Add a serializable cached state:
+Add `testSpec` availability from `reports.testSpecJson` and optional cached summary state to `WorkflowState`. `renderWorkflowHtml()` reads only supplied state/availability; it receives no client, callback, or promise.
 
-```typescript
-export interface TestInputSummaryState {
-  workspace: string;
-  revision: number;
-  specSha256: string;
-  summary: TestInputFormSummary;
-  error?: string;
-  updatedAt: string;
-}
-```
+- [ ] **Step 5: Render editor action in simple and detailed modes**
 
-Add `testSpec` to `WorkflowReportAvailability`, derived from `reports.testSpecJson`. `renderWorkflowHtml()` may read only `WorkflowState` and file availability passed to it; it must not receive a client callback or promise.
+Place near test-design review. Show attention, unresolved, unconfirmed, and blocking counts. Update copy from legacy manual JSON editing to canonical editor usage.
 
-- [ ] **Step 6: Render the editor card in both simple and detailed modes**
+- [ ] **Step 6: Register panel and command**
 
-Place the action near test-design review. Include current attention, unresolved, unconfirmed, and blocking counts. Use warning styling only when `executionBlockingCount > 0` or summary refresh failed.
+Add activation event, command contribution titled `UnitTestRunner: 未確定テスト項目を入力`, command-registry ID, complete handler map, one client/panel factory during activation, and save callback to summary refresh.
 
-Update workflow copy so canonical `test_spec.json` and the dedicated editor replace instructions to edit legacy JSON manually. Keep legacy filenames only where compatibility is explicitly documented.
+- [ ] **Step 7: Refresh only at approved lifecycle boundaries**
 
-- [ ] **Step 7: Register the panel and command in `extension.ts`**
+Invalidate before and refresh after successful analyze, reanalyze, explicit test-design generation, form save, and activation restoration. Ignore late responses for a no-longer-current workspace. Cache error without blocking unrelated Workflow operations.
 
-Create one CLI client and panel factory during activation. Add handler:
-
-```typescript
-'unitTestRunner.openTestInputEditor': async () => {
-  const workspace = await lastWorkspace(context);
-  await testInputEditor.open(workspace);
-},
-```
-
-The panel save callback triggers an async summary refresh and `workflowPanel.refresh()`.
-
-- [ ] **Step 8: Refresh summaries only at lifecycle boundaries**
-
-Call summary-only refresh:
-
-- after successful analyze;
-- after successful reanalyze;
-- after successful explicit test-design generation;
-- after successful form save;
-- once at activation when the restored Workflow state has a workspace and canonical TestSpec.
-
-Invalidate before starting those operations. Ignore late responses for a no-longer-current workspace. On failure cache the error and keep the command available; do not block unrelated Workflow rendering.
-
-- [ ] **Step 9: Rerun focused and full VS Code tests**
+- [ ] **Step 8: Run full VS Code suite and commit**
 
 ```powershell
 Push-Location vscode\extension
 npm test
 Pop-Location
-```
-
-- [ ] **Step 10: Commit Workflow integration**
-
-```powershell
 git add vscode/extension/src/testInputEditor/summaryCache.ts vscode/extension/src/workflow vscode/extension/src/commands/commandRegistry.ts vscode/extension/src/extension.ts vscode/extension/package.json vscode/extension/src/test
 git commit -m "feat: surface unresolved test inputs in workflow"
 ```
 
-### Task 13: Document usage, run full regression, and verify distribution packaging
+### Task 12: Document, run complete regression, smoke real output, and package
 
 **Files:**
 - Create: `docs/test_input_editor.md`
 - Modify: `docs/vscode_usage_guide.md`
 - Modify: `README.md`
 - Modify: `vscode/extension/src/test/uiCopy.test.ts`
-- Verify: all files changed by Tasks 1–12
+- Verify: all implementation files
 
-**Interfaces:**
-- User documentation explains manual opening, hybrid input, explicit partial save, confirmation semantics, promotion, warnings, revision conflicts, and reanalysis.
-- Final verification covers Python, TypeScript, CLI smoke, canonical harness consumption, and packaged VSIX/CLI.
+- [ ] **Step 1: Add failing documentation/copy assertions**
 
-- [ ] **Step 1: Add documentation assertions before writing prose**
+Require command title, count labels, `確認済み` semantics, canonical `test_spec.json`, and absence of normal-path instructions to edit legacy `test_case_design.json`.
 
-Extend `uiCopy.test.ts` and, if needed, a lightweight Python docs test to require:
+- [ ] **Step 2: Write dedicated guide**
 
-- command title `未確定テスト項目を入力`;
-- Workflow labels with count and blocking language;
-- no instruction to edit `test_case_design.json` as the normal path;
-- references to canonical `test_spec.json` and `確認済み` semantics.
+Document manual open, statuses, hybrid suggestions/free C expressions, explicit partial save, item confirmation versus formal approval, hard errors versus warnings, promotion/demotion, revision/fingerprint conflict, stale reanalysis, and canonical CLI commands.
 
-- [ ] **Step 2: Write the dedicated usage guide**
+- [ ] **Step 3: Update README and general VS Code guide**
 
-`docs/test_input_editor.md` must include:
+Add editor to Workflow, outputs, command list, and reanalysis. Mention legacy alias only as compatibility behavior.
 
-1. prerequisites and how the current function workspace is selected;
-2. the Workflow button and why the tab never auto-opens;
-3. case list and item status meanings;
-4. suggestion selection plus free C-expression editing;
-5. explicit save and partial save;
-6. difference between value entry, item confirmation, and formal review approval;
-7. hard errors versus warnings;
-8. automatic promotion and limited demotion;
-9. revision/fingerprint conflict resolution;
-10. stale-source reanalysis flow;
-11. canonical CLI reproduction commands.
-
-Use copy-pasteable commands:
-
-```powershell
-py -m unit_test_runner --json get-test-input-form --workspace $out
-py -m unit_test_runner --json apply-test-input-form --workspace $out --input $changes --expected-revision 3
-py -m unit_test_runner --json generate-harness-skeleton --function-signature "$out\reports\function_signature.json" --global-access "$out\reports\global_access.json" --call-report "$out\reports\call_report.json" --test-spec "$out\reports\test_spec.json" --dependency-policy "$out\reports\dependency_policy.json" --out $out --overwrite
-```
-
-- [ ] **Step 3: Update README and the general VS Code guide**
-
-Add the dedicated editor to the normal Workflow, outputs, command list, and reanalysis description. Replace the statement that reanalysis reads `reports/test_case_design.json` with canonical `reports/test_spec.json`; mention the legacy alias only as compatibility behavior.
-
-- [ ] **Step 4: Run every Python test module in isolation**
+- [ ] **Step 4: Run every Python module in isolation**
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path .\src).Path
@@ -1653,9 +1060,7 @@ if ($failed.Count -ne 0) {
 }
 ```
 
-Expected: all modules pass, including every new form test and all existing contract, harness, execution, and reanalysis tests.
-
-- [ ] **Step 5: Run the full VS Code suite from a clean install**
+- [ ] **Step 5: Run full VS Code suite from clean install**
 
 ```powershell
 Push-Location vscode\extension
@@ -1664,37 +1069,67 @@ npm test
 Pop-Location
 ```
 
-Expected: TypeScript compiles in strict mode and all Node tests pass.
-
-- [ ] **Step 6: Run the real canonical smoke sequence**
+- [ ] **Step 6: Run a real smoke using queried revision, IDs, fingerprints, and current values**
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path .\src).Path
 $fixture = "$PWD\tests\fixtures\vc6_project"
 $out = "$env:TEMP\unitTestRunner-input-editor-smoke\Control_Update"
+$changesPath = Join-Path $env:TEMP ("unitTestRunner-input-changes-" + [guid]::NewGuid().ToString("N") + ".json")
 
 py -m unit_test_runner --json analyze-function --workspace $fixture --dsw "$fixture\Product.dsw" --source src\control.c --function Control_Update --configuration "Win32 Debug" --project Control --out $out --phase harness
-py -m unit_test_runner --json get-test-input-form --workspace $out
-# Build changes.json from the returned item IDs and current fingerprints, using concrete reviewed expressions.
-py -m unit_test_runner --json apply-test-input-form --workspace $out --input "$out\changes.json" --expected-revision 1
-py -m unit_test_runner --json get-test-spec --workspace $out
-py -m unit_test_runner --json generate-harness-skeleton --function-signature "$out\reports\function_signature.json" --global-access "$out\reports\global_access.json" --call-report "$out\reports\call_report.json" --test-spec "$out\reports\test_spec.json" --dependency-policy "$out\reports\dependency_policy.json" --out $out --overwrite
-py -m unit_test_runner --json build-probe --workspace $out --dry-run --overwrite
+$formEnvelope = py -m unit_test_runner --json get-test-input-form --workspace $out | ConvertFrom-Json
+$form = $formEnvelope.data.details
+$changes = @()
+foreach ($case in @($form.cases)) {
+  foreach ($item in @($case.items)) {
+    if (-not $item.blocking) { continue }
+    $values = [ordered]@{}
+    foreach ($control in @($item.controls)) {
+      if (-not $control.required_for_confirmation) { continue }
+      $current = [string]$control.value
+      $isUnresolved = [string]::IsNullOrWhiteSpace($current) -or $current -match '^(?i:TBD|TODO|UNKNOWN|UNRESOLVED)'
+      if (-not $isUnresolved) {
+        $values[$control.name] = $current
+        continue
+      }
+      $suggestion = @($control.suggestions) | Select-Object -First 1
+      $values[$control.name] = if ($null -ne $suggestion) { [string]$suggestion.value } else { '0' }
+    }
+    $changes += [ordered]@{
+      item_id = [string]$item.item_id
+      subject_fingerprint = [string]$item.subject_fingerprint
+      values = $values
+      confirmed = $true
+    }
+  }
+}
+[ordered]@{ schema_version = '1.0'; changes = $changes } |
+  ConvertTo-Json -Depth 12 |
+  Set-Content -LiteralPath $changesPath -Encoding utf8
+
+try {
+  py -m unit_test_runner --json apply-test-input-form --workspace $out --input $changesPath --expected-revision ([int]$form.revision)
+  py -m unit_test_runner --json get-test-spec --workspace $out
+  py -m unit_test_runner --json generate-harness-skeleton --function-signature "$out\reports\function_signature.json" --global-access "$out\reports\global_access.json" --call-report "$out\reports\call_report.json" --test-spec "$out\reports\test_spec.json" --dependency-policy "$out\reports\dependency_policy.json" --out $out --overwrite
+  py -m unit_test_runner --json build-probe --workspace $out --dry-run --overwrite
+}
+finally {
+  Remove-Item -LiteralPath $changesPath -Force -ErrorAction SilentlyContinue
+}
 ```
 
-The smoke operator must create `changes.json` from the actual query output; do not hard-code item IDs or fingerprints in documentation or scripts.
+Expected: no hard-coded ID, fingerprint, or revision; apply advances one revision; blocking count falls; promoted case reaches generated C; build-probe dry-run passes.
 
-Expected: apply succeeds, canonical revision advances once, form summary shrinks, promoted cases appear in generated C, and build-probe dry-run succeeds.
-
-- [ ] **Step 7: Build the distributable CLI and VSIX**
+- [ ] **Step 7: Build distribution**
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_distribution.ps1
 ```
 
-Expected: the packaged executable recognizes both new subcommands and the VSIX manifest contains the editor command. Run the packaged executable with `--help` and verify `get-test-input-form` and `apply-test-input-form` are listed.
+Verify packaged CLI `--help` lists both commands and VSIX manifest contains the editor command.
 
-- [ ] **Step 8: Inspect the final diff for forbidden or accidental changes**
+- [ ] **Step 8: Inspect final diff**
 
 ```powershell
 git diff --check
@@ -1702,15 +1137,9 @@ git status --short
 git diff -- src/unit_test_runner/schemas/test_spec.schema.json
 ```
 
-Expected:
+Expected: no whitespace/temp files, no unapproved canonical schema change, no normal-path legacy consumer, no formal-review mutation.
 
-- no whitespace errors;
-- no unintended generated files or temporary form request files;
-- no change to canonical TestSpec schema unless a separately approved migration was introduced;
-- no new normal-path dependency on legacy `test_case_design.json`;
-- no formal review mutation in the form service.
-
-- [ ] **Step 9: Commit documentation and final verification adjustments**
+- [ ] **Step 9: Commit docs**
 
 ```powershell
 git add README.md docs/test_input_editor.md docs/vscode_usage_guide.md vscode/extension/src/test/uiCopy.test.ts
@@ -1719,20 +1148,21 @@ git commit -m "docs: explain test input editor workflow"
 
 ## Completion Gate
 
-Before declaring implementation complete, verify all of the following from fresh command output:
+Before declaring completion, verify from fresh command output:
 
-- The Python form model is strict, bounded, and freshness-validated.
-- IDs are semantic and index-independent; ambiguous subjects are not writable.
-- Partial saves are atomic and revision-guarded.
-- Confirmed unresolved values are rejected; suspicious C expressions are warnings only.
-- Formal review authority, provenance, and historical unresolved records are unchanged.
-- Eligible unresolved main cases promote only when every execution-required parent is concrete and confirmed.
-- Intentional additional candidates do not promote.
-- Only touched unsafe executable cases demote; unrelated saves do not reclassify cases.
-- Markdown/CSV export failure does not roll back canonical JSON.
-- The VS Code adapter uses canonical `--test-spec` and `--previous-test-spec` paths.
-- Webview content is escaped, CSP-protected, and free of direct canonical writes.
-- Drafts survive panel hide/close within one extension session, but not VS Code restart.
-- Conflicts retain drafts and require explicit resolution.
-- Workflow render never launches a CLI process, and cached counts refresh at approved lifecycle boundaries.
-- Python tests, VS Code tests, canonical end-to-end smoke, and distribution build all pass.
+- strict bounded freshness-validated form contracts;
+- item IDs stable across reorder and promotion/demotion, with no array index or case location in the hash;
+- ambiguous items not writable;
+- atomic partial save and one revision increment;
+- confirmed unresolved values rejected, advisory C warnings saveable;
+- formal review/provenance/history unchanged;
+- only eligible ready candidates promote;
+- intentional candidates stay additional;
+- only touched unsafe executable cases demote;
+- view-export failure does not roll back canonical JSON;
+- VS Code uses canonical `--test-spec` and `--previous-test-spec`;
+- Webview escape/CSP/no direct canonical write;
+- in-session draft retention only;
+- explicit conflict resolution with draft preservation;
+- no CLI process during Workflow render;
+- Python suite, VS Code suite, canonical smoke, and distribution build all pass.
