@@ -31,6 +31,8 @@ from .field_locator import (
 )
 from .service import (
     CurrentFormSnapshot,
+    TestInputApplyResult,
+    apply_test_input_form,
     build_test_input_form,
     load_current_form_snapshot,
 )
@@ -43,6 +45,7 @@ __all__ = [
     "FORM_SCHEMA_VERSION",
     "ControlRule",
     "CurrentFormSnapshot",
+    "TestInputApplyResult",
     "FieldRule",
     "FormCase",
     "FormControl",
@@ -54,6 +57,7 @@ __all__ = [
     "TestInputChangeRequest",
     "TestInputFormDocument",
     "TestInputFormError",
+    "apply_test_input_form",
     "build_test_input_form",
     "canonical_bytes",
     "digest",
