@@ -10,7 +10,18 @@ def select_candidates_for_coverage(boundary_payload: dict, coverage_id: str, max
                 item["_candidate_collection"] = collection
                 matching.append(item)
     matching.sort(key=_candidate_sort_key)
-    return matching[:max_items], matching[max_items:]
+
+    selected: list[dict] = []
+    additional: list[dict] = []
+    selected_subjects: set[tuple[str, ...]] = set()
+    for candidate in matching:
+        subject = _candidate_subject(candidate)
+        if len(selected) < max_items and subject not in selected_subjects:
+            selected.append(candidate)
+            selected_subjects.add(subject)
+        else:
+            additional.append(candidate)
+    return selected, additional
 
 
 def fallback_input_candidates(boundary_payload: dict, max_items: int = 2) -> list[dict]:
@@ -19,7 +30,23 @@ def fallback_input_candidates(boundary_payload: dict, max_items: int = 2) -> lis
     return candidates[:max_items]
 
 
-def _candidate_sort_key(candidate: dict) -> tuple[int, int, str]:
+def _candidate_sort_key(candidate: dict) -> tuple[int, int, int, str]:
     confidence_rank = {"high": 0, "medium": 1, "low": 2}.get(candidate.get("confidence"), 3)
     review_rank = 1 if candidate.get("review_required", True) else 0
-    return confidence_rank, review_rank, candidate.get("candidate_id", "")
+    value_kind_rank = 0 if candidate.get("value_kind") == "boundary_at" else 1
+    return confidence_rank, review_rank, value_kind_rank, candidate.get("candidate_id", "")
+
+
+def _candidate_subject(candidate: dict) -> tuple[str, ...]:
+    collection = str(candidate.get("_candidate_collection") or "unknown")
+    if collection == "input_candidates":
+        return (
+            collection,
+            str(candidate.get("target_kind") or "unknown"),
+            str(candidate.get("target_name") or "unknown"),
+        )
+    if collection == "state_candidates":
+        return (collection, str(candidate.get("variable_name") or "unknown"))
+    if collection == "stub_return_candidates":
+        return (collection, str(candidate.get("call_name") or "unknown"))
+    return (collection, str(candidate.get("candidate_id") or "unknown"))
