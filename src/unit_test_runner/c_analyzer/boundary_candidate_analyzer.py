@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 
 from .boundary_models import (
@@ -41,14 +42,20 @@ def generate_boundary_equivalence_candidates(
 
     input_candidates.extend(_switch_candidates(coverage_design))
     input_candidates.extend(_loop_candidates(coverage_design))
-    links = _coverage_links(input_candidates, state_candidates, stub_candidates, coverage_design)
-    status = "generated" if input_candidates or state_candidates or stub_candidates else "insufficient_information"
+    deduped_input_candidates = _dedupe_inputs(input_candidates)
+    links = _coverage_links(
+        deduped_input_candidates,
+        state_candidates,
+        stub_candidates,
+        coverage_design,
+    )
+    status = "generated" if deduped_input_candidates or state_candidates or stub_candidates else "insufficient_information"
     return BoundaryEquivalenceReport(
         source_path=function_signature.source_path,
         source_sha256=function_signature.source_sha256,
         function_name=function_signature.function_name,
         status=status,
-        input_candidates=_dedupe_inputs(input_candidates),
+        input_candidates=deduped_input_candidates,
         state_candidates=state_candidates,
         stub_return_candidates=stub_candidates,
         equivalence_classes=equivalence_classes,
@@ -154,7 +161,13 @@ def _state_candidates(condition_id: str, raw: str, coverage_ids: list[str], glob
         for value in values:
             candidates.append(
                 StateValueCandidate(
-                    candidate_id=f"STATE_{declaration.name}_{len(candidates) + 1:03d}",
+                    candidate_id=_candidate_id(
+                        "STATE",
+                        declaration.name,
+                        value,
+                        declaration.scope,
+                        condition_id,
+                    ),
                     variable_name=declaration.name,
                     scope=declaration.scope,
                     value_expression=value,
@@ -186,7 +199,24 @@ def _stub_return_candidates(condition_id: str, raw: str, coverage_ids: list[str]
 
 
 def _coverage_for_condition(condition_id: str, coverage: CoverageDesignReport) -> list[str]:
-    return [item.coverage_id for item in coverage.coverage_items if item.target_id == condition_id or condition_id in item.target_id or item.target_id.startswith("BR_")]
+    target_ids = {condition_id}
+    for branch in coverage.branches:
+        if branch.condition and branch.condition.condition_id == condition_id:
+            target_ids.add(branch.branch_id)
+    for switch in coverage.switches:
+        if switch.expression.condition_id == condition_id:
+            target_ids.add(switch.switch_id)
+    for loop in coverage.loops:
+        if loop.condition and loop.condition.condition_id == condition_id:
+            target_ids.add(loop.loop_id)
+    for ternary in coverage.ternaries:
+        if ternary.condition.condition_id == condition_id:
+            target_ids.add(ternary.ternary_id)
+    return [
+        item.coverage_id
+        for item in coverage.coverage_items
+        if item.target_id in target_ids
+    ]
 
 
 def _coverage_links(inputs: list[InputValueCandidate], states: list[StateValueCandidate], stubs: list[StubReturnCandidate], coverage: CoverageDesignReport) -> list[CandidateCoverageLink]:
@@ -211,10 +241,16 @@ def _around(value: str) -> list[str]:
 
 
 def _input(target: str, target_kind: str, value: str, value_kind: str, source: str, condition_id: str | None, coverage_ids: list[str], purpose: str, evidence: str, confidence: str) -> InputValueCandidate:
-    safe_target = re.sub(r"\W+", "_", target).strip("_") or "unknown"
-    safe_value = re.sub(r"\W+", "_", value).strip("_") or "value"
     return InputValueCandidate(
-        candidate_id=f"IN_{safe_target}_{safe_value}"[:80],
+        candidate_id=_candidate_id(
+            "IN",
+            target,
+            value,
+            target_kind,
+            value_kind,
+            source,
+            condition_id,
+        ),
         target_name=target,
         target_kind=target_kind,
         value_expression=value,
@@ -230,9 +266,43 @@ def _input(target: str, target_kind: str, value: str, value_kind: str, source: s
 
 
 def _stub(call_name: str, value: str, value_kind: str, call_id: str | None, condition_id: str, coverage_ids: list[str], purpose: str, evidence: str, confidence: str) -> StubReturnCandidate:
-    safe_call = re.sub(r"\W+", "_", call_name)
-    safe_value = re.sub(r"\W+", "_", value).strip("_") or "value"
-    return StubReturnCandidate(f"STUB_{safe_call}_{safe_value}"[:80], call_name, value, value_kind, call_id, condition_id, coverage_ids, purpose, confidence, True, evidence)
+    candidate_id = _candidate_id(
+        "STUB",
+        call_name,
+        value,
+        value_kind,
+        call_id,
+        condition_id,
+    )
+    return StubReturnCandidate(candidate_id, call_name, value, value_kind, call_id, condition_id, coverage_ids, purpose, confidence, True, evidence)
+
+
+def _candidate_id(prefix: str, *parts: object) -> str:
+    values = ["" if part is None else str(part) for part in parts]
+    semantic_key = "\x1f".join(values)
+    digest = hashlib.sha256(semantic_key.encode("utf-8")).hexdigest()[:12]
+    readable_parts = [
+        _candidate_id_component(value)
+        for value in values[:2]
+        if value
+    ]
+    readable = "_".join(part for part in readable_parts if part)
+    stem = f"{prefix}_{readable}" if readable else prefix
+    max_stem_length = 80 - len(digest) - 1
+    return f"{stem[:max_stem_length]}_{digest}"
+
+
+def _candidate_id_component(value: str) -> str:
+    stripped = value.strip()
+    sign = ""
+    if stripped.startswith("-"):
+        sign = "neg_"
+        stripped = stripped[1:]
+    elif stripped.startswith("+"):
+        sign = "pos_"
+        stripped = stripped[1:]
+    safe = re.sub(r"\W+", "_", stripped).strip("_") or "value"
+    return f"{sign}{safe}"
 
 
 def _dedupe_inputs(candidates: list[InputValueCandidate]) -> list[InputValueCandidate]:
