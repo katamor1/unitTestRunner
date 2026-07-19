@@ -1,1 +1,1 @@
-feat: add test input editor gui workflow
+fix: route test design review to canonical TestSpec
