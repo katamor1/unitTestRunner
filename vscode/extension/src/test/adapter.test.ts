@@ -215,7 +215,8 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.deepEqual(finalize.args.slice(0, 3), ['--json', 'finalize-dossier', '--workspace']);
     assert.deepEqual(testDesign.args.slice(0, 3), ['--json', 'generate-test-design', '--dossier']);
     assert.deepEqual(harness.args.slice(0, 2), ['--json', 'generate-harness-skeleton']);
-    assert.deepEqual(harness.args.slice(harness.args.indexOf('--test-case-design'), harness.args.indexOf('--test-case-design') + 2), ['--test-case-design', path.join(target.outputWorkspace, 'reports', 'test_case_design.json')]);
+    assert.deepEqual(harness.args.slice(harness.args.indexOf('--test-spec'), harness.args.indexOf('--test-spec') + 2), ['--test-spec', path.join(target.outputWorkspace, 'reports', 'test_spec.json')]);
+    assert.equal(harness.args.includes('--test-case-design'), false);
     assert.deepEqual(harness.args.slice(harness.args.indexOf('--dependency-policy'), harness.args.indexOf('--dependency-policy') + 2), ['--dependency-policy', path.join(target.outputWorkspace, 'reports', 'dependency_policy.json')]);
     assert.deepEqual(harness.args.slice(harness.args.indexOf('--out'), harness.args.indexOf('--out') + 2), ['--out', target.outputWorkspace]);
     const buildProbe = buildBuildProbeInvocation(settings, target.outputWorkspace, true);

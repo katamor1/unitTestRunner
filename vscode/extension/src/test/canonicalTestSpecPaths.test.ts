@@ -111,13 +111,13 @@ describe('canonical TestSpec paths in the VS Code adapter', () => {
     const workspace = 'D:\\unit-test-output\\Control_Update';
     const conventional = resolveReportPaths(workspace);
 
-    assert.equal(conventional.testSpecJson, path.join(workspace, 'reports', 'test_spec.json'));
-    assert.equal(conventional.testSpecMd, path.join(workspace, 'reports', 'test_spec.md'));
-    assert.equal(conventional.testSpecCsv, path.join(workspace, 'reports', 'test_spec.csv'));
+    assert.equal(conventional.testSpecJson, path.win32.join(workspace, 'reports', 'test_spec.json'));
+    assert.equal(conventional.testSpecMd, path.win32.join(workspace, 'reports', 'test_spec.md'));
+    assert.equal(conventional.testSpecCsv, path.win32.join(workspace, 'reports', 'test_spec.csv'));
 
     const parsed = parseCliResult(JSON.stringify(validEnvelope()), '', workspace);
-    assert.equal(parsed.reports.testSpecJson, path.join(workspace, 'reports', 'test_spec.json'));
-    assert.equal(parsed.reports.testSpecMd, path.join(workspace, 'reports', 'test_spec.md'));
-    assert.equal(parsed.reports.testSpecCsv, path.join(workspace, 'reports', 'test_spec.csv'));
+    assert.equal(parsed.reports.testSpecJson, path.win32.join(workspace, 'reports', 'test_spec.json'));
+    assert.equal(parsed.reports.testSpecMd, path.win32.join(workspace, 'reports', 'test_spec.md'));
+    assert.equal(parsed.reports.testSpecCsv, path.win32.join(workspace, 'reports', 'test_spec.csv'));
   });
 });

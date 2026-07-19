@@ -97,8 +97,8 @@ export function buildReanalyzeFunctionInvocation(settings: AdapterSettings, targ
     target.outputWorkspace,
     '--previous-dossier',
     path.join(reports, 'function_dossier.json'),
-    '--previous-test-case-design',
-    path.join(reports, 'test_case_design.json'),
+    '--previous-test-spec',
+    path.join(reports, 'test_spec.json'),
   ]);
   const project = target.project || settings.defaultProject;
   if (project) {
@@ -181,8 +181,8 @@ export function buildGenerateHarnessSkeletonInvocation(settings: AdapterSettings
     path.join(reports, 'global_access.json'),
     '--call-report',
     path.join(reports, 'call_report.json'),
-    '--test-case-design',
-    path.join(reports, 'test_case_design.json'),
+    '--test-spec',
+    path.join(reports, 'test_spec.json'),
     '--dependency-policy',
     path.join(reports, 'dependency_policy.json'),
     '--out',
