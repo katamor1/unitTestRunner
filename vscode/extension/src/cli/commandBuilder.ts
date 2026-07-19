@@ -171,6 +171,39 @@ export function buildGenerateTestDesignInvocation(settings: AdapterSettings, dos
   return invocation(settings, jsonPrefix(settings).concat(['generate-test-design', '--dossier', dossierPath]), false);
 }
 
+export function buildGetTestInputFormInvocation(
+  settings: AdapterSettings,
+  workspace: string,
+  summaryOnly = false,
+): CliInvocation {
+  const args = jsonPrefix(settings).concat([
+    'get-test-input-form',
+    '--workspace',
+    workspace,
+  ]);
+  if (summaryOnly) {
+    args.push('--summary-only');
+  }
+  return invocation(settings, args, false);
+}
+
+export function buildApplyTestInputFormInvocation(
+  settings: AdapterSettings,
+  workspace: string,
+  inputPath: string,
+  expectedRevision: number,
+): CliInvocation {
+  return invocation(settings, jsonPrefix(settings).concat([
+    'apply-test-input-form',
+    '--workspace',
+    workspace,
+    '--input',
+    inputPath,
+    '--expected-revision',
+    String(expectedRevision),
+  ]), false);
+}
+
 export function buildGenerateHarnessSkeletonInvocation(settings: AdapterSettings, workspace: string): CliInvocation {
   const reports = path.join(workspace, 'reports');
   const args = jsonPrefix(settings).concat([

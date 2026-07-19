@@ -550,6 +550,25 @@ def _reclassify_cases(
     return promoted_ids, demoted_ids
 
 
+def _mark_promoted_unresolved_history_nonblocking(
+    spec: TestSpec,
+    promoted_case_ids: tuple[str, ...],
+) -> None:
+    if not promoted_case_ids:
+        return
+    promoted = set(promoted_case_ids)
+    for item in spec.unresolved_items:
+        if not isinstance(item, dict):
+            continue
+        related = {
+            str(case_id)
+            for case_id in item.get("related_test_case_ids") or []
+            if str(case_id).strip()
+        }
+        if related & promoted:
+            item["blocking"] = False
+
+
 def _validate_candidate(spec: TestSpec, current: CurrentFormSnapshot) -> None:
     violations = validate_test_spec(spec, current_context=current.context)
     if violations:
@@ -613,6 +632,7 @@ def apply_test_input_form(
             touched_executable_execution_ids
         ),
     )
+    _mark_promoted_unresolved_history_nonblocking(candidate, promoted_ids)
     _validate_candidate(candidate, current)
     try:
         saved, canonical_artifact = save_test_spec_snapshot(

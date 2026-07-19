@@ -28,6 +28,7 @@ export const UNIT_TEST_RUNNER_COMMAND_IDS = [
   'unitTestRunner.openChangeImpactReport',
   'unitTestRunner.openRegressionSelection',
   'unitTestRunner.generateTestDesign',
+  'unitTestRunner.openTestInputEditor',
   'unitTestRunner.generateHarnessSkeleton',
   'unitTestRunner.buildProbeDryRun',
   'unitTestRunner.runBuildProbe',

@@ -38,6 +38,19 @@ import { resolveFunctionNameFromText } from './functionTarget/regexFunctionResol
 import { ReportPaths, resolveReportPaths } from './reports/reportPathResolver';
 import { openMarkdown, openReport } from './reports/reportOpener';
 import { SuiteDashboardPanel } from './suite/suiteDashboard';
+import { TestInputCliClient, TestInputFormClient } from './testInputEditor/cliClient';
+import { TestInputEditorPanel } from './testInputEditor/panel';
+import {
+  readyTestInputSummaryState,
+  readyTestInputSummaryStateFromApply,
+  loadTestInputSummaryState,
+} from './testInputEditor/summaryCache';
+import {
+  applyTestInputSummaryForWorkspace,
+  clearTestInputSummaryForWorkspace,
+  currentTestInputWorkspace,
+  sameTestInputWorkspace,
+} from './testInputEditor/workflowIntegration';
 import { readSelectedSuiteEntryIds, SuitePanelProvider } from './suite/suitePanel';
 import { WorkflowPanelProvider } from './workflow/workflowPanel';
 import {
@@ -59,6 +72,7 @@ const LAST_SUITE_ERROR_KEY = 'unitTestRunner.lastSuiteError';
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Unit Test Runner');
   context.subscriptions.push(output);
+  const testInputClient = createTestInputClient(context);
   let workflowPanel: WorkflowPanelProvider;
   workflowPanel = new WorkflowPanelProvider(
     context,
@@ -92,6 +106,9 @@ export function activate(context: vscode.ExtensionContext): void {
       workflowPanel.refresh();
       void vscode.window.showInformationMessage('UnitTestRunner: ファイルの保存を確認しました。次のステップへ進めます。');
     }
+    if (path.basename(document.uri.fsPath).toLowerCase() === 'test_spec.json') {
+      void refreshTestInputSummary(context, workflowPanel, testInputClient);
+    }
   }));
 
   const quickHandlers = createQuickCommandHandlers({
@@ -116,6 +133,7 @@ export function activate(context: vscode.ExtensionContext): void {
     'unitTestRunner.openChangeImpactReport': async () => openLastReport(context, 'changeImpactReportMd'),
     'unitTestRunner.openRegressionSelection': async () => openLastReport(context, 'regressionSelectionCsv'),
     'unitTestRunner.generateTestDesign': async () => runWorkspaceCommand(context, output, 'testDesign', workflowPanel),
+    'unitTestRunner.openTestInputEditor': async () => openTestInputEditor(context, workflowPanel, testInputClient),
     'unitTestRunner.generateHarnessSkeleton': async () => runWorkspaceCommand(context, output, 'harness', workflowPanel),
     'unitTestRunner.buildProbeDryRun': async () => runWorkspaceCommand(context, output, 'buildProbeDryRun', workflowPanel),
     'unitTestRunner.runBuildProbe': async () => runWorkspaceCommand(context, output, 'buildProbeRun', workflowPanel),
@@ -140,6 +158,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     ...registerUnitTestRunnerCommands(context, { registry: commandRegistry, handlers }),
   );
+  void refreshTestInputSummary(context, workflowPanel, testInputClient);
 }
 
 export function deactivate(): void {
@@ -856,6 +875,76 @@ function readWorkflowState(context: vscode.ExtensionContext): WorkflowState {
   return context.workspaceState.get<WorkflowState>(WORKFLOW_STATE_KEY) ?? createInitialWorkflowState(workflowSettingsReady(context));
 }
 
+function createTestInputClient(context: vscode.ExtensionContext): TestInputCliClient {
+  return new TestInputCliClient({
+    settings: () => readConfig(context),
+    storageRoot: path.join(context.globalStorageUri.fsPath, 'test-input-editor'),
+  });
+}
+
+async function openTestInputEditor(
+  context: vscode.ExtensionContext,
+  workflowPanel: WorkflowPanelProvider,
+  client: TestInputFormClient,
+): Promise<void> {
+  const state = readWorkflowState(context);
+  const workspace = currentTestInputWorkspace(state) ?? await lastWorkspace(context);
+  const specPath = resolveReportPaths(workspace).testSpecJson;
+  if (!specPath || !fs.existsSync(specPath)) {
+    throw new Error(`test_spec.jsonが見つかりません。先に［5. テスト設計を生成］を実行してください。確認先: ${specPath ?? workspace}`);
+  }
+  await TestInputEditorPanel.open(context, workspace, {
+    client,
+    onSaved: async (savedWorkspace, result, model) => {
+      const latest = readWorkflowState(context);
+      const next = applyTestInputSummaryForWorkspace(
+        latest,
+        savedWorkspace,
+        model
+          ? readyTestInputSummaryState(savedWorkspace, model)
+          : readyTestInputSummaryStateFromApply(savedWorkspace, result),
+      );
+      if (next !== latest) {
+        await context.workspaceState.update(WORKFLOW_STATE_KEY, next);
+      }
+      workflowPanel.refresh();
+    },
+  });
+}
+
+async function refreshTestInputSummary(
+  context: vscode.ExtensionContext,
+  workflowPanel: WorkflowPanelProvider,
+  client: TestInputFormClient,
+  requestedWorkspace?: string,
+): Promise<void> {
+  const before = readWorkflowState(context);
+  const workspace = requestedWorkspace ?? currentTestInputWorkspace(before);
+  if (!workspace) {
+    return;
+  }
+  const specPath = resolveReportPaths(workspace).testSpecJson;
+  if (!specPath || !fs.existsSync(specPath)) {
+    const cleared = clearTestInputSummaryForWorkspace(before, workspace);
+    if (cleared !== before) {
+      await context.workspaceState.update(WORKFLOW_STATE_KEY, cleared);
+      workflowPanel.refresh();
+    }
+    return;
+  }
+  const summary = await loadTestInputSummaryState(client, workspace);
+  const latest = readWorkflowState(context);
+  const currentWorkspace = currentTestInputWorkspace(latest);
+  if (!currentWorkspace || !sameTestInputWorkspace(currentWorkspace, workspace)) {
+    return;
+  }
+  const next = applyTestInputSummaryForWorkspace(latest, workspace, summary);
+  if (next !== latest) {
+    await context.workspaceState.update(WORKFLOW_STATE_KEY, next);
+    workflowPanel.refresh();
+  }
+}
+
 async function recordWorkflowSuccess(context: vscode.ExtensionContext, workflowPanel: WorkflowPanelProvider, event: { kind: WorkflowCommandKind; outputWorkspace?: string; functionName?: string; reports?: ReportPaths }): Promise<void> {
   const state = markWorkflowCommandSucceeded(readWorkflowState(context), event);
   await context.workspaceState.update(WORKFLOW_STATE_KEY, state);
@@ -866,6 +955,12 @@ async function recordWorkflowSuccess(context: vscode.ExtensionContext, workflowP
   if (legacy.lastDossier) {
     await context.globalState.update(LAST_DOSSIER_KEY, legacy.lastDossier);
   }
+  await refreshTestInputSummary(
+    context,
+    workflowPanel,
+    createTestInputClient(context),
+    event.outputWorkspace ?? event.reports?.workspace,
+  );
   workflowPanel.refresh();
 }
 

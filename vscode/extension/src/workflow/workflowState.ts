@@ -1,6 +1,7 @@
 import * as path from 'path';
 
 import { ReportPaths } from '../reports/reportPathResolver';
+import { TestInputFormSummary } from '../testInputEditor/contracts';
 
 export const WORKFLOW_STATE_KEY = 'unitTestRunner.workflowState';
 
@@ -56,8 +57,25 @@ export interface WorkflowState {
   completedStepIds: WorkflowStepId[];
   awaitingSave?: AwaitingSave;
   lastError?: string;
+  testInputSummary?: TestInputSummaryState;
   updatedAt?: string;
 }
+
+export type TestInputSummaryState =
+  | {
+      status: 'ready';
+      workspace: string;
+      revision: number;
+      specSha256: string;
+      summary: TestInputFormSummary;
+      updatedAt: string;
+    }
+  | {
+      status: 'error';
+      workspace: string;
+      message: string;
+      updatedAt: string;
+    };
 
 export interface WorkflowReportAvailability {
   functionDossier: boolean;
@@ -174,10 +192,11 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
   {
     id: 'reviewTestDesign',
     title: '6. テストケース設計を確認',
-    purpose: '生成されたテスト仕様を確認します。CSVは一覧、Markdownはレビュー、test_spec.jsonはテストハーネス生成に使用する正本です。',
-    requiredAction: 'CSVとMarkdownで内容を確認し、TBD_*やreview_requiredは正本JSON（test_spec.json）へ入力して保存します。',
+    purpose: '生成されたテスト仕様を確認します。未確定の入力値・事前状態・スタブ・期待値は専用画面で入力します。',
+    requiredAction: '［未確定項目を入力］を開いて必要な値を入力し、確認済みの項目を明示して保存します。CSVとMarkdownは確認用、test_spec.jsonは正本です。',
     actions: [
-      { id: 'openTestDesign', kind: 'openReport', label: 'テスト仕様（CSV）を開く', reportKey: 'testSpecCsv', stepId: 'reviewTestDesign', primary: true },
+      { id: 'openTestInputEditor', kind: 'command', label: '未確定項目を入力', commandId: 'unitTestRunner.openTestInputEditor', stepId: 'reviewTestDesign', primary: true },
+      { id: 'openTestDesign', kind: 'openReport', label: 'テスト仕様（CSV）を開く', reportKey: 'testSpecCsv', stepId: 'reviewTestDesign' },
       { id: 'openTestDesignMarkdown', kind: 'openReport', label: 'レビュー用Markdownを開く', reportKey: 'testSpecMd', stepId: 'reviewTestDesign' },
       { id: 'openTestDesignJson', kind: 'openReport', label: '正本JSON（test_spec.json）を開く', reportKey: 'testSpecJson', stepId: 'reviewTestDesign' },
       { id: 'confirmTestDesign', kind: 'confirmStep', label: '保存済みとして確定', stepId: 'reviewTestDesign' },
@@ -296,7 +315,7 @@ export function markWorkflowCommandSucceeded(state: WorkflowState, event: Workfl
   if (commandStep) {
     completed.add(commandStep);
   }
-  const reports = mergeReports(state.reports, event.reports, event.outputWorkspace);
+  const reports = mergeReports(workspaceChanged ? undefined : state.reports, event.reports, event.outputWorkspace);
   return {
     ...state,
     settingsReady: true,
@@ -306,6 +325,7 @@ export function markWorkflowCommandSucceeded(state: WorkflowState, event: Workfl
     completedStepIds: Array.from(completed),
     awaitingSave: undefined,
     lastError: undefined,
+    testInputSummary: workspaceChanged ? undefined : state.testInputSummary,
     updatedAt: timestamp(),
   };
 }

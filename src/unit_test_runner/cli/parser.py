@@ -197,6 +197,21 @@ def build_parser() -> argparse.ArgumentParser:
     update_spec.add_argument("--patch", required=True)
     update_spec.add_argument("--expected-revision", required=True, type=int)
 
+    get_form = subcommands.add_parser(
+        "get-test-input-form",
+        help="Build a validated form model for editable test inputs.",
+    )
+    get_form.add_argument("--workspace", required=True)
+    get_form.add_argument("--summary-only", action="store_true")
+
+    apply_form = subcommands.add_parser(
+        "apply-test-input-form",
+        help="Apply revision-checked test input form changes.",
+    )
+    apply_form.add_argument("--workspace", required=True)
+    apply_form.add_argument("--input", required=True)
+    apply_form.add_argument("--expected-revision", required=True, type=int)
+
     get_review = subcommands.add_parser(
         "get-review-status",
         help="Discover current review items, exact guards, decisions, and readiness.",

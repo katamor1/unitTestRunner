@@ -65,6 +65,12 @@ from unit_test_runner.reports.source_membership_markdown import render_source_me
 from unit_test_runner.vc6 import discover_workspace, map_source_to_projects
 from unit_test_runner.vc6.dsp_parser import parse_dsp as parse_dsp_project
 from unit_test_runner.vc6.source_membership import map_source_membership
+from unit_test_runner.test_input_form import (
+    TestInputFormError,
+    apply_test_input_form,
+    build_test_input_form,
+    parse_test_input_change_request,
+)
 from unit_test_runner.test_spec import (
     TestSpecContractError,
     build_current_artifact_context,
@@ -126,6 +132,8 @@ def dispatch(args: argparse.Namespace) -> CLIResult:
         "generate-test-design": handle_generate_test_design,
         "get-test-spec": handle_get_test_spec,
         "update-test-spec": handle_update_test_spec,
+        "get-test-input-form": handle_get_test_input_form,
+        "apply-test-input-form": handle_apply_test_input_form,
         "get-review-status": handle_get_review_status,
         "record-review-decision": handle_record_review_decision,
         "reconcile-test-cases": handle_reconcile_test_cases,
@@ -1145,6 +1153,75 @@ def handle_update_test_spec(args: argparse.Namespace) -> CLIResult:
             if view_export.written
             else []
         ),
+    )
+
+
+MAX_TEST_INPUT_REQUEST_BYTES = 4 * 1024 * 1024
+
+
+def handle_get_test_input_form(args: argparse.Namespace) -> CLIResult:
+    workspace = _existing_dir(args.workspace, "workspace", args.command)
+    try:
+        document = build_test_input_form(
+            workspace,
+            summary_only=bool(args.summary_only),
+        )
+    except TestInputFormError as error:
+        raise CLIError(
+            error.message,
+            EXIT_INPUT_ERROR,
+            args.command,
+            code=error.code,
+        ) from error
+    return CLIResult(
+        status="test_input_form_loaded",
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Editable test input form loaded.",
+        data=document.to_dict(),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
+    )
+
+
+def handle_apply_test_input_form(args: argparse.Namespace) -> CLIResult:
+    workspace = _existing_dir(args.workspace, "workspace", args.command)
+    input_path = _existing_file(args.input, "input", args.command)
+    try:
+        if input_path.stat().st_size > MAX_TEST_INPUT_REQUEST_BYTES:
+            raise TestInputFormError(
+                "test_input_form_invalid",
+                f"Test input change request exceeds {MAX_TEST_INPUT_REQUEST_BYTES} bytes.",
+            )
+        parsed = json.loads(input_path.read_text(encoding="utf-8-sig"))
+        request = parse_test_input_change_request(parsed)
+        applied = apply_test_input_form(
+            workspace,
+            request,
+            args.expected_revision,
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise CLIError(
+            str(error),
+            EXIT_INPUT_ERROR,
+            args.command,
+            code="test_input_form_invalid",
+        ) from error
+    except TestInputFormError as error:
+        raise CLIError(
+            error.message,
+            EXIT_INPUT_ERROR,
+            args.command,
+            code=error.code,
+        ) from error
+    return CLIResult(
+        status="test_input_form_applied",
+        exit_code=EXIT_OK,
+        command=args.command,
+        message="Test input form changes applied.",
+        data=applied.to_dict(),
+        diagnostics=[dict(item) for item in applied.warnings],
+        artifacts=list(applied.artifacts),
+        outcome=DomainOutcome("command", RunOutcome.PASSED, None),
     )
 
 
