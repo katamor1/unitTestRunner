@@ -667,7 +667,8 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.ok(harnessIndex > reviewIndex);
     assert.ok(probeIndex > harnessIndex);
     assert.match(harnessStep.purpose, /ビルドの事前確認/);
-    assert.match(harnessStep.requiredAction, /test_case_design\.json/);
+    assert.match(harnessStep.requiredAction, /test_spec\.json/);
+    assert.doesNotMatch(harnessStep.requiredAction, /test_case_design\.json/);
     assert.equal(harnessStep.actions[0].commandId, 'unitTestRunner.generateHarnessSkeleton');
   });
 
@@ -676,9 +677,9 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.ok(reviewStep);
     const actions = new Map(reviewStep.actions.map((action) => [action.label, action]));
 
-    assert.equal(actions.get('テスト設計（CSV）を開く')?.reportKey, 'testCaseDesignCsv');
-    assert.equal(actions.get('レビュー用Markdownを開く')?.reportKey, 'testCaseDesignMd');
-    assert.equal(actions.get('生成用JSONを開く')?.reportKey, 'testCaseDesignJson');
+    assert.equal(actions.get('テスト仕様（CSV）を開く')?.reportKey, 'testSpecCsv');
+    assert.equal(actions.get('レビュー用Markdownを開く')?.reportKey, 'testSpecMd');
+    assert.equal(actions.get('正本JSON（test_spec.json）を開く')?.reportKey, 'testSpecJson');
   });
 
   it('completes an awaiting-save workflow step only for the matching file', () => {

@@ -19,10 +19,10 @@ describe('canonical TestSpec review route', () => {
     );
     assert.doesNotMatch(`${review.purpose}\n${review.requiredAction}`, /test_case_design\.json/);
 
-    const testSpecCsv = 'D:\\unit-test-output\\Control_Update\\reports\\test_spec.csv';
+    const testSpecJson = 'D:\\unit-test-output\\Control_Update\\reports\\test_spec.json';
     const availability = reportAvailabilityFromPaths(
-      { workspace: 'D:\\unit-test-output\\Control_Update', testSpecCsv },
-      (filePath) => filePath === testSpecCsv,
+      { workspace: 'D:\\unit-test-output\\Control_Update', testSpecJson },
+      (filePath) => filePath === testSpecJson,
     );
     assert.equal(availability.testCaseDesign, true);
   });
