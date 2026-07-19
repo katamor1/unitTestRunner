@@ -63,7 +63,17 @@ jobs:
           set -o pipefail
           mkdir -p .sdd/diagnostics
           {
-            if compgen -G '.sdd/payload.tar.gz.b64.*' > /dev/null; then
+            if [[ -f .sdd/next.patch ]] || compgen -G '.sdd/next.patch.b64.*' > /dev/null; then
+              patch_path=.sdd/next.patch
+              if [[ ! -f "$patch_path" ]]; then
+                cat .sdd/next.patch.b64.* | base64 --decode > /tmp/next.patch
+                patch_path=/tmp/next.patch
+              fi
+              cp "$patch_path" .sdd/diagnostics/next.patch
+              wc -c "$patch_path"
+              git apply --check "$patch_path"
+              git apply "$patch_path"
+            else
               cp .sdd/payload.tar.gz.b64.* .sdd/diagnostics/
               cat .sdd/payload.tar.gz.b64.* > .sdd/diagnostics/concatenated.b64
               python - <<'PY'
@@ -81,16 +91,6 @@ jobs:
               cp /tmp/payload.tar.gz .sdd/diagnostics/payload.tar.gz
               wc -c /tmp/payload.tar.gz
               tar -xzf /tmp/payload.tar.gz -C .
-            else
-              patch_path=.sdd/next.patch
-              if [[ ! -f "$patch_path" ]]; then
-                cat .sdd/next.patch.b64.* | base64 --decode > /tmp/next.patch
-                patch_path=/tmp/next.patch
-              fi
-              cp "$patch_path" .sdd/diagnostics/next.patch
-              wc -c "$patch_path"
-              git apply --check "$patch_path"
-              git apply "$patch_path"
             fi
             bash .sdd/verify.sh
           } 2>&1 | tee .sdd/diagnostics/apply.log
