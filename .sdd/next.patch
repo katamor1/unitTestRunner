@@ -1,0 +1,86 @@
+diff --git a/vscode/extension/src/test/adapter.test.ts b/vscode/extension/src/test/adapter.test.ts
+index bd931ac..847ae10 100644
+--- a/vscode/extension/src/test/adapter.test.ts
++++ b/vscode/extension/src/test/adapter.test.ts
+@@ -667,7 +667,8 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
+     assert.ok(harnessIndex > reviewIndex);
+     assert.ok(probeIndex > harnessIndex);
+     assert.match(harnessStep.purpose, /ビルドの事前確認/);
+-    assert.match(harnessStep.requiredAction, /test_case_design\.json/);
++    assert.match(harnessStep.requiredAction, /test_spec\.json/);
++    assert.doesNotMatch(harnessStep.requiredAction, /test_case_design\.json/);
+     assert.equal(harnessStep.actions[0].commandId, 'unitTestRunner.generateHarnessSkeleton');
+   });
+ 
+@@ -676,9 +677,9 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
+     assert.ok(reviewStep);
+     const actions = new Map(reviewStep.actions.map((action) => [action.label, action]));
+ 
+-    assert.equal(actions.get('テスト設計（CSV）を開く')?.reportKey, 'testCaseDesignCsv');
+-    assert.equal(actions.get('レビュー用Markdownを開く')?.reportKey, 'testCaseDesignMd');
+-    assert.equal(actions.get('生成用JSONを開く')?.reportKey, 'testCaseDesignJson');
++    assert.equal(actions.get('テスト仕様（CSV）を開く')?.reportKey, 'testSpecCsv');
++    assert.equal(actions.get('レビュー用Markdownを開く')?.reportKey, 'testSpecMd');
++    assert.equal(actions.get('正本JSON（test_spec.json）を開く')?.reportKey, 'testSpecJson');
+   });
+ 
+   it('completes an awaiting-save workflow step only for the matching file', () => {
+diff --git a/vscode/extension/src/test/testSpecReviewRoute.test.ts b/vscode/extension/src/test/testSpecReviewRoute.test.ts
+index 40ed196..7d6a55d 100644
+--- a/vscode/extension/src/test/testSpecReviewRoute.test.ts
++++ b/vscode/extension/src/test/testSpecReviewRoute.test.ts
+@@ -19,10 +19,10 @@ describe('canonical TestSpec review route', () => {
+     );
+     assert.doesNotMatch(`${review.purpose}\n${review.requiredAction}`, /test_case_design\.json/);
+ 
+-    const testSpecCsv = 'D:\\unit-test-output\\Control_Update\\reports\\test_spec.csv';
++    const testSpecJson = 'D:\\unit-test-output\\Control_Update\\reports\\test_spec.json';
+     const availability = reportAvailabilityFromPaths(
+-      { workspace: 'D:\\unit-test-output\\Control_Update', testSpecCsv },
+-      (filePath) => filePath === testSpecCsv,
++      { workspace: 'D:\\unit-test-output\\Control_Update', testSpecJson },
++      (filePath) => filePath === testSpecJson,
+     );
+     assert.equal(availability.testCaseDesign, true);
+   });
+diff --git a/vscode/extension/src/workflow/workflowState.ts b/vscode/extension/src/workflow/workflowState.ts
+index 3dc588f..5b02b09 100644
+--- a/vscode/extension/src/workflow/workflowState.ts
++++ b/vscode/extension/src/workflow/workflowState.ts
+@@ -174,20 +174,20 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
+   {
+     id: 'reviewTestDesign',
+     title: '6. テストケース設計を確認',
+-    purpose: '生成されたテストケース設計を確認します。CSVは一覧確認、Markdownはレビュー、JSONはテストハーネス生成に使用します。',
+-    requiredAction: 'CSV、Markdown、JSONを開き、TBD_EXPECTED_RETURNやreview_requiredの項目を入力して保存します。',
++    purpose: '生成されたテスト仕様を確認します。CSVは一覧、Markdownはレビュー、test_spec.jsonはテストハーネス生成に使用する正本です。',
++    requiredAction: 'CSVとMarkdownで内容を確認し、TBD_*やreview_requiredは正本JSON（test_spec.json）へ入力して保存します。',
+     actions: [
+-      { id: 'openTestDesign', kind: 'openReport', label: 'テスト設計（CSV）を開く', reportKey: 'testCaseDesignCsv', stepId: 'reviewTestDesign', primary: true },
+-      { id: 'openTestDesignMarkdown', kind: 'openReport', label: 'レビュー用Markdownを開く', reportKey: 'testCaseDesignMd', stepId: 'reviewTestDesign' },
+-      { id: 'openTestDesignJson', kind: 'openReport', label: '生成用JSONを開く', reportKey: 'testCaseDesignJson', stepId: 'reviewTestDesign' },
++      { id: 'openTestDesign', kind: 'openReport', label: 'テスト仕様（CSV）を開く', reportKey: 'testSpecCsv', stepId: 'reviewTestDesign', primary: true },
++      { id: 'openTestDesignMarkdown', kind: 'openReport', label: 'レビュー用Markdownを開く', reportKey: 'testSpecMd', stepId: 'reviewTestDesign' },
++      { id: 'openTestDesignJson', kind: 'openReport', label: '正本JSON（test_spec.json）を開く', reportKey: 'testSpecJson', stepId: 'reviewTestDesign' },
+       { id: 'confirmTestDesign', kind: 'confirmStep', label: '保存済みとして確定', stepId: 'reviewTestDesign' },
+     ],
+   },
+   {
+     id: 'generateHarnessSkeleton',
+     title: '7. テストハーネスを生成',
+-    purpose: 'レビュー済みのtest_case_design.jsonから、ビルドの事前確認に使用するテストハーネスを生成します。',
+-    requiredAction: 'test_case_design.jsonの期待値とレビュー項目を保存してから、テストハーネスを生成します。',
++    purpose: 'レビュー済みのtest_spec.jsonから、ビルドの事前確認に使用するテストハーネスを生成します。',
++    requiredAction: 'test_spec.jsonの期待値とレビュー項目を保存してから、テストハーネスを生成します。',
+     actions: [
+       { id: 'generateHarnessSkeleton', kind: 'command', label: 'テストハーネスを生成', repeatLabel: 'テストハーネスを再生成', commandId: 'unitTestRunner.generateHarnessSkeleton', primary: true },
+     ],
+@@ -371,7 +371,7 @@ export function reportAvailabilityFromPaths(reports: Partial<ReportPaths> | unde
+     reviewChecklist: reportExists(reports, 'reviewChecklistMd', exists),
+     unresolvedItems: reportExists(reports, 'unresolvedItemsMd', exists),
+     nextActions: reportExists(reports, 'nextActionsMd', exists),
+-    testCaseDesign: reportExists(reports, 'testCaseDesignCsv', exists),
++    testCaseDesign: reportExists(reports, 'testSpecJson', exists),
+     harnessSkeletonReport: reportExists(reports, 'harnessSkeletonReportJson', exists),
+     buildProbeReport: reportExists(reports, 'buildProbeReportMd', exists),
+     testExecutionReport: reportExists(reports, 'testExecutionReportMd', exists),
