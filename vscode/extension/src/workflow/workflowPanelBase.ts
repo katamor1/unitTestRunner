@@ -58,11 +58,26 @@ export function workflowStatusLabel(status: WorkflowStepStatus): string {
 export function resolveWorkflowActionPresentation(
   action: WorkflowAction,
   status?: WorkflowStepStatus,
+  state?: WorkflowState,
 ): WorkflowActionPresentation {
-  const label = status === 'done' && action.repeatLabel ? action.repeatLabel : action.label;
+  let label = status === 'done' && action.repeatLabel ? action.repeatLabel : action.label;
+  let danger = action.danger === true;
+  if (action.id === 'openTestInputEditor' && state?.testInputSummary) {
+    const summaryState = state.testInputSummary;
+    if (summaryState.status === 'ready') {
+      label = summaryState.summary.attentionCount === 0
+        ? '入力内容を確認（0件）'
+        : `未確定項目を入力（${summaryState.summary.attentionCount}件）`;
+      danger = summaryState.summary.executionBlockingCount > 0;
+    } else {
+      label = '未確定項目を入力（件数を取得できません）';
+      danger = true;
+    }
+  }
   const primary = status === 'current' && action.primary === true;
-  const hidden = status === 'done' && action.kind === 'confirmStep';
-  const classes = [primary ? 'primary' : '', action.danger ? 'danger' : '']
+  const hidden = (status === 'done' && action.kind === 'confirmStep')
+    || (action.id === 'openTestInputEditor' && !state?.testInputSummary);
+  const classes = [primary ? 'primary' : '', danger ? 'danger' : '']
     .filter(Boolean)
     .join(' ');
   return { label, classes, primary, hidden };
@@ -106,6 +121,7 @@ export const SIMPLE_WORKFLOW_ACTIONS: WorkflowAction[] = [
 
 export const SIMPLE_SECONDARY_ACTIONS: WorkflowAction[] = [
   { id: 'openQuickSummary', kind: 'command', label: 'クイックチェックの概要を開く', commandId: 'unitTestRunner.openQuickSummary' },
+  { id: 'openTestInputEditor', kind: 'command', label: '未確定項目を入力', commandId: 'unitTestRunner.openTestInputEditor' },
   { id: 'openBuildProbeReport', kind: 'openReport', label: 'ビルド結果を開く', reportKey: 'buildProbeReportMd' },
   { id: 'openTestExecutionReport', kind: 'openReport', label: 'テスト結果を開く', reportKey: 'testExecutionReportMd' },
   { id: 'openOutputWorkspace', kind: 'openOutputWorkspace', label: '出力ワークスペースを開く' },
@@ -230,8 +246,8 @@ export function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState
   const awaiting = state.awaitingSave ? `<div class="notice">保存を待っています: ${escapeHtml(state.awaitingSave.filePath)}</div>` : '';
   const error = state.lastError ? `<div class="error">前回のエラー: ${escapeHtml(state.lastError)}</div>` : '';
   const running = runningLabel ? `<div class="busy" role="status">「${escapeHtml(runningLabel)}」を実行しています。<br><span>大きなプロジェクトでは時間がかかる場合があります。完了するまでほかの操作はできません。</span></div>` : '';
-  const simplePanel = renderSimpleWorkflowPanel(functionName, workspace, steps);
-  const fullPanel = renderFullWorkflowPanel(functionName, workspace, steps, optionalActions);
+  const simplePanel = renderSimpleWorkflowPanel(functionName, workspace, steps, state);
+  const fullPanel = renderFullWorkflowPanel(functionName, workspace, steps, optionalActions, state);
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -369,7 +385,7 @@ export function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState
 </html>`;
 }
 
-function renderSimpleWorkflowPanel(functionName: string, workspace: string, steps: WorkflowStepViews): string {
+function renderSimpleWorkflowPanel(functionName: string, workspace: string, steps: WorkflowStepViews, state: WorkflowState): string {
   const flow = simpleFlowSteps(steps);
   const doneCount = flow.filter((step) => step.status === 'done').length;
   const current = flow.find((step) => step.status === 'current') ?? flow[flow.length - 1];
@@ -392,7 +408,7 @@ function renderSimpleWorkflowPanel(functionName: string, workspace: string, step
 </div>
 <div class="simple-card">
   <h2>結果と補助操作</h2>
-  <div class="actions">${SIMPLE_SECONDARY_ACTIONS.map((action) => renderAction(action)).join('')}</div>
+  <div class="actions">${SIMPLE_SECONDARY_ACTIONS.map((action) => renderAction(action, undefined, state)).join('')}</div>
 </div>
 <div class="simple-card">
   <h2>表示切替</h2>
@@ -445,30 +461,30 @@ function renderSimpleFlowStep(step: SimpleFlowStepView): string {
 </section>`;
 }
 
-function renderFullWorkflowPanel(functionName: string, workspace: string, steps: WorkflowStepViews, optionalActions: WorkflowAction[]): string {
+function renderFullWorkflowPanel(functionName: string, workspace: string, steps: WorkflowStepViews, optionalActions: WorkflowAction[], state: WorkflowState): string {
   return `<div class="summary">
   <div class="name">${escapeHtml(functionName)}</div>
   <div class="path">${escapeHtml(workspace)}</div>
 </div>
-${steps.map(renderStep).join('')}
+${steps.map((step) => renderStep(step, state)).join('')}
 <div class="optional">
   <h2>その他の操作</h2>
-  <div class="actions">${optionalActions.map((action) => renderAction(action)).join('')}</div>
+  <div class="actions">${optionalActions.map((action) => renderAction(action, undefined, state)).join('')}</div>
 </div>`;
 }
 
-function renderStep(step: WorkflowStepViews[number]): string {
+function renderStep(step: WorkflowStepViews[number], state: WorkflowState): string {
   return `<section class="step ${step.status}">
   <span class="status">${workflowStatusLabel(step.status)}</span>
   <h3>${escapeHtml(step.title)}</h3>
   <p>${escapeHtml(step.purpose)}</p>
   <p class="required">${escapeHtml(step.requiredAction)}</p>
-  <div class="actions">${step.actions.map((action) => renderAction(action, step.status)).join('')}</div>
+  <div class="actions">${step.actions.map((action) => renderAction(action, step.status, state)).join('')}</div>
 </section>`;
 }
 
-function renderAction(action: WorkflowAction, status?: WorkflowStepStatus): string {
-  const presentation = resolveWorkflowActionPresentation(action, status);
+function renderAction(action: WorkflowAction, status?: WorkflowStepStatus, state?: WorkflowState): string {
+  const presentation = resolveWorkflowActionPresentation(action, status, state);
   if (presentation.hidden) {
     return '';
   }
@@ -519,6 +535,7 @@ function commandLabel(commandId?: string): string {
     'unitTestRunner.reanalyzeCurrentFunction': '現在の関数を再解析',
     'unitTestRunner.finalizeDossier': '関数分析レポートを確定',
     'unitTestRunner.generateTestDesign': 'テスト設計を生成',
+    'unitTestRunner.openTestInputEditor': '未確定項目を入力',
     'unitTestRunner.generateHarnessSkeleton': 'テストハーネスを生成',
     'unitTestRunner.buildProbeDryRun': 'ビルドの事前確認を実行',
     'unitTestRunner.runBuildProbe': 'ビルドを実行',

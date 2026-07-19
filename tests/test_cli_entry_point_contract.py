@@ -76,6 +76,8 @@ class CliEntryPointContractTests(unittest.TestCase):
             ("run-tests", "--help"),
             ("prepare-evidence", "--help"),
             ("generate-test-design", "--help"),
+            ("get-test-input-form", "--help"),
+            ("apply-test-input-form", "--help"),
         ]
 
         for command in commands:

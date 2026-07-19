@@ -117,6 +117,7 @@ describe('Japanese GUI copy contract', () => {
     assert.equal(commands.get('unitTestRunner.quickCheckSelectedFunction'), 'UnitTestRunner: 選択した関数をクイックチェック');
     assert.equal(commands.get('unitTestRunner.runFullGateForCurrentFunction'), 'UnitTestRunner: 現在の関数でフルゲートを実行');
     assert.equal(commands.get('unitTestRunner.analyzeCurrentFunction'), 'UnitTestRunner: 現在の関数を解析');
+    assert.equal(commands.get('unitTestRunner.openTestInputEditor'), 'UnitTestRunner: 未確定テスト項目を入力');
     assert.equal(commands.get('unitTestRunner.openSuiteManifest'), 'UnitTestRunner: スイート定義ファイルを開く');
     assert.equal(commands.get('unitTestRunner.runAllSuiteTestsRequireGreen'), 'UnitTestRunner: 全件テストを実行して合否を確認');
     assert.equal(views.get('unitTestRunner.workflow'), '関数テスト');

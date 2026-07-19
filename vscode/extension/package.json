@@ -31,6 +31,7 @@
     "onCommand:unitTestRunner.openChangeImpactReport",
     "onCommand:unitTestRunner.openRegressionSelection",
     "onCommand:unitTestRunner.generateTestDesign",
+    "onCommand:unitTestRunner.openTestInputEditor",
     "onCommand:unitTestRunner.generateHarnessSkeleton",
     "onCommand:unitTestRunner.buildProbeDryRun",
     "onCommand:unitTestRunner.runBuildProbe",
@@ -112,6 +113,10 @@
       {
         "command": "unitTestRunner.generateTestDesign",
         "title": "UnitTestRunner: テスト設計を生成"
+      },
+      {
+        "command": "unitTestRunner.openTestInputEditor",
+        "title": "UnitTestRunner: 未確定テスト項目を入力"
       },
       {
         "command": "unitTestRunner.generateHarnessSkeleton",

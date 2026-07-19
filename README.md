@@ -19,6 +19,7 @@
 - [テスト仕様書](docs/test_specification.md)
 - [配布用バイナリ作成手順書](docs/distribution_binary_build_guide.md)
 - [VS Code利用手順書](docs/vscode_usage_guide.md)
+- [テスト入力編集GUI 利用手順](docs/test_input_editor.md)
 - [v0.1スモークサンプル](docs/v0.1_smoke_sample.md)
 - [VC6 DSW/DSPパース実機スモーク](docs/vc6_dsw_dsp_parse_smoke.md)
 
@@ -109,6 +110,9 @@ py -m unit_test_runner --json prepare-evidence --workspace $out
 - `$out\generated\`
 - `$out\reports\function_dossier.json`
 - `$out\reports\function_dossier.md`
+- `$out\reports\test_spec.json`（canonical正本）
+- `$out\reports\test_spec.md`（レビュー表示）
+- `$out\reports\test_spec.csv`（一覧表示）
 - `$out\reports\test_case_design.csv`
 - `$out\generated\build\Makefile`
 - `$out\reports\build_probe.log`
@@ -139,7 +143,7 @@ py -m unit_test_runner --json prepare-evidence --workspace $out
 }
 ```
 
-通常は関係ごとの既定方針を継承します。特定のテストケースだけ切り替える場合は、`test_case_design.json` の `dependency_overrides` を使います。
+通常は関係ごとの既定方針を継承します。特定のテストケースだけ切り替える場合は、canonical `test_spec.json` の `dependency_overrides` をテスト入力編集GUIから更新します。旧 `test_case_design.json` は後方互換の読み取りaliasです。
 
 ```json
 {
@@ -165,10 +169,23 @@ py -m unit_test_runner --json generate-harness-skeleton `
   --function-signature "$out\reports\function_signature.json" `
   --global-access "$out\reports\global_access.json" `
   --call-report "$out\reports\call_report.json" `
-  --test-case-design "$out\reports\test_case_design.json" `
+  --test-spec "$out\reports\test_spec.json" `
   --dependency-policy "$out\reports\dependency_policy.json" `
   --out $out --overwrite
 ```
+
+## 未確定テスト入力をGUIで反映する
+
+`TBD_VALID_VALUE` などが残る場合、JSONを直接編集せずWorkflowパネルの `未確定項目を入力（N件）` を使用します。候補値を選んだ後もC式を自由編集でき、項目ごとに `確認済み` を明示します。部分保存が可能で、revisionまたはsubject fingerprintが変わった場合は下書きを保持したまま競合解決へ進みます。
+
+CLIで確認する場合は次を使用します。
+
+```powershell
+py -m unit_test_runner --json get-test-input-form --workspace $out
+py -m unit_test_runner --json apply-test-input-form --workspace $out --input $changes --expected-revision 3
+```
+
+詳細は [テスト入力編集GUI 利用手順](docs/test_input_editor.md) を参照してください。
 
 ## 実用fixture
 
@@ -195,6 +212,7 @@ VS Code上からの操作手順は [VS Code利用手順書](docs/vscode_usage_gu
 `unitTestRunner.sourceRoot` が未設定の場合は、VS Codeで開いた先頭workspace folderをプロジェクトルートとして使います。単一フォルダを開いた場合は、そのTOPフォルダが既定のプロジェクトルートです。
 
 最初の解析は対象Cファイル上の右クリックメニュー、またはパネルの `現在関数を解析` / `選択関数を解析` から開始できます。以降はパネルが `function_dossier.md`、レビュー項目、テスト設計、build probe、テスト実行、エビデンス確認の順に現在の推奨工程を強調します。
+テスト設計後は `未確定項目を入力（N件）` から専用タブを開き、入力値・事前状態・スタブ設定・期待値を入力します。値の入力と項目の `確認済み` は別操作で、`保存して反映` により変更した項目だけをcanonical `reports/test_spec.json` へ保存します。
 
 パネルから開いたレポートは保存検知で次工程へ進みます。編集不要の場合は、パネルの `保存済みとして確定` で次のアクションへ進めます。
 
@@ -229,6 +247,7 @@ VSIXに `bin/win32-x64/unit-test-runner.exe` が同梱されている場合、`u
 - `UnitTestRunner: Open Change Impact Report`
 - `UnitTestRunner: Open Regression Selection`
 - `UnitTestRunner: Generate Test Design`
+- `UnitTestRunner: 未確定テスト項目を入力`
 - `UnitTestRunner: Build Probe Dry Run`
 - `UnitTestRunner: Run Build Probe`
 - `UnitTestRunner: Run Tests`

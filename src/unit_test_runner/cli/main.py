@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
             exit_code=exc.exit_code,
             command=exc.command,
             message=exc.message,
-            errors=[exc.message],
+            errors=[{"code": exc.code, "message": exc.message}],
             outcome=DomainOutcome("command", RunOutcome.ERROR, None),
         )
         logging.error(exc.message)

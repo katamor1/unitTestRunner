@@ -120,6 +120,43 @@ class TestInputFormReclassificationTests(unittest.TestCase):
             }
             self.assertTrue(after_ids.issubset(before_ids))
 
+    def test_promoting_resolved_candidate_marks_related_unresolved_history_nonblocking(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = write_test_input_form_fixture(Path(temp_dir))
+            current = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
+            context = build_current_artifact_context(fixture.workspace, current.spec)
+            current.spec.unresolved_items = [
+                {
+                    "item_id": "UNRES_FIXTURE_EXPECTED",
+                    "item_kind": "expected_return_unknown",
+                    "description": "Confirm the expected return value.",
+                    "related_test_case_ids": [fixture.unresolved_case_id],
+                    "reason": "Static analysis could not prove the final oracle.",
+                    "suggested_action": "Enter and confirm the expected value.",
+                }
+            ]
+            save_test_spec_snapshot(
+                fixture.canonical_path,
+                current.spec,
+                expected_revision=current.spec.revision,
+                current_context=context,
+            )
+            form = build_test_input_form(fixture.workspace)
+
+            result = apply_test_input_form(
+                fixture.workspace,
+                ready_candidate_request(form, fixture.unresolved_case_id),
+                expected_revision=form.revision,
+            )
+
+            self.assertEqual((fixture.unresolved_case_id,), result.promoted_case_ids)
+            saved = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
+            self.assertEqual(
+                [fixture.unresolved_case_id],
+                saved.spec.unresolved_items[0]["related_test_case_ids"],
+            )
+            self.assertIs(False, saved.spec.unresolved_items[0]["blocking"])
+
     def test_intentional_candidate_never_promotes_and_history_summaries_stay_unchanged(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             fixture = write_test_input_form_fixture(Path(temp_dir))

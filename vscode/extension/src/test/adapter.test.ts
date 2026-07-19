@@ -699,6 +699,38 @@ describe('UnitTestRunner VS Code thin adapter core', () => {
     assert.equal(match.state.awaitingSave, undefined);
   });
 
+
+  it('clears a cached test input summary when the workflow switches workspaces', () => {
+    const initial = {
+      ...createInitialWorkflowState(true),
+      outputWorkspace: 'C:\\out\\Old',
+      reports: { workspace: 'C:\\out\\Old' },
+      testInputSummary: {
+        status: 'ready' as const,
+        workspace: 'C:\\out\\Old',
+        revision: 2,
+        specSha256: 'a'.repeat(64),
+        summary: {
+          attentionCount: 1,
+          unresolvedCount: 1,
+          unconfirmedCount: 1,
+          executionBlockingCount: 1,
+          warningCount: 0,
+        },
+        updatedAt: '2026-07-19T00:00:00.000Z',
+      },
+    };
+
+    const switched = markWorkflowCommandSucceeded(initial, {
+      kind: 'analyze',
+      outputWorkspace: 'C:\\out\\New',
+      functionName: 'New_Function',
+      reports: { workspace: 'C:\\out\\New' },
+    });
+
+    assert.equal(switched.testInputSummary, undefined);
+  });
+
   it('does not advance workflow recommendation after a CLI failure', () => {
     const outputWorkspace = 'C:\\out\\Control_Update';
     const analyzed = markWorkflowCommandSucceeded(createInitialWorkflowState(true), {

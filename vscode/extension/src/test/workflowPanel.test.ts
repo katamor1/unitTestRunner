@@ -71,6 +71,77 @@ describe('workflow action presentation', () => {
     assert.equal(resolveWorkflowActionPresentation(confirmation, 'current').hidden, false);
   });
 
+
+  it('shows the unresolved item count and blocking emphasis for the input editor', () => {
+    const inputAction: WorkflowAction = {
+      id: 'openTestInputEditor',
+      kind: 'command',
+      label: '未確定項目を入力',
+      commandId: 'unitTestRunner.openTestInputEditor',
+      primary: true,
+    };
+    const readyState: WorkflowState = {
+      settingsReady: true,
+      outputWorkspace: 'D:\\unit-test-output\\Control_Update',
+      completedStepIds: ['settings', 'generateTestDesign'],
+      testInputSummary: {
+        status: 'ready',
+        workspace: 'D:\\unit-test-output\\Control_Update',
+        revision: 3,
+        specSha256: 'a'.repeat(64),
+        summary: {
+          attentionCount: 7,
+          unresolvedCount: 4,
+          unconfirmedCount: 7,
+          executionBlockingCount: 4,
+          warningCount: 1,
+        },
+        updatedAt: '2026-07-19T00:00:00.000Z',
+      },
+    };
+
+    const blocked = resolveWorkflowActionPresentation(inputAction, 'current', readyState);
+    assert.equal(blocked.label, '未確定項目を入力（7件）');
+    assert.match(blocked.classes, /primary/);
+    assert.match(blocked.classes, /danger/);
+    assert.equal(blocked.hidden, false);
+
+    const completeState: WorkflowState = {
+      ...readyState,
+      testInputSummary: {
+        status: 'ready',
+        workspace: 'D:\\unit-test-output\\Control_Update',
+        revision: 3,
+        specSha256: 'a'.repeat(64),
+        summary: {
+          attentionCount: 0,
+          unresolvedCount: 0,
+          unconfirmedCount: 0,
+          executionBlockingCount: 0,
+          warningCount: 0,
+        },
+        updatedAt: '2026-07-19T00:00:00.000Z',
+      },
+    };
+    const complete = resolveWorkflowActionPresentation(inputAction, 'current', completeState);
+    assert.equal(complete.label, '入力内容を確認（0件）');
+    assert.doesNotMatch(complete.classes, /danger/);
+  });
+
+  it('hides the editor until a test specification summary is available', () => {
+    const inputAction: WorkflowAction = {
+      id: 'openTestInputEditor',
+      kind: 'command',
+      label: '未確定項目を入力',
+      commandId: 'unitTestRunner.openTestInputEditor',
+    };
+    const state: WorkflowState = {
+      settingsReady: true,
+      completedStepIds: ['settings'],
+    };
+    assert.equal(resolveWorkflowActionPresentation(inputAction, 'pending', state).hidden, true);
+  });
+
   it('uses the same status labels in both panel modes', () => {
     assert.equal(workflowStatusLabel('done'), '完了');
     assert.equal(workflowStatusLabel('current'), '次の操作');
