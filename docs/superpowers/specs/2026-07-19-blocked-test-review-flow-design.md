@@ -145,7 +145,14 @@ unit-test-runner apply-test-review `
   --review "$workspace\reports\test_review_plan.json"
 ```
 
-This command validates exact guards, applies candidate dispositions and review decisions, promotes approved complete candidates, regenerates the harness, and runs execution preflight. It does not run a compiler or test executable.
+This command validates exact guards, applies the candidate dispositions and explicit review decisions in the plan, promotes complete adopted candidates whose blocking review items are resolved, regenerates the harness, and runs execution preflight. It does not run a compiler or test executable.
+
+Successful application writes operation views:
+
+```text
+reports/test_review_apply_report.json
+reports/test_review_apply_report.md
+```
 
 Supported options:
 
@@ -153,10 +160,9 @@ Supported options:
 --workspace <path>            required
 --review <path>               required
 --expected-spec-revision <n>  optional command-line guard; must match the plan when supplied
---overwrite-harness           permit replacement of generated harness outputs
 ```
 
-The command rejects a plan that does not contain exact guards. There is no force or ignore-staleness option.
+The command rejects a plan that does not contain exact guards. There is no force, overwrite-local-edits, or ignore-staleness option.
 
 ## Test review plan artifact
 
@@ -198,6 +204,7 @@ Each candidate entry has this conceptual shape:
   "case_id": "TC_UtrLarge_Module_06996_003",
   "case_fingerprint": "<sha256>",
   "disposition": "adopt",
+  "disposition_rationale": "Selected to cover the positive multiple-of-17 path",
   "title": "...",
   "input_assignments": [],
   "state_setups": [],
@@ -217,11 +224,11 @@ Each candidate entry has this conceptual shape:
 
 Allowed dispositions are:
 
-- `adopt`: validate executable completeness and move the case to `test_cases`;
+- `adopt`: validate executable completeness and move the case to `test_cases`; every blocking review item for the case must be resolved as `approved` or validly `waived`;
 - `defer`: keep the case in `additional_case_candidates` without closing its review work;
-- `reject`: keep the case as a candidate and require a non-empty rationale; associated review decisions normally use `changes_requested` or `waived` according to reviewer intent.
+- `reject`: keep the case in `additional_case_candidates` and require a non-empty `disposition_rationale` explaining why it is not being adopted.
 
-Candidate disposition and review resolution remain separate concepts. The applier does not guess a review resolution from a disposition.
+Candidate disposition and review resolution remain separate concepts. The applier never infers or rewrites a review resolution from `adopt`, `defer`, or `reject`. A rejected candidate may have `changes_requested`, `waived`, or still-open review items according to the reviewer’s explicit entries and the existing ledger rules.
 
 ### Markdown view
 
@@ -230,6 +237,7 @@ The Markdown view groups all information needed to make one decision:
 ```text
 ケース: TC_UtrLarge_Module_06996_003
 採用: adopt / defer / reject
+理由: Selected to cover the positive multiple-of-17 path
 
 入力:
   seed = 17
@@ -271,9 +279,9 @@ A case with disposition `adopt` must satisfy all of the following before any can
 - stub call-count and captured-argument expectations are concrete when the case asserts them;
 - coverage links reference current coverage items;
 - candidate links reference current candidate identities;
-- referenced review decisions are present and current;
+- every blocking review item associated with the case is present, current, and resolved as `approved` or validly `waived`;
 - every `approved` or `waived` decision satisfies the existing review-ledger rules;
-- every `reject` disposition includes a rationale;
+- every `reject` disposition includes a non-empty `disposition_rationale`;
 - the complete updated TestSpec passes current-context contract validation.
 
 Validation errors identify the case ID and JSON path, for example:
@@ -340,6 +348,8 @@ Responsibilities:
   3. generated-harness workspace lock;
 - re-read TestSpec and review snapshots after locks are held;
 - compare all revision, SHA, and fingerprint guards;
+- verify existing harness outputs are tool-owned and match their last published hashes before replacing them;
+- reject locally modified or unprovenanced harness files instead of overwriting them;
 - render and validate all target bytes in a staging directory;
 - commit canonical TestSpec and review ledger with atomic replacement;
 - regenerate harness outputs from the committed TestSpec;
@@ -370,7 +380,7 @@ The panel supports:
 - candidate navigation;
 - adopt/defer/reject selection;
 - editing concrete input, state, stub, and expected values;
-- entering reviewer and rationale;
+- entering disposition rationale, reviewer, and review rationale;
 - inline validation;
 - opening related source, coverage, and unresolved-item reports;
 - applying the review;
@@ -499,7 +509,7 @@ Historical run and evidence directories remain immutable.
 - Review plans are untrusted input when reapplied, even if generated by the same tool.
 - The applier accepts JSON only and validates it before traversing user-controlled paths or values.
 - Exact revision, SHA-256, source identity, review fingerprint, and case fingerprints are mandatory.
-- There is no `--force`, `--ignore-sha`, or stale-plan override.
+- There is no `--force`, `--overwrite-local-edits`, `--ignore-sha`, or stale-plan override.
 - Command arguments in JSON are arrays to avoid shell injection through display strings.
 - The transaction never modifies product source files.
 - Applying a review never launches a compiler or test executable.
@@ -527,6 +537,10 @@ No files are changed. All safe-to-report case validation errors are returned tog
 ### Concurrent writer
 
 The command fails with a revision/fingerprint conflict. It does not retry by silently rebasing user decisions.
+
+### Locally modified harness
+
+No canonical files are changed. The command identifies each generated path whose current hash differs from the last published hash and asks the user to preserve or revert those edits before applying the review.
 
 ### Harness regeneration failure
 
@@ -565,6 +579,7 @@ Review application succeeds, but the terminal status is `review_applied_build_re
 ### Contract tests
 
 - `test_review_plan` schema acceptance and rejection;
+- `test_review_apply_report` schema acceptance and rejection;
 - wheel and PyInstaller schema packaging;
 - additive CLI result fields;
 - no raw shell command as the authoritative JSON action;
@@ -580,6 +595,7 @@ Review application succeeds, but the terminal status is `review_applied_build_re
 - lock acquisition order;
 - atomic replacement and rollback;
 - rollback failure recovery record;
+- locally modified harness rejection;
 - symlink, reparse-point, and Windows long/8.3 alias behavior;
 - no product-source modification.
 
@@ -590,6 +606,7 @@ Review application succeeds, but the terminal status is `review_applied_build_re
 - `--quiet` retains essential blocked guidance;
 - `review-test-cases` is non-destructive;
 - `apply-test-review` rejects incomplete or stale plans without byte changes;
+- `apply-test-review` rejects adopted cases with unresolved blocking review items;
 - successful apply returns `build_required` or `ready_to_run` accurately;
 - applying a review never starts build or test processes.
 
@@ -613,11 +630,12 @@ The regression sequence is:
 3. assert the output recommends `review-test-cases`;
 4. generate a review plan;
 5. populate four reviewed executable cases with known inputs and expectations;
-6. apply the review;
-7. assert the cases moved to `test_cases`, decisions were persisted, and the harness was regenerated;
-8. run the verification build;
-9. run tests and assert four passes;
-10. confirm prior blocked run/evidence history remains unchanged.
+6. explicitly resolve every blocking review item for the four adopted cases;
+7. apply the review;
+8. assert the cases moved to `test_cases`, decisions were persisted, and the harness was regenerated;
+9. run the verification build;
+10. run tests and assert four passes;
+11. confirm prior blocked run/evidence history remains unchanged.
 
 ## Rollout
 
@@ -640,7 +658,9 @@ The first slice immediately improves the exit-code-35 experience even before the
 - A review plan can be generated without changing TestSpec or review decisions.
 - A stale or incomplete plan changes no canonical bytes.
 - A valid reviewed candidate can be promoted to `test_cases` with review authority preserved.
+- Every blocking review item for an adopted case is explicitly resolved as `approved` or validly `waived`.
 - Duplicate assignments and placeholders cannot enter an executable adopted case.
+- Locally modified generated harness files are never silently overwritten.
 - Harness and provenance are refreshed after promotion.
 - The tool identifies whether build or execution is the next operation.
 - Applying a review never starts build or test execution.
