@@ -25,7 +25,7 @@ jobs:
         id: staged
         shell: bash
         run: |
-          if [[ -f .sdd/verify.sh && -f .sdd/commit-message.txt ]] && \
+          if [[ -f .sdd/ready && -f .sdd/verify.sh && -f .sdd/commit-message.txt ]] && \
              { [[ -f .sdd/next.patch ]] || compgen -G '.sdd/next.patch.b64.*' > /dev/null; }; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
@@ -86,7 +86,7 @@ jobs:
         run: |
           message="$(cat .sdd/commit-message.txt)"
           rm -rf .sdd/diagnostics
-          rm -f .sdd/next.patch .sdd/next.patch.b64.* .sdd/verify.sh .sdd/commit-message.txt .sdd/task*-reviewed
+          rm -f .sdd/ready .sdd/next.patch .sdd/next.patch.b64.* .sdd/verify.sh .sdd/commit-message.txt .sdd/task*-reviewed
           rmdir .sdd 2>/dev/null || true
           git config user.name "OpenAI"
           git config user.email "noreply@openai.com"
