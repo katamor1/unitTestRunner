@@ -4,9 +4,9 @@ Date: 2026-07-20
 
 ## Summary
 
-`run-tests --run` returns exit code `35` when execution is intentionally blocked, but the current user-facing message does not identify the blocking items or lead the user to the corrective action. The detailed reasons are distributed across the execution report, warnings, review items, TestSpec, harness report, build-probe report, and logs.
+`run-tests --run` returns exit code `35` when execution is intentionally blocked, but the current user-facing message does not identify the blocking items or lead the user to the corrective action. The underlying reasons are distributed across the execution report, TestSpec, harness report, build-probe report, executable resolution, and run logs.
 
-This design adds a first-class **test execution blocker report**. When and only when the terminal execution outcome is `blocked`, the Python execution core creates a structured JSON artifact and a human-readable Markdown view containing the direct blockers, their source artifacts, current values where applicable, and deterministic next actions.
+This design adds a first-class **test execution blocker report**. When and only when the canonical terminal outcome is `blocked`, the Python execution core creates a structured JSON artifact and a human-readable Markdown view containing the direct blockers, their source artifacts, current values where applicable, and deterministic next actions.
 
 The report is stored both with the immutable run history and as a latest-workspace view:
 
@@ -17,7 +17,7 @@ reports/test_execution_blockers.json
 reports/test_execution_blockers.md
 ```
 
-The VS Code extension treats a valid `run-tests` exit-code-35 envelope as an expected blocked outcome rather than an opaque CLI failure. It automatically opens the latest Markdown blocker report once for that run and retains a Workflow action named `実行ブロック項目を開く（N件）` for later access.
+The VS Code extension recognizes a valid `run-tests` exit-code-35 envelope as an expected blocked domain outcome rather than an opaque CLI failure. When a verified Markdown blocker report exists, it opens that report once for the run and retains a Workflow action named `実行ブロック項目を開く（N件）`.
 
 A later actual run with any non-blocked outcome removes only the latest `reports/test_execution_blockers.*` views and hides the Workflow action. Historical run reports remain unchanged.
 
@@ -41,55 +41,53 @@ For a blocked run, this does not answer:
 
 ### Blocker details are distributed
 
-The existing execution model already records useful information:
+The existing execution model already records useful inputs:
 
-- execution warnings;
-- `ExecutionReviewItem` entries;
-- build-probe readiness;
+- execution warnings and `ExecutionReviewItem` entries;
+- build-probe readiness and diagnostics;
 - executable resolution;
 - canonical TestSpec unresolved items and candidate cases;
 - harness placeholders;
-- runner output and logs.
+- runner case results and logs.
 
-However, these inputs are not normalized into a direct-cause list. Some items are background review work rather than causes of the current block, while broad messages such as “no executable test cases” can duplicate several concrete unresolved fields.
+These inputs are not normalized into a direct-cause list. Some entries are background review work rather than causes of the current block. Broad symptoms such as “no executable test cases” can also duplicate several concrete unresolved fields.
 
 ### Existing VS Code handling obscures the domain outcome
 
-A non-zero CLI exit is normally shown as a command error. For exit code `35`, the important distinction is that the command completed and produced evidence, but execution was blocked by an expected precondition or review state. The extension needs to recognize the complete structured envelope, not the numeric exit code alone.
+A non-zero CLI exit is normally shown as a command error. Exit code `35` instead means that the command completed and prepared evidence, but execution was blocked by an expected precondition or review state. The extension must recognize the complete structured envelope, not the numeric exit code alone.
 
 ## Goals
 
 - Generate a blocker report for actual `run-tests --run` results whose canonical outcome is exactly `blocked`.
 - List only blockers that directly contributed to that run’s blocked outcome.
-- Include the test-case ID, stable item ID, control name, current value, source artifact, JSON Pointer, and recommended operation where those fields apply.
+- Include test-case ID, stable item ID, control name, current value, source artifact, JSON Pointer, and recommended operation where those fields apply.
+- Guarantee at least one blocker in every successfully generated blocked report.
 - Preserve one immutable blocker report per blocked run.
 - Maintain a latest blocker report under `reports/` for simple Workflow navigation.
-- Automatically open the latest Markdown report after a blocked run in VS Code.
-- Preserve exit code `35` and the semantic distinction between blocked execution and failed tests.
+- Automatically open the verified Markdown report after a blocked run in VS Code.
+- Preserve exit code `35` and the distinction between blocked execution and failed tests.
 - Remove stale latest blocker views and hide their Workflow action after a later non-blocked actual run.
-- Reuse the test-input editor’s canonical field location and unresolved-value rules instead of introducing a second TestSpec interpretation.
+- Reuse the test-input editor’s field-location and unresolved-value rules instead of introducing a second TestSpec interpretation.
 - Keep CLI-only and VS Code-driven runs behaviorally equivalent.
 
 ## Non-goals
 
-- Generating a blocker report for `failed`, `inconclusive`, `timed_out`, `cancelled`, `passed`, or `planned` outcomes.
-- Treating a test assertion failure as an execution blocker.
+- Generating blocker reports for `failed`, `inconclusive`, `timed_out`, `cancelled`, `passed`, or `planned` outcomes.
+- Treating assertion failures as execution blockers.
 - Automatically changing TestSpec, confirming review items, regenerating a harness, building, or rerunning tests.
 - Implementing the broader `review-test-cases` / `apply-test-review` workflow described in the earlier blocked-review design.
-- Replacing the existing test-input editor. The editor remains the primary correction path for unresolved executable values.
+- Replacing the existing test-input editor. It remains the primary correction path for unresolved executable values.
 - Adding suite-level blocker aggregation in this increment.
 - Copying complete product source files or unrestricted logs into the blocker artifact.
 
 ## Approved product decisions
 
-The following decisions are fixed for this implementation:
-
-1. The blocker report is generated by the Python execution core, not by VS Code.
-2. VS Code automatically opens the Markdown report immediately after a valid blocked run.
-3. The report contains direct blockers plus their cause source, current value, and recommended action.
+1. The Python execution core generates the report; VS Code does not infer blocker causes.
+2. VS Code automatically opens the Markdown report immediately after a valid blocked run when a verified report is available.
+3. The report contains direct blockers plus cause source, current value, and recommended action.
 4. Both immutable run-history files and latest `reports/` files are written.
 5. Reports are generated only for the exact `blocked` outcome.
-6. A later actual non-blocked run removes the latest `reports/` files and hides the Workflow action.
+6. A later actual non-blocked run removes the latest files and hides the Workflow action.
 7. Historical reports under `runs/<run_id>/` are never removed by this lifecycle.
 
 ## User experience
@@ -101,6 +99,8 @@ After `run-tests --run` returns exit code `35`, VS Code opens:
 ```text
 reports/test_execution_blockers.md
 ```
+
+or, if latest-view synchronization failed, the verified run-history Markdown file.
 
 The report begins with an actionable summary:
 
@@ -122,7 +122,7 @@ The Workflow panel retains:
 実行ブロック項目を開く（3件）
 ```
 
-When a deterministic primary operation exists, the Workflow also exposes the mapped operation, such as `未確定項目を入力`, `ビルド結果を開く`, or `テストハーネスを生成`.
+When a deterministic primary operation exists, Workflow also exposes the mapped operation, such as `未確定項目を入力`, `ビルド結果を開く`, or `テストハーネスを生成`.
 
 ### Example item
 
@@ -151,7 +151,7 @@ When a later `run-tests --run` produces any outcome other than `blocked`:
 - `reports/test_execution_blockers.json` is removed;
 - `reports/test_execution_blockers.md` is removed;
 - the Workflow blocker action and cached count are cleared;
-- earlier `runs/<run_id>/test_execution_blockers.*` files remain available as historical evidence.
+- earlier `runs/<run_id>/test_execution_blockers.*` files remain historical evidence.
 
 `run-tests --plan` neither generates nor removes blocker reports because it is not an actual terminal execution result.
 
@@ -170,19 +170,11 @@ src/unit_test_runner/execution/
 
 #### `blocker_models.py`
 
-Defines immutable or validation-friendly models for:
-
-- recommended actions;
-- individual blockers;
-- report summary;
-- the complete blocker-report payload;
-- write results and warnings.
-
-The models do not read or write the filesystem.
+Defines models for recommended actions, individual blockers, the report summary, the complete payload, and non-fatal publication diagnostics. These models do not access the filesystem.
 
 #### `blocker_analyzer.py`
 
-Consumes the current execution snapshot and extracts direct causes from:
+Consumes:
 
 - `TestExecutionReport`;
 - canonical TestSpec;
@@ -190,21 +182,20 @@ Consumes the current execution snapshot and extracts direct causes from:
 - harness report;
 - build-probe report;
 - build-workspace report;
-- the current run logs when the runner itself reports blocked.
+- current run logs when the runner itself reports blocked.
 
-It returns a fully normalized in-memory report without changing any source artifact.
+It returns a normalized in-memory report without modifying source artifacts.
 
 #### `blocker_report_writer.py`
 
 Responsibilities:
 
 - validate workspace containment;
-- render the canonical JSON payload;
-- render the Markdown view;
-- atomically publish the immutable run files;
-- atomically synchronize the latest `reports/` files;
+- render canonical JSON and Markdown;
+- atomically publish immutable run files;
+- synchronize latest `reports/` files only after both history files exist;
 - remove latest files after a non-blocked actual run;
-- return produced-artifact metadata and non-fatal write diagnostics.
+- return produced-artifact metadata and non-fatal diagnostics.
 
 The writer does not decide why a run is blocked.
 
@@ -228,7 +219,7 @@ runs/<run_id>/test_execution_blockers.md
 
 #### Execution orchestration
 
-The execution flow constructs `TestExecutionReport` as it does today, writes the normal run evidence, then handles blocker publication according to the terminal status.
+The execution flow constructs the final `TestExecutionReport`, publishes the normal immutable run files, then publishes or clears blocker views according to the terminal outcome.
 
 #### CLI
 
@@ -236,7 +227,7 @@ The `run-tests` handler adds blocker details and artifacts for blocked runs and 
 
 #### VS Code extension
 
-The adapter parses valid blocked envelopes, opens a verified Markdown path, caches current blocker state, and renders Workflow actions. It does not derive blocker causes itself.
+The adapter parses valid blocked envelopes, opens only verified paths, caches current blocker state, and renders Workflow actions. It does not derive blocker causes.
 
 ## Artifact contract
 
@@ -318,34 +309,31 @@ The schema is packaged with wheels, the bundled executable, and distribution bui
 }
 ```
 
-Fields that do not apply are omitted rather than populated with fabricated values. For example, a missing executable blocker has no `case_id`, `item_id`, or `current_value`.
+Fields that do not apply are omitted. A missing executable blocker, for example, has no `case_id`, `item_id`, or `current_value`.
 
 ### Recommended action codes
-
-Initial stable codes are:
 
 | Code | VS Code operation |
 | --- | --- |
 | `open_test_input_editor` | `unitTestRunner.openTestInputEditor` |
-| `open_build_probe_report` | open the current build-probe Markdown report |
+| `open_build_probe_report` | open current build-probe Markdown |
 | `generate_harness` | `unitTestRunner.generateHarnessSkeleton` |
 | `run_build_probe` | `unitTestRunner.runBuildProbe` |
 | `choose_or_build_executable` | open build guidance or executable configuration |
 | `open_execution_log` | open the current run’s combined execution log |
+| `open_execution_report` | open the current run’s execution report |
 
-The report stores codes and labels. Action selection and command routing never depend on localized label text.
+The report stores codes and labels. Routing never depends on localized text.
 
 ## Direct blocker analysis
 
 ### General rule
 
-A blocker is included only when it directly explains why the current run’s terminal outcome is `blocked`.
-
-Background review work, informational warnings, and formal review items that did not stop this run are excluded.
+A blocker is included only when it directly explains why the current run’s terminal outcome is `blocked`. Background review work, informational warnings, and formal review items that did not stop the run are excluded.
 
 ### Priority order
 
-Blockers are ordered by the prerequisite sequence:
+Blockers are ordered by prerequisite sequence:
 
 1. build-probe readiness;
 2. executable availability;
@@ -354,28 +342,25 @@ Blockers are ordered by the prerequisite sequence:
 5. unresolved or unconfirmed executable TestSpec fields;
 6. runner-reported blocked reasons.
 
-The first blocker’s recommended operation becomes the report-level `primary_action`, with aggregation when several blockers share the same operation.
+The first blocker’s recommended operation becomes the report-level `primary_action`, with aggregation when several blockers share that operation.
 
 ### Build probe not successful
 
 When execution is blocked because the build probe is not `succeeded`:
 
 - include each structured error diagnostic from `build_probe_report.json`;
-- include its code, message, relevant file, line, and source pointer when available;
-- set the source artifact to the build-probe report;
-- recommend `open_build_probe_report` or `run_build_probe` according to the current probe state.
+- include code, message, relevant file, line, and source pointer where available;
+- source the blocker from the build-probe report;
+- recommend `open_build_probe_report` or `run_build_probe` according to current state.
 
-When the status is non-successful but there are no structured error diagnostics, emit one generic `build_probe_not_successful` blocker.
-
-The broad precondition message is not counted separately when concrete diagnostics exist.
+When no structured errors exist, emit one generic `build_probe_not_successful` blocker. The broad precondition warning is not counted separately when concrete diagnostics exist.
 
 ### Executable missing
 
 When the resolved executable does not exist:
 
 - include the attempted executable path as a workspace-relative value when safe;
-- include the build-probe status;
-- include the resolver warning that explains the lookup;
+- include build-probe status and resolver warning;
 - recommend `choose_or_build_executable`.
 
 ### No executable test cases
@@ -383,7 +368,7 @@ When the resolved executable does not exist:
 When there are no executable cases:
 
 1. query the canonical test-input form model;
-2. select only items marked as execution-blocking;
+2. select only execution-blocking items;
 3. emit concrete blockers for unresolved or unconfirmed executable fields;
 4. emit a generic `no_executable_test_cases` blocker only when no concrete direct cause can be identified.
 
@@ -393,80 +378,70 @@ This avoids counting both the broad symptom and each concrete field.
 
 For a blocking form item:
 
-- each unresolved required control is one leaf-level blocker;
+- each unresolved required control becomes one leaf-level blocker;
 - unresolved means empty or beginning with `TBD`, `TODO`, `UNKNOWN`, or `UNRESOLVED`, using the same normalization as the input editor;
-- the blocker includes the stable item ID, control name, current value, case ID, TestSpec path, and JSON Pointer.
+- include stable item ID, control name, current value, case ID, TestSpec path, and JSON Pointer.
 
 ### Confirmation-only blockers
 
-A parent item may contain concrete required values but remain unconfirmed, preventing candidate promotion. In that case, emit one parent-level `unconfirmed_test_input` blocker rather than duplicating every concrete control.
-
-Its source pointer targets the parent object, and its current-value summary lists the relevant concrete controls in a bounded form.
+A parent item may contain concrete required values but remain unconfirmed, preventing candidate promotion. Emit one parent-level `unconfirmed_test_input` blocker rather than duplicating every concrete control. Its source pointer targets the parent object and its bounded current-value summary lists the relevant controls.
 
 ### Placeholder execution prohibited
 
-When placeholders are explicitly disallowed and unresolved placeholders block execution, prefer concrete TestSpec field blockers. A generic `placeholder_tests_not_allowed` blocker is emitted only for a harness placeholder that cannot be mapped back to a current canonical field.
+When placeholders are explicitly disallowed, prefer concrete TestSpec field blockers. Emit a generic `placeholder_tests_not_allowed` blocker only for a harness placeholder that cannot be mapped to a current canonical field.
 
 ### Harness missing or stale
 
-When execution evidence indicates that the harness is absent, stale, or inconsistent with the current canonical TestSpec, emit a harness blocker and recommend `generate_harness`.
-
-The report does not automatically regenerate it.
+When execution evidence indicates that the harness is absent, stale, or inconsistent with current TestSpec, emit a harness blocker and recommend `generate_harness`. The report does not regenerate it.
 
 ### Runner-reported blocked outcome
 
-When the test executable starts but the runner reports a blocked state:
+When the executable starts but the runner reports blocked:
 
 - map structured blocked case results when available;
 - include related case IDs and runner messages;
-- include a bounded log excerpt only when it is needed to explain an otherwise unstructured block;
+- include a bounded log excerpt only when needed to explain an unstructured block;
 - link to the full combined log;
 - recommend `open_execution_log`.
 
 If no structured case reason exists, emit one generic `runner_reported_blocked` blocker.
 
+### Final fallback guarantee
+
+If the terminal outcome is `blocked` but every specialized analyzer yields no blocker, emit exactly one:
+
+```text
+code: execution_blocked_unknown
+category: execution
+source_artifact: runs/<run_id>/test_execution_report.json
+recommended_action: open_execution_report
+```
+
+A successfully generated blocked report therefore never has `blocker_count == 0`.
+
 ## Reuse of TestSpec field location
 
-The blocker analyzer must not implement a second TestSpec traversal or placeholder interpretation.
-
-A narrow read-only API is exposed from the existing test-input form subsystem, conceptually:
+The blocker analyzer must not implement a second TestSpec traversal or placeholder interpretation. Expose a narrow read-only API from the test-input subsystem, conceptually:
 
 ```python
 locate_editable_test_spec_fields(spec) -> tuple[LocatedEditableField, ...]
 ```
 
-The reusable field description includes:
-
-- stable parent item ID;
-- case ID and current location;
-- item kind and label;
-- parent JSON Pointer;
-- leaf control names and leaf JSON Pointers;
-- current values;
-- confirmation status;
-- execution-blocking status;
-- editable status.
-
-The API performs no writes and does not change review state.
+Each description includes stable parent item ID, case ID, current collection, item kind, parent and leaf JSON Pointers, control names, current values, confirmation status, execution-blocking status, and editability. The API performs no writes and does not change review state.
 
 ## Deduplication and stable ordering
 
 ### Deduplication key
 
 ```text
-code
-+ case_id
-+ item_id
-+ control_name
-+ source_artifact
-+ source_pointer
+code + case_id + item_id + control_name + source_artifact + source_pointer
 ```
 
-Missing optional values are normalized to empty strings for this key.
+Missing optional values normalize to empty strings.
 
 ### Stable sort
 
-Within the fixed category priority, blockers are sorted by:
+Within fixed category priority, sort by:
 
 ```text
 case_id
@@ -476,45 +451,43 @@ source_pointer
 code
 ```
 
-`blocker_id` values are assigned after sorting as `BLK-001`, `BLK-002`, and so on. The IDs are stable for the same normalized blocker set but are scoped to one report, not global identities.
+Assign `BLK-001`, `BLK-002`, and so on after sorting. IDs are stable for the same normalized set but scoped to one report.
 
 ## Size and path safety
 
 - `current_value`: maximum 2,048 Unicode code points.
 - diagnostic message: maximum 4,096 code points.
 - runner log excerpt: maximum 8,192 code points.
-- truncated values set `truncated: true`.
-- the full source artifact or log path remains available for inspection.
-- `source_artifact`, log paths, and executable paths stored as navigable references must be workspace-relative.
-- absolute paths outside the workspace are not exposed as openable paths in the artifact.
-- symlinks and junctions are checked through the existing workspace-containment conventions.
-- Markdown escapes HTML-significant characters, table separators, and backticks where needed.
+- truncated content sets `truncated: true`.
+- full source artifact or log paths remain available.
+- navigable source, log, and executable paths must be workspace-relative.
+- absolute paths outside the workspace are not exposed as openable references.
+- symlinks and junctions follow existing containment checks.
+- Markdown escapes HTML-significant characters, table separators, and backticks.
 - no source file or complete log is copied into the report.
 
 ## Publication lifecycle
 
 ### Blocked actual run
 
-The publication order is:
+1. Construct final `TestExecutionReport` in memory.
+2. Write normal immutable execution report, result files, and logs.
+3. Build and validate blocker report in memory.
+4. Atomically write run-history blocker JSON.
+5. Atomically write run-history blocker Markdown.
+6. After both history files exist, atomically synchronize latest JSON and Markdown under `reports/`.
+7. Write `reports/latest_run.json` with execution-report and available blocker-report references.
+8. Prepare remaining evidence artifacts.
 
-1. construct the final `TestExecutionReport` in memory;
-2. write the normal immutable execution report, result files, and logs;
-3. build and validate the blocker report in memory;
-4. atomically write the run-history blocker JSON;
-5. atomically write the run-history blocker Markdown;
-6. after both history files exist, atomically synchronize the latest JSON and Markdown under `reports/`;
-7. write `reports/latest_run.json` with references to the execution report and, when available, the blocker report;
-8. prepare the remaining evidence artifacts.
-
-The run-history JSON is the canonical blocker artifact. Markdown and latest copies are views.
+The run-history JSON is canonical. Markdown and latest copies are views.
 
 ### Non-blocked actual run
 
 After the new immutable execution report is safely written:
 
-1. remove `reports/test_execution_blockers.json` if it exists;
-2. remove `reports/test_execution_blockers.md` if it exists;
-3. write `latest_run.json` without a blocker reference;
+1. remove latest blocker JSON if it exists;
+2. remove latest blocker Markdown if it exists;
+3. write `latest_run.json` without blocker reference;
 4. leave all prior run-history directories unchanged.
 
 ### Planned run
@@ -523,7 +496,7 @@ After the new immutable execution report is safely written:
 
 ## `latest_run.json`
 
-The latest-run pointer gains an optional `blocker_report` field:
+Add an optional field:
 
 ```json
 {
@@ -543,37 +516,36 @@ The latest-run pointer gains an optional `blocker_report` field:
 }
 ```
 
-The field is omitted for all non-blocked runs and when blocker publication failed. Existing consumers continue to accept pointers without it.
+Omit `blocker_report` for non-blocked runs and when blocker publication failed. Existing consumers continue to accept pointers without it.
 
 ## Failure semantics
 
-The blocker report is explanatory evidence. A publication failure must not replace the true test outcome.
+The blocker report is explanatory evidence. Publication failure must not replace the true test outcome.
 
 ### Run-history blocker write failure
 
 - retain `blocked` and exit code `35`;
-- add a structured diagnostic such as `blocker_report_write_failed`;
-- remove or invalidate latest blocker views so an older report is not presented as current;
-- write `latest_run.json` without a blocker reference;
-- return the normal execution report and evidence artifacts.
+- add structured diagnostic `blocker_report_write_failed`;
+- remove or invalidate latest blocker views so older data is not presented as current;
+- write `latest_run.json` without blocker reference;
+- return normal execution and evidence artifacts.
 
 ### Latest synchronization failure
 
-When history JSON and Markdown are valid but `reports/` synchronization fails:
+When history files are valid but latest synchronization fails:
 
 - retain exit code `35`;
-- return the run-history paths as produced artifacts;
+- return run-history paths as produced artifacts;
 - add a warning diagnostic;
-- VS Code opens the verified run-history Markdown path rather than an old latest path.
+- VS Code opens verified run-history Markdown instead of an old latest path.
 
 ### Markdown-only failure
 
-When canonical JSON is written but Markdown rendering or publication fails:
+When canonical JSON exists but Markdown fails:
 
-- retain the JSON artifact;
-- retain exit code `35`;
-- expose the JSON or execution report as the fallback view;
-- never claim that the Markdown file exists.
+- retain JSON and exit code `35`;
+- expose JSON or execution report as fallback;
+- never claim Markdown exists.
 
 ### Latest-file deletion failure
 
@@ -581,15 +553,15 @@ After a non-blocked run:
 
 - retain the actual terminal outcome;
 - omit blocker data from `latest_run.json`;
-- clear the VS Code blocker cache and action;
+- clear VS Code blocker cache and action;
 - add a warning diagnostic;
-- do not treat a leftover file on disk as current.
+- never treat a leftover file as current.
 
 ## CLI behavior
 
 ### JSON envelope
 
-A successful blocked-domain result retains:
+A blocked-domain result retains:
 
 ```text
 exit_code: 35
@@ -597,7 +569,7 @@ outcome: blocked
 status: blocked
 ```
 
-and includes:
+and includes the in-memory count and primary action even if view publication partially failed:
 
 ```json
 {
@@ -612,46 +584,25 @@ and includes:
 }
 ```
 
-Only paths that were successfully written are returned.
+Only successfully written paths are present.
 
 ### Message
-
-Blocked output uses an action-oriented message, for example:
 
 ```text
 Test execution was blocked by 3 items. See reports/test_execution_blockers.md.
 ```
 
-The human renderer displays:
-
-```text
-テスト実行は3件の項目でブロックされました。
-
-最初に行う操作:
-  未確定テスト項目を入力
-
-一覧:
-  reports\test_execution_blockers.md
-```
-
-The blocker set is not placed in the CLI `errors` collection merely because the domain outcome is blocked. Publication failures are diagnostics; actual tool errors retain the normal error channel.
+Human output presents the first operation and available report path. Blockers are not placed in CLI `errors` merely because the domain outcome is blocked. Publication failures are diagnostics; actual command failures retain the error channel.
 
 ### Produced artifacts
 
-Blocked runs register successfully written files:
-
-- immutable blocker JSON as `test_execution_blocker_report`;
-- immutable blocker Markdown as the human view;
-- latest JSON and Markdown views;
-- all existing execution, result, log, and evidence artifacts.
-
-Other outcomes do not register blocker artifacts.
+Blocked runs register successfully written immutable JSON, immutable Markdown, latest views, and all existing execution/evidence artifacts. Other outcomes do not register blocker artifacts.
 
 ## VS Code integration
 
 ### Structured blocked classification
 
-The extension treats a non-zero process result as a handled blocked domain outcome only when all of the following hold:
+The extension treats a non-zero process result as a handled blocked domain outcome when all of the following hold:
 
 ```text
 command == run-tests
@@ -660,26 +611,27 @@ exitCode == 35
 JSON envelope parses successfully
 JSON command == run-tests
 JSON outcome == blocked
-blocker path is workspace-contained and matches the envelope
 ```
 
 An exit code `35` with missing or invalid JSON remains a normal CLI error. Numeric exit code alone is never sufficient.
 
+Report-path verification is a separate gate for automatic opening. A valid blocked envelope with a report-publication diagnostic remains a handled blocked outcome, but VS Code displays the diagnostic and does not open an unverified or missing report.
+
 ### Automatic opening
 
-On a valid blocked result with at least one blocker:
+On a valid blocked result with at least one blocker and a verified Markdown path:
 
-1. record the run outcome and report metadata;
-2. validate the latest Markdown path, falling back to the run-history Markdown path;
-3. open the Markdown report once;
-4. cache the run ID, blocker count, report hashes, and primary action;
-5. refresh the Workflow panel.
+1. record run outcome and report metadata;
+2. validate latest Markdown, falling back to run-history Markdown;
+3. open Markdown once;
+4. cache run ID, blocker count, hashes, and primary action;
+5. refresh Workflow.
 
-The extension stores the last auto-opened blocker run ID so repeated panel refreshes or state restoration do not reopen the report. Closing the tab does not remove the Workflow action.
+The extension stores the last auto-opened blocker run ID so refreshes and restoration do not reopen it. Closing the tab does not remove the Workflow action.
 
 ### Workflow state
 
-The state stores a discriminated blocker summary, conceptually:
+Conceptually:
 
 ```typescript
 {
@@ -688,40 +640,34 @@ The state stores a discriminated blocker summary, conceptually:
   runId: string,
   count: number,
   primaryAction: string,
-  reportJson: string,
-  reportMarkdown: string,
-  reportSha256: string,
+  reportJson?: string,
+  reportMarkdown?: string,
+  reportSha256?: string,
   updatedAt: string
 }
 ```
 
-A non-blocked actual run clears this state.
+Paths and hashes are optional because report publication can fail without changing the blocked outcome. A non-blocked actual run clears this state.
 
 ### Workflow actions
 
-Both simple and detailed views display:
+Both simple and detailed views display `実行ブロック項目を開く（N件）` when verified report metadata is available. Where supported, an adjacent primary-operation button is mapped from the stable action code. Labels never drive routing.
 
-```text
-実行ブロック項目を開く（N件）
-```
-
-near the test execution/result stage.
-
-Where supported, an adjacent primary-operation button is mapped from the stable action code. Labels do not drive routing.
+When a blocked outcome has no published view, Workflow shows the blocked status and publication diagnostic but does not render an open-report button.
 
 ### Activation-time restoration
 
-On extension activation, blocker state is restored only when:
+Restore blocker state only when:
 
 1. `reports/latest_run.json` is valid;
 2. its execution report exists and reports `blocked`;
 3. its optional blocker reference uses the same run ID;
-4. blocker JSON validates against the registered schema;
-5. the blocker JSON’s execution-report reference matches the latest execution report;
-6. the recorded SHA-256 matches the blocker JSON;
-7. the Markdown path is workspace-contained and exists.
+4. blocker JSON validates against schema;
+5. blocker JSON references the same execution report;
+6. recorded SHA-256 matches blocker JSON;
+7. Markdown is workspace-contained and exists.
 
-A stray or stale `reports/test_execution_blockers.md` file alone never restores the action.
+A stray `reports/test_execution_blockers.md` alone never restores the action.
 
 ## Compatibility
 
@@ -729,85 +675,81 @@ A stray or stale `reports/test_execution_blockers.md` file alone never restores 
 - Existing execution-report fields are unchanged.
 - `latest_run.json.blocker_report` is optional.
 - Existing runs without blocker reports remain readable.
-- Existing consumers that ignore new CLI detail fields continue to work.
+- Consumers ignoring new CLI detail fields continue to work.
 - The new artifact kind and schema are additive.
-- `run-tests --plan` behavior and exit code remain unchanged.
+- `run-tests --plan` behavior remains unchanged.
 
 ## Testing strategy
 
-### Python model and analyzer tests
+### Python analyzer tests
 
-- build-probe error diagnostics become individual blockers;
-- a non-successful probe without diagnostics becomes one generic blocker;
-- executable-not-found includes the attempted path and build state;
+- build-probe diagnostics become individual blockers;
+- non-successful probe without diagnostics becomes one generic blocker;
+- executable-not-found includes attempted path and build state;
 - no executable cases expands to concrete blocking TestSpec fields;
 - broad no-case and placeholder messages are not double-counted when concrete causes exist;
-- empty, `TBD*`, `TODO*`, `UNKNOWN*`, and `UNRESOLVED*` values are detected through the shared input-form rules;
+- empty, `TBD*`, `TODO*`, `UNKNOWN*`, and `UNRESOLVED*` use shared input-form rules;
 - each unresolved required leaf becomes one blocker;
-- a fully populated but unconfirmed parent becomes one confirmation-only blocker;
+- a concrete but unconfirmed parent becomes one confirmation-only blocker;
 - unrelated formal review items are excluded;
-- runner structured blocked cases and fallback log explanations are normalized;
-- duplicate blockers are removed;
-- sorting and `BLK-NNN` assignment are deterministic;
-- primary action follows the prerequisite priority;
-- long values and messages are truncated with the marker set.
+- runner structured blockers and fallback log explanations are normalized;
+- an otherwise unexplained blocked result produces `execution_blocked_unknown`;
+- duplicate removal, sorting, IDs, primary action, and truncation are deterministic.
 
 ### Publication tests
 
-- blocked run writes all four blocker files;
+- blocked run writes all four files;
 - run-history files are never overwritten;
-- blocker JSON passes contract validation;
+- JSON passes contract validation;
 - Markdown safely escapes dynamic content;
-- `latest_run.json` contains a valid optional blocker reference;
-- a later non-blocked run deletes only the latest files;
-- historical blocker files remain after a non-blocked run;
-- `--plan` neither deletes nor creates latest blocker files;
-- run-history write failure retains exit code `35` and removes stale latest views;
-- latest synchronization failure returns the history paths;
-- Markdown failure preserves JSON and the true outcome;
+- `latest_run.json` contains a valid optional reference;
+- a later non-blocked run deletes only latest files;
+- historical files remain;
+- `--plan` changes nothing;
+- run-history failure retains exit `35` and removes stale latest views;
+- latest synchronization failure returns history paths;
+- Markdown failure preserves JSON and true outcome;
 - workspace escapes, symlinks, and junction escapes are rejected.
 
 ### CLI tests
 
-- blocked result retains exit code `35`;
-- blocked result message includes the count and available report path;
-- blocker detail fields and primary action are present;
-- blocker artifacts are registered only when written;
-- `passed`, `failed`, `inconclusive`, `timed_out`, and `cancelled` results do not expose blocker artifacts;
-- a blocker-publication warning does not convert the outcome to failed or internal error.
+- blocked result retains exit `35`;
+- message includes count and available path;
+- count and primary action remain present during publication failure;
+- blocker artifacts register only when written;
+- non-blocked outcomes expose no blocker artifacts;
+- publication warnings do not convert outcome to failed or internal error.
 
 ### VS Code tests
 
-- valid exit-code-35 blocked envelope opens Markdown automatically;
-- malformed or unstructured exit-code-35 output remains a CLI error;
-- auto-open happens once per run ID;
+- valid blocked envelope is handled even when publication failed;
+- valid blocked envelope with verified Markdown auto-opens once;
+- malformed exit-code-35 output remains a CLI error;
 - simple and detailed Workflow views show the same count;
-- the open-report action validates workspace containment;
-- stable primary action codes invoke the correct existing command;
-- a later non-blocked run clears the action;
-- `failed`, `inconclusive`, `timed_out`, `cancelled`, and `planned` results do not auto-open;
-- activation restores state only from matching latest-run, hashes, and schema;
-- stale, modified, or external report paths are not opened;
-- the user can reopen a previously auto-opened report from Workflow.
+- open-report action validates containment;
+- stable action codes invoke correct commands;
+- later non-blocked run clears action;
+- other outcomes do not auto-open;
+- activation restores only matching run IDs, hashes, schema, and paths;
+- stale, modified, or external paths are not opened;
+- user can reopen a previously auto-opened report from Workflow.
 
 ### Integration tests
 
 #### Blocked to resolved
 
 ```text
-create canonical TestSpec with blocking unresolved values
-→ generate harness/build prerequisites as appropriate
+create TestSpec with blocking unresolved values
+→ generate prerequisites
 → run-tests --run
-→ assert exit 35
-→ assert immutable and latest blocker files
+→ assert exit 35 and four blocker files
 → assert concrete TestSpec field details
-→ resolve and confirm values through canonical input-form APIs
-→ regenerate harness
-→ rebuild
+→ resolve and confirm through canonical input-form APIs
+→ regenerate harness and build
 → run-tests --run
 → assert non-blocked outcome
 → assert latest blocker files removed
-→ assert historical blocker files retained
+→ assert historical files retained
 ```
 
 #### Build-precondition block
@@ -816,31 +758,31 @@ create canonical TestSpec with blocking unresolved values
 prepare non-successful build-probe report with diagnostics
 → run-tests --run
 → assert build diagnostics in blocker report
-→ assert primary action is build-related
-→ assert no unrelated TestSpec review items are listed
+→ assert build-related primary action
+→ assert unrelated TestSpec review items excluded
 ```
 
 #### Distribution contract
 
-- wheel contains the blocker schema;
-- bundled executable recognizes and emits the artifact;
-- packaged VSIX contains the blocked-result handling and Workflow action;
-- Windows distribution smoke verifies exit code `35`, report creation, and safe auto-open metadata.
+- wheel contains blocker schema;
+- bundled executable emits the artifact;
+- packaged VSIX contains blocked-result handling and Workflow action;
+- Windows distribution smoke verifies exit `35`, report creation, and safe auto-open metadata.
 
 ## Acceptance criteria
 
-The feature is complete when all of the following are true:
-
-1. A `run-tests --run` outcome of `blocked` creates an immutable JSON and Markdown blocker report for that run.
-2. The latest JSON and Markdown views are synchronized under `reports/`.
-3. The report contains only direct blockers, not unrelated review work.
-4. Concrete TestSpec blockers include case ID, stable item ID, control name, current value, source artifact, and JSON Pointer.
-5. The report provides a deterministic primary operation and ordered next steps.
-6. Exit code `35` and the blocked domain outcome are unchanged.
-7. VS Code automatically opens the verified Markdown report once after the blocked run.
-8. Both Workflow modes provide `実行ブロック項目を開く（N件）` until a later actual non-blocked run.
-9. A later non-blocked actual run removes the latest views and UI state without deleting historical run evidence.
-10. `run-tests --plan` does not change blocker-report state.
-11. Publication failures do not overwrite the true terminal outcome or expose an older report as current.
-12. CLI-only and VS Code-driven runs produce the same canonical blocker artifacts.
-13. Full Python, VS Code, Extension Host, fixture smoke, package-contract, source-integrity, and Windows distribution checks pass.
+1. Every successfully generated blocked report contains at least one direct blocker.
+2. A blocked actual run creates immutable JSON and Markdown under its run directory.
+3. Latest JSON and Markdown views are synchronized under `reports/`.
+4. Unrelated review work is excluded.
+5. Concrete TestSpec blockers include case ID, stable item ID, control name, current value, source artifact, and JSON Pointer.
+6. The report provides deterministic primary operation and ordered next steps.
+7. Exit code `35` and blocked semantics are unchanged.
+8. VS Code handles valid blocked envelopes even if report publication fails.
+9. VS Code automatically opens a verified Markdown report once after the run.
+10. Both Workflow modes provide `実行ブロック項目を開く（N件）` while verified current report metadata exists.
+11. A later non-blocked actual run removes latest views and UI state without deleting history.
+12. `run-tests --plan` does not change blocker state.
+13. Publication failures do not overwrite the true outcome or expose an older report as current.
+14. CLI-only and VS Code-driven runs produce the same canonical blocker artifacts.
+15. Full Python, VS Code, Extension Host, fixture smoke, package-contract, source-integrity, and Windows distribution checks pass.
