@@ -85,7 +85,7 @@ jobs:
         run: |
           .\dist\unit-test-runner.exe --version
           .\dist\unit-test-runner.exe --help | Out-Null
-          python - <<'PY'
+          @'
           import zipfile
           from pathlib import Path
           vsix = Path('dist/unit-test-runner-vscode-0.1.0.vsix')
@@ -94,7 +94,7 @@ jobs:
               info = archive.getinfo(name)
               assert info.file_size > 0
           print('VSIX bundled CLI verified')
-          PY
+          '@ | python -
 
       - name: Upload installation package
         uses: actions/upload-artifact@v4
