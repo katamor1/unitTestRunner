@@ -1,0 +1,110 @@
+name: Apply and Build Test Execution Blocker Report
+
+on:
+  push:
+    branches:
+      - feat/test-execution-blocker-report-standard-build
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-test-execution-blocker-report-standard-build
+  cancel-in-progress: false
+
+jobs:
+  apply-build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/test-execution-blocker-report-standard-build
+          fetch-depth: 0
+
+      - name: Detect complete staged patch
+        id: staged
+        shell: pwsh
+        run: |
+          $parts = @(Get-ChildItem -LiteralPath .sdd -Filter 'patch.part.*' -File -ErrorAction SilentlyContinue | Sort-Object Name)
+          $present = (Test-Path -LiteralPath .sdd\ready -PathType Leaf) -and
+                     (Test-Path -LiteralPath .sdd\patch.sha256 -PathType Leaf) -and
+                     (Test-Path -LiteralPath .sdd\commit-message.txt -PathType Leaf) -and
+                     ($parts.Count -gt 0)
+          "present=$($present.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Set up Python
+        if: steps.staged.outputs.present == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node
+        if: steps.staged.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: vscode/extension/package-lock.json
+
+      - name: Reconstruct and apply reviewed patch
+        if: steps.staged.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          @'
+          import base64
+          import gzip
+          import hashlib
+          from pathlib import Path
+
+          parts = sorted(Path('.sdd').glob('patch.part.*'))
+          encoded = b''.join(part.read_bytes() for part in parts)
+          compressed = base64.b64decode(encoded, validate=True)
+          expected = Path('.sdd/patch.sha256').read_text(encoding='utf-8').strip()
+          actual = hashlib.sha256(compressed).hexdigest()
+          if actual != expected:
+              raise SystemExit(f'patch SHA-256 mismatch: expected {expected}, got {actual}')
+          patch_path = Path('.sdd/changes.patch')
+          patch_path.write_bytes(gzip.decompress(compressed))
+          print(f'compressed_bytes={len(compressed)} sha256={actual} parts={len(parts)} patch_bytes={patch_path.stat().st_size}')
+          '@ | python -
+          git apply --check --binary .sdd\changes.patch
+          git apply --binary .sdd\changes.patch
+          git diff --check
+
+      - name: Build through the standard distribution script
+        if: steps.staged.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_distribution.ps1
+          if (-not (Test-Path -LiteralPath .\dist\unit-test-runner.exe -PathType Leaf)) {
+            throw 'Standard build did not produce dist\unit-test-runner.exe'
+          }
+          if (-not (Test-Path -LiteralPath .\dist\unit-test-runner-vscode-0.1.0.vsix -PathType Leaf)) {
+            throw 'Standard build did not produce dist\unit-test-runner-vscode-0.1.0.vsix'
+          }
+
+      - name: Upload standard distribution outputs
+        if: steps.staged.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-runner-standard-distribution
+          path: |
+            dist/unit-test-runner.exe
+            dist/unit-test-runner-vscode-0.1.0.vsix
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Commit verified implementation
+        if: steps.staged.outputs.present == 'true' && success()
+        shell: pwsh
+        run: |
+          $message = (Get-Content -LiteralPath .sdd\commit-message.txt -Raw -Encoding UTF8).Trim()
+          Remove-Item -LiteralPath .sdd -Recurse -Force
+          Remove-Item -LiteralPath .github\workflows\apply-test-execution-blocker-report.yml -Force
+          git config user.name OpenAI
+          git config user.email noreply@openai.com
+          git add -A
+          git commit -m $message
+          git push origin HEAD:feat/test-execution-blocker-report-standard-build
