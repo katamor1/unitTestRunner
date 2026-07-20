@@ -4,13 +4,16 @@ on:
   push:
     branches:
       - release/transitive-link-fix-windows
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 concurrency:
   group: build-transitive-link-fix-windows
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
