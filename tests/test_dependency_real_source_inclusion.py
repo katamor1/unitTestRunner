@@ -1,4 +1,5 @@
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -9,6 +10,12 @@ SRC_ROOT = REPO_ROOT / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
 from unit_test_runner.build import generate_build_workspace
+from unit_test_runner.c_analyzer.call_analyzer import analyze_calls
+from unit_test_runner.c_analyzer.function_locator import locate_function
+from unit_test_runner.c_analyzer.global_access_analyzer import analyze_global_access
+from unit_test_runner.c_analyzer.signature_extractor import extract_signature
+from unit_test_runner.c_analyzer.source_digest import build_source_digest
+from unit_test_runner.dependency_policy.analyzer import analyze_dependency_policy
 from unit_test_runner.harness import generate_harness_skeleton
 
 
@@ -133,6 +140,128 @@ class DependencyRealSourceInclusionTests(unittest.TestCase):
             self.assertIn("generated/dependencies/utr_dependency_dispatch.c", compile_sources)
             self.assertFalse((output / "extracted" / "deps.h").exists())
             self.assertFalse(any(item.code == "dependency_call_rewrite_skipped" for item in report.diagnostics))
+
+    @unittest.skipUnless(
+        any(shutil.which(name) for name in ("gcc", "clang", "cc")),
+        "host C compiler is required",
+    )
+    def test_auto_stub_fallback_keeps_transitive_real_source_out_of_build(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project = root / "project"
+            output = root / "out"
+            project.mkdir()
+            target = project / "target.c"
+            helper = project / "helper.c"
+            next_source = project / "next.c"
+            header = project / "deps.h"
+            header.write_text(
+                "extern int g_state;\n"
+                "int Helper(int value);\n"
+                "int Next(int value);\n",
+                encoding="ascii",
+            )
+            target.write_text(
+                '#include "deps.h"\n'
+                "int g_state;\n"
+                "int Target(int value)\n"
+                "{\n"
+                "    g_state += value;\n"
+                "    return Helper(value);\n"
+                "}\n",
+                encoding="ascii",
+            )
+            helper.write_text(
+                '#include "deps.h"\n'
+                "int Helper(int value)\n"
+                "{\n"
+                "    g_state += value;\n"
+                "    return Next(value);\n"
+                "}\n",
+                encoding="ascii",
+            )
+            next_source.write_text(
+                '#include "deps.h"\n'
+                "int Next(int value) { return value + 1; }\n",
+                encoding="ascii",
+            )
+            build_context = {
+                "workspace_root": str(project),
+                "include_dirs": [str(project)],
+                "defines": [],
+                "compiler_options": [],
+            }
+            digest = build_source_digest(target, build_context)
+            location = locate_function(digest, "Target")
+            signature = extract_signature(digest, location)
+            global_access = analyze_global_access(digest, location, signature)
+            call_report = analyze_calls(digest, location, signature, global_access)
+            policy = analyze_dependency_policy(
+                workspace_root=project,
+                target_source=target,
+                source_digest=digest,
+                function_signature=signature,
+                global_access=global_access,
+                call_report=call_report,
+                project_sources=[target, helper, next_source],
+                project_headers=[header],
+            )
+            dependency = policy.dependencies[0]
+            self.assertEqual("stub", dependency.resolved_mode)
+            self.assertEqual("review_required", dependency.review_status)
+
+            design = {
+                "source": {"path": str(target), "sha256": digest.source.sha256},
+                "function": {"name": "Target", "status": "generated"},
+                "test_cases": [],
+                "additional_case_candidates": [],
+                "coverage_summary": {
+                    "total_coverage_items": 0,
+                    "covered_by_design_count": 0,
+                    "uncovered_coverage_ids": [],
+                    "coverage_to_test_cases": {},
+                },
+                "unresolved_items": [],
+                "warnings": [],
+            }
+            harness = generate_harness_skeleton(
+                signature,
+                global_access,
+                call_report,
+                design,
+                output,
+                overwrite=True,
+                dependency_policy=policy.to_dict(),
+            )
+            reports = output / "reports"
+            reports.mkdir(exist_ok=True)
+            (reports / "dependency_policy.json").write_text(
+                json.dumps(policy.to_dict()),
+                encoding="utf-8",
+            )
+
+            report, probe = generate_build_workspace(
+                build_context,
+                digest.to_dict(include_tokens=True),
+                harness.to_dict(),
+                output,
+                run_probe=True,
+                dry_run=False,
+                toolchain="verification",
+            )
+
+            self.assertEqual("succeeded", probe.status)
+            self.assertEqual(0, probe.exit_code)
+            dependency_sources = [
+                item for item in report.copied_files if item.file_kind == "dependency_source"
+            ]
+            self.assertEqual([], dependency_sources)
+            compile_sources = {unit.source_file.as_posix() for unit in report.compile_units}
+            self.assertNotIn("extracted/dependencies/helper.c", compile_sources)
+            self.assertNotIn("extracted/dependencies/next.c", compile_sources)
+            dispatch = harness.to_dict()["dependency_dispatches"][0]
+            self.assertEqual("stub", dispatch["default_mode"])
+            self.assertFalse(dispatch["real_available"])
 
     def test_mismatched_rewrite_site_blocks_build_without_modifying_product_sources(self):
         with tempfile.TemporaryDirectory() as temp_dir:
