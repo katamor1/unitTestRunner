@@ -104,6 +104,106 @@ class DependencyPolicyAnalyzerTests(unittest.TestCase):
         self.assertEqual(Path("src/internal.c"), objects["g_state"].definition_source)
         self.assertEqual("fixture", objects["g_missing"].resolved_mode)
 
+    def test_auto_uses_reviewed_stub_when_real_source_has_external_link_dependencies(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            include = root / "include"
+            src = root / "src"
+            include.mkdir(parents=True)
+            src.mkdir(parents=True)
+            header = include / "deps.h"
+            header.write_text(
+                "extern int g_state;\n"
+                "int Helper(int value);\n"
+                "int Next(int value);\n",
+                encoding="utf-8",
+            )
+            target = src / "target.c"
+            target.write_text(
+                '#include "deps.h"\n'
+                "int g_state;\n"
+                "int Target(int value)\n"
+                "{\n"
+                "    g_state += value;\n"
+                "    return Helper(value);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            helper = src / "helper.c"
+            helper.write_text(
+                '#include "deps.h"\n'
+                "int Helper(int value)\n"
+                "{\n"
+                "    g_state += value;\n"
+                "    return Next(value);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            next_source = src / "next.c"
+            next_source.write_text(
+                '#include "deps.h"\n'
+                "int Next(int value) { return value + 1; }\n",
+                encoding="utf-8",
+            )
+
+            analysis_args = {
+                "workspace_root": root,
+                "target_source": target,
+                "source_digest": {
+                    "preprocessor": {"includes": [{"resolved_candidates": [str(header)]}]}
+                },
+                "function_signature": {"function": {"name": "Target"}},
+                "global_access": {
+                    "file_scope_declarations": [],
+                    "global_accesses": [{"name": "g_state", "access_kind": "read_write"}],
+                },
+                "call_report": {
+                    "calls": [
+                        {
+                            "call_id": "CALL_001",
+                            "name": "Helper",
+                            "target_kind": "external_function",
+                            "name_position": {"line": 6, "column": 12},
+                            "call_range": {
+                                "start": {"line": 6, "column": 12},
+                                "end": {"line": 6, "column": 25},
+                            },
+                            "arguments": [
+                                {
+                                    "raw": "value",
+                                    "argument_kind": "parameter",
+                                    "passing_mode_hint": "by_value",
+                                }
+                            ],
+                            "return_usage": {"usage_kind": "returned"},
+                        }
+                    ],
+                    "stub_candidates": [],
+                },
+                "project_sources": [target, helper, next_source],
+                "project_headers": [header],
+            }
+            report = analyze_dependency_policy(**analysis_args)
+            explicit_real = analyze_dependency_policy(
+                **analysis_args,
+                existing_policy={
+                    "dependencies": [{"callee": "Helper", "configured_mode": "real"}]
+                },
+            )
+
+        dependency = report.dependencies[0]
+        self.assertEqual("stub", dependency.resolved_mode)
+        self.assertEqual("review_required", dependency.review_status)
+        self.assertEqual("review_required", report.status)
+        self.assertTrue(
+            any(item.kind == "implementation_transitive_dependency" for item in dependency.evidence)
+        )
+        self.assertTrue(any("Next" in warning for warning in dependency.warnings))
+        explicit_dependency = explicit_real.dependencies[0]
+        self.assertEqual("real", explicit_dependency.resolved_mode)
+        self.assertEqual("review_required", explicit_dependency.review_status)
+        self.assertTrue(any("Next" in warning for warning in explicit_dependency.warnings))
+
     def test_unsupported_indirect_and_conflicting_external_definition_require_review(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

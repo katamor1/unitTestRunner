@@ -6,8 +6,13 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from unit_test_runner.encoding import decode_bytes_auto
+from unit_test_runner.c_analyzer.call_analyzer import analyze_calls
+from unit_test_runner.c_analyzer.function_locator import locate_function
+from unit_test_runner.c_analyzer.global_access_analyzer import analyze_global_access
 from unit_test_runner.c_analyzer.object_definition_finder import find_file_scope_object_definitions
 from unit_test_runner.c_analyzer.masker import mask_source_text
+from unit_test_runner.c_analyzer.signature_extractor import extract_signature
+from unit_test_runner.c_analyzer.source_digest import build_source_digest
 
 from .models import (
     DependencyEvidence,
@@ -83,13 +88,27 @@ def analyze_dependency_policy(
         implementation_source = signature.definition_source
         callee_globals = _callee_global_names(root, implementation_source, callee, target_globals)
         shared_globals = sorted(target_globals.intersection(callee_globals))
-        evidence = _dependency_evidence(callee, target_kind, calls, implementation_source, shared_globals, stub_tags.get(callee, set()))
+        external_link_calls = (
+            _implementation_external_link_calls(root, implementation_source, callee)
+            if configured_mode != "stub" and signature.resolution in {"exact", "compatible_inferred"}
+            else []
+        )
+        evidence = _dependency_evidence(
+            callee,
+            target_kind,
+            calls,
+            implementation_source,
+            shared_globals,
+            stub_tags.get(callee, set()),
+            external_link_calls,
+        )
         resolved_mode, review_status, warnings = _resolve_dependency_mode(
             configured_mode,
             target_kind,
             signature.resolution,
             implementation_source,
             evidence,
+            external_link_calls,
         )
         rewrite_sites = []
         if target_kind in _SUPPORTED_DIRECT_KINDS and resolved_mode in {"real", "stub"} and signature.resolution in {"exact", "compatible_inferred"}:
@@ -227,6 +246,7 @@ def _dependency_evidence(
     implementation_source: Path | None,
     shared_globals: list[str],
     tags: set[str],
+    external_link_calls: list[str],
 ) -> list[DependencyEvidence]:
     result: list[DependencyEvidence] = []
     if target_kind == "same_file_function":
@@ -237,6 +257,15 @@ def _dependency_evidence(
         result.append(DependencyEvidence("implementation_missing", "No project implementation source was found.", "signature_resolver", -2))
     for name in shared_globals:
         result.append(DependencyEvidence("shared_global", f"Target and {callee} both reference {name}.", "global_access", 4))
+    if external_link_calls:
+        result.append(
+            DependencyEvidence(
+                "implementation_transitive_dependency",
+                f"{callee} calls additional link dependencies: {', '.join(external_link_calls)}.",
+                "implementation_call_report",
+                0,
+            )
+        )
     pointer_coupled = False
     for call in calls:
         for argument in call.get("arguments", []):
@@ -267,6 +296,7 @@ def _resolve_dependency_mode(
     signature_resolution: str,
     implementation_source: Path | None,
     evidence: list[DependencyEvidence],
+    external_link_calls: list[str],
 ) -> tuple[str, str, list[str]]:
     warnings: list[str] = []
     if configured_mode not in _VALID_DEPENDENCY_MODES:
@@ -281,20 +311,44 @@ def _resolve_dependency_mode(
     if configured_mode == "real":
         if implementation_source is None and target_kind not in {"same_file_function", "standard_library"}:
             return "review_required", "review_required", [*warnings, "real mode requires a unique implementation source."]
+        if external_link_calls:
+            return (
+                "real",
+                "review_required",
+                [
+                    *warnings,
+                    "real implementation requires additional link dependencies: "
+                    + ", ".join(external_link_calls)
+                    + ".",
+                ],
+            )
         return "real", "resolved", warnings
     if target_kind == "standard_library":
         return "real", "resolved", warnings
     score = sum(item.weight for item in evidence)
     strong_state_coupling = any(item.kind in {"shared_global", "pointer_state_coupling"} for item in evidence)
     if implementation_source is not None and strong_state_coupling and score >= 3:
-        return "real", "resolved", warnings
-    if implementation_source is None and score <= 1:
-        return "stub", "resolved", warnings
-    if score <= 0:
-        return "stub", "resolved", warnings
-    if implementation_source is not None and score >= 4:
-        return "real", "resolved", warnings
-    return "review_required", "review_required", [*warnings, f"auto evidence score {score} is ambiguous."]
+        auto_mode, auto_review = "real", "resolved"
+    elif implementation_source is None and score <= 1:
+        auto_mode, auto_review = "stub", "resolved"
+    elif score <= 0:
+        auto_mode, auto_review = "stub", "resolved"
+    elif implementation_source is not None and score >= 4:
+        auto_mode, auto_review = "real", "resolved"
+    else:
+        return "review_required", "review_required", [*warnings, f"auto evidence score {score} is ambiguous."]
+    if auto_mode == "real" and external_link_calls:
+        return (
+            "stub",
+            "review_required",
+            [
+                *warnings,
+                "auto selected a safe stub because the real implementation requires additional link dependencies: "
+                + ", ".join(external_link_calls)
+                + ".",
+            ],
+        )
+    return auto_mode, auto_review, warnings
 
 
 def _analyze_external_objects(
@@ -362,6 +416,34 @@ def _resolve_object_mode(configured_mode: str, candidates: list[Path]) -> tuple[
     if len(candidates) == 0:
         return "fixture", "resolved", warnings
     return "review_required", "review_required", [*warnings, "Multiple product definitions were found."]
+
+
+def _implementation_external_link_calls(
+    root: Path,
+    implementation_source: Path | None,
+    callee: str,
+) -> list[str]:
+    if implementation_source is None:
+        return []
+    path = implementation_source if implementation_source.is_absolute() else root / implementation_source
+    try:
+        digest = build_source_digest(path)
+        location = locate_function(digest, callee)
+        if location.status != "found":
+            return []
+        signature = extract_signature(digest, location)
+        global_access = analyze_global_access(digest, location, signature)
+        call_report = analyze_calls(digest, location, signature, global_access)
+    except (OSError, UnicodeError, ValueError, KeyError, AttributeError):
+        return []
+    unsafe_kinds = {"external_function", "linked_library_function"}
+    return sorted(
+        {
+            call.name
+            for call in call_report.calls
+            if call.target_kind in unsafe_kinds and call.name
+        }
+    )
 
 
 def _callee_global_names(root: Path, implementation_source: Path | None, callee: str, target_globals: set[str]) -> set[str]:
