@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - feat/test-execution-blocker-report-standard-build
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
