@@ -1,0 +1,99 @@
+name: Apply Test Execution Blocker Report
+
+on:
+  push:
+    branches:
+      - feat/test-execution-blocker-report
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-test-execution-blocker-report
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/test-execution-blocker-report
+          fetch-depth: 0
+
+      - name: Detect staged payload
+        id: staged
+        shell: bash
+        run: |
+          if [[ -f .sdd/blocker-feature.ready \
+             && -f .sdd/blocker-feature.sha256 \
+             && -f .sdd/blocker-feature.commit-message \
+             ]] && compgen -G '.sdd/blocker-feature.tar.gz.b64.*' >/dev/null; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.staged.outputs.present == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node
+        if: steps.staged.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: vscode/extension/package-lock.json
+
+      - name: Apply and verify payload
+        if: steps.staged.outputs.present == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .sdd/blocker-feature.tar.gz.b64.* > "$RUNNER_TEMP/blocker-feature.b64"
+          python - <<'PY'
+          import base64
+          import hashlib
+          from pathlib import Path
+
+          encoded = Path('${{ runner.temp }}/blocker-feature.b64').read_bytes()
+          payload = base64.b64decode(encoded, validate=True)
+          expected = Path('.sdd/blocker-feature.sha256').read_text(encoding='utf-8').strip()
+          actual = hashlib.sha256(payload).hexdigest()
+          if actual != expected:
+              raise SystemExit(f'payload SHA-256 mismatch: expected {expected}, got {actual}')
+          Path('${{ runner.temp }}/blocker-feature.tar.gz').write_bytes(payload)
+          print(f'payload_bytes={len(payload)} sha256={actual}')
+          PY
+          tar -xzf "$RUNNER_TEMP/blocker-feature.tar.gz" -C .
+          python -m pip install "setuptools>=61" wheel
+          python -m pip install -e ".[test]"
+          python -m compileall -q src tests
+          python -m unittest \
+            tests.test_distribution_build_script \
+            tests.test_cli_test_execution_blockers \
+            tests.test_execution_blocker_analyzer \
+            tests.test_execution_blocker_report_writer \
+            tests.test_execution_blocker_lifecycle -v
+          npm ci --prefix vscode/extension
+          npm test --prefix vscode/extension
+          git diff --check
+
+      - name: Commit verified feature
+        if: steps.staged.outputs.present == 'true' && success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          message="$(cat .sdd/blocker-feature.commit-message)"
+          rm -rf .sdd
+          rm -f .github/workflows/apply-test-execution-blocker-report.yml
+          git config user.name OpenAI
+          git config user.email noreply@openai.com
+          git add -A
+          git commit -m "$message"
+          git push origin HEAD:feat/test-execution-blocker-report
