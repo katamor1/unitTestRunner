@@ -1,0 +1,122 @@
+name: Build Transitive Link Fix Windows Package
+
+on:
+  push:
+    branches:
+      - release/transitive-link-fix-windows
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-transitive-link-fix-windows
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout merged fix
+        uses: actions/checkout@v4
+        with:
+          ref: release/transitive-link-fix-windows
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: vscode/extension/package-lock.json
+
+      - name: Build bundled CLI and VSIX
+        shell: pwsh
+        run: ./scripts/build_distribution.ps1 -PythonLauncher python -SkipTests
+
+      - name: Build wheel and install notes
+        shell: pwsh
+        run: |
+          python -m pip wheel . --no-deps -w dist
+          @'
+          # UnitTestRunner 推移的リンク依存修正版
+
+          このパッケージは `UtrLarge_Module_06996 -> UtrLarge_Module_00000 -> UtrLarge_Module_00001` のような推移的実依存を、autoモードで不完全にリンクしてLNK2019になる問題を修正します。
+
+          ## 推奨インストール
+
+          1. VS Codeを閉じます。
+          2. VSIXを強制更新します。
+
+          ```powershell
+          code --install-extension .\unit-test-runner-vscode-0.1.0.vsix --force
+          ```
+
+          3. VS Codeを起動し、`Developer: Reload Window` を実行します。
+          4. 対象関数で `現在の関数を再解析` を実行します。
+          5. `テスト設計を生成`、`テストハーネスを生成`、`ビルドを実行` を順に再実行します。
+
+          Python CLIを外部指定している場合はwheelも更新してください。
+
+          ```powershell
+          py -3.12 -m pip install --upgrade .\unit_test_runner-0.1.0-py3-none-any.whl
+          ```
+
+          `unitTestRunner.cliPath` が空なら、VSIX同梱の修正版CLIが使用されます。外部CLIを指定している場合は `where.exe unit-test-runner` で更新先を確認してください。
+          '@ | Set-Content -LiteralPath dist\INSTALL_LINK_FIX_JA.md -Encoding utf8
+          $files = @(
+            'dist\unit-test-runner.exe',
+            'dist\unit-test-runner-vscode-0.1.0.vsix',
+            'dist\unit_test_runner-0.1.0-py3-none-any.whl'
+          )
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()
+            "$hash  $([System.IO.Path]::GetFileName($file))"
+          }
+          $lines | Set-Content -LiteralPath dist\SHA256SUMS.txt -Encoding ascii
+
+      - name: Verify packaged fix
+        shell: pwsh
+        run: |
+          .\dist\unit-test-runner.exe --version
+          .\dist\unit-test-runner.exe --help | Out-Null
+          python - <<'PY'
+          import zipfile
+          from pathlib import Path
+          vsix = Path('dist/unit-test-runner-vscode-0.1.0.vsix')
+          with zipfile.ZipFile(vsix) as archive:
+              name = 'extension/bin/win32-x64/unit-test-runner.exe'
+              info = archive.getinfo(name)
+              assert info.file_size > 0
+          print('VSIX bundled CLI verified')
+          PY
+
+      - name: Upload installation package
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-runner-transitive-link-fix-windows
+          path: |
+            dist/unit-test-runner.exe
+            dist/unit-test-runner-vscode-0.1.0.vsix
+            dist/unit_test_runner-0.1.0-py3-none-any.whl
+            dist/INSTALL_LINK_FIX_JA.md
+            dist/SHA256SUMS.txt
+          retention-days: 7
+
+      - name: Remove temporary build workflow
+        if: success()
+        shell: pwsh
+        env:
+          BRANCH: release/transitive-link-fix-windows
+        run: |
+          Remove-Item -LiteralPath .github\workflows\build-transitive-link-fix-windows.yml -Force
+          git config user.name OpenAI
+          git config user.email noreply@openai.com
+          git add -A
+          git commit -m 'chore: remove temporary transitive link fix build workflow'
+          git push origin "HEAD:$env:BRANCH"
