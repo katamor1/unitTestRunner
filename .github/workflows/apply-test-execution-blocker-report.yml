@@ -23,13 +23,13 @@ jobs:
           ref: feat/test-execution-blocker-report
           fetch-depth: 0
 
-      - name: Detect complete staged payload
+      - name: Detect complete staged patch
         id: staged
         shell: pwsh
         run: |
-          $parts = @(Get-ChildItem -LiteralPath .sdd -Filter 'payload.part.*' -File -ErrorAction SilentlyContinue | Sort-Object Name)
+          $parts = @(Get-ChildItem -LiteralPath .sdd -Filter 'patch.part.*' -File -ErrorAction SilentlyContinue | Sort-Object Name)
           $present = (Test-Path -LiteralPath .sdd\ready -PathType Leaf) -and
-                     (Test-Path -LiteralPath .sdd\payload.sha256 -PathType Leaf) -and
+                     (Test-Path -LiteralPath .sdd\patch.sha256 -PathType Leaf) -and
                      (Test-Path -LiteralPath .sdd\commit-message.txt -PathType Leaf) -and
                      ($parts.Count -gt 0)
           "present=$($present.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -48,36 +48,29 @@ jobs:
           cache: npm
           cache-dependency-path: vscode/extension/package-lock.json
 
-      - name: Reconstruct and apply reviewed payload
+      - name: Reconstruct and apply reviewed patch
         if: steps.staged.outputs.present == 'true'
         shell: pwsh
         run: |
           @'
           import base64
+          import gzip
           import hashlib
-          import tarfile
           from pathlib import Path
 
-          root = Path.cwd().resolve()
-          parts = sorted(Path('.sdd').glob('payload.part.*'))
+          parts = sorted(Path('.sdd').glob('patch.part.*'))
           encoded = b''.join(part.read_bytes() for part in parts)
-          payload = base64.b64decode(encoded, validate=True)
-          expected = Path('.sdd/payload.sha256').read_text(encoding='utf-8').strip()
-          actual = hashlib.sha256(payload).hexdigest()
+          compressed = base64.b64decode(encoded, validate=True)
+          expected = Path('.sdd/patch.sha256').read_text(encoding='utf-8').strip()
+          actual = hashlib.sha256(compressed).hexdigest()
           if actual != expected:
-              raise SystemExit(f'payload SHA-256 mismatch: expected {expected}, got {actual}')
-          archive_path = Path('.sdd/payload.tar.gz')
-          archive_path.write_bytes(payload)
-          with tarfile.open(archive_path, 'r:gz') as archive:
-              for member in archive.getmembers():
-                  target = (root / member.name).resolve()
-                  try:
-                      target.relative_to(root)
-                  except ValueError as exc:
-                      raise SystemExit(f'payload member escapes repository: {member.name}') from exc
-              archive.extractall(root)
-          print(f'payload_bytes={len(payload)} sha256={actual} parts={len(parts)}')
+              raise SystemExit(f'patch SHA-256 mismatch: expected {expected}, got {actual}')
+          patch_path = Path('.sdd/changes.patch')
+          patch_path.write_bytes(gzip.decompress(compressed))
+          print(f'compressed_bytes={len(compressed)} sha256={actual} parts={len(parts)} patch_bytes={patch_path.stat().st_size}')
           '@ | python -
+          git apply --check --binary .sdd\changes.patch
+          git apply --binary .sdd\changes.patch
           git diff --check
 
       - name: Build through the standard distribution script
