@@ -1,0 +1,65 @@
+name: Apply Test Execution Blocker Plan
+
+on:
+  push:
+    branches:
+      - design/test-execution-blocker-report
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-test-execution-blocker-plan
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout design branch
+        uses: actions/checkout@v4
+        with:
+          ref: design/test-execution-blocker-report
+          fetch-depth: 0
+
+      - name: Detect staged payload
+        id: staged
+        shell: bash
+        run: |
+          if compgen -G '.sdd/test-execution-blocker-plan.gz.b64.*' >/dev/null; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Reconstruct and verify implementation plan
+        if: steps.staged.outputs.present == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .sdd/test-execution-blocker-plan.gz.b64.* > /tmp/plan.b64
+          base64 --decode /tmp/plan.b64 > /tmp/plan.gz
+          actual="$(sha256sum /tmp/plan.gz | awk '{print $1}')"
+          expected="8f36f061ea840694b6416d09552f0819d42c5aacccebaf5f9d2df35434838b9b"
+          test "$actual" = "$expected"
+          mkdir -p docs/superpowers/plans
+          gzip -dc /tmp/plan.gz > docs/superpowers/plans/2026-07-20-test-execution-blocker-report.md
+          grep -Fq '# Test Execution Blocker Report Implementation Plan' docs/superpowers/plans/2026-07-20-test-execution-blocker-report.md
+          grep -Fq '## Task 12: 結合テスト、ドキュメント、配布契約、全回帰を完成する' docs/superpowers/plans/2026-07-20-test-execution-blocker-report.md
+          test "$(grep -c '^- \[ \]' docs/superpowers/plans/2026-07-20-test-execution-blocker-report.md)" -eq 95
+          git diff --check
+
+      - name: Commit implementation plan and remove staging
+        if: steps.staged.outputs.present == 'true' && success()
+        shell: bash
+        env:
+          BRANCH: design/test-execution-blocker-report
+        run: |
+          rm -rf .sdd
+          rm -f .github/workflows/apply-test-execution-blocker-plan.yml
+          git config user.name OpenAI
+          git config user.email noreply@openai.com
+          git add -A
+          git commit -m "docs: plan test execution blocker report"
+          git push origin "HEAD:$BRANCH"
