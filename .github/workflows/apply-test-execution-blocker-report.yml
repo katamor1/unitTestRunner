@@ -27,11 +27,10 @@ jobs:
         id: staged
         shell: pwsh
         run: |
-          $parts = @(Get-ChildItem -LiteralPath .sdd -Filter 'patch.part.*' -File -ErrorAction SilentlyContinue | Sort-Object Name)
           $present = (Test-Path -LiteralPath .sdd\ready -PathType Leaf) -and
                      (Test-Path -LiteralPath .sdd\patch.sha256 -PathType Leaf) -and
                      (Test-Path -LiteralPath .sdd\commit-message.txt -PathType Leaf) -and
-                     ($parts.Count -gt 0)
+                     (Test-Path -LiteralPath .sdd\changes.patch.gz -PathType Leaf)
           "present=$($present.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Set up Python
@@ -48,26 +47,24 @@ jobs:
           cache: npm
           cache-dependency-path: vscode/extension/package-lock.json
 
-      - name: Reconstruct and apply reviewed patch
+      - name: Verify and apply reviewed patch
         if: steps.staged.outputs.present == 'true'
         shell: pwsh
         run: |
           @'
-          import base64
           import gzip
           import hashlib
           from pathlib import Path
 
-          parts = sorted(Path('.sdd').glob('patch.part.*'))
-          encoded = b''.join(part.read_bytes() for part in parts)
-          compressed = base64.b64decode(encoded, validate=True)
+          compressed_path = Path('.sdd/changes.patch.gz')
+          compressed = compressed_path.read_bytes()
           expected = Path('.sdd/patch.sha256').read_text(encoding='utf-8').strip()
           actual = hashlib.sha256(compressed).hexdigest()
           if actual != expected:
               raise SystemExit(f'patch SHA-256 mismatch: expected {expected}, got {actual}')
           patch_path = Path('.sdd/changes.patch')
           patch_path.write_bytes(gzip.decompress(compressed))
-          print(f'compressed_bytes={len(compressed)} sha256={actual} parts={len(parts)} patch_bytes={patch_path.stat().st_size}')
+          print(f'compressed_bytes={len(compressed)} sha256={actual} patch_bytes={patch_path.stat().st_size}')
           '@ | python -
           git apply --check --binary .sdd\changes.patch
           git apply --binary .sdd\changes.patch
