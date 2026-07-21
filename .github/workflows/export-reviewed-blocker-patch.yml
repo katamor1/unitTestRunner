@@ -1,0 +1,40 @@
+name: Export Reviewed Blocker Patch
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch history
+        uses: actions/checkout@v4
+        with:
+          ref: feat/test-execution-blocker-report-formal
+          fetch-depth: 0
+
+      - name: Recover exact reviewed patch
+        run: |
+          git show a24b7cde6dd83a11307aed20da1bf0bcc4aeaacb:.sdd/patch.part.00 > reviewed-test-execution-blocker-report.patch
+          git show a24b7cde6dd83a11307aed20da1bf0bcc4aeaacb:.sdd/patch.sha256 > reviewed-test-execution-blocker-report.sha256
+          sha256sum reviewed-test-execution-blocker-report.patch
+          cat reviewed-test-execution-blocker-report.sha256
+
+      - name: Upload reviewed patch
+        uses: actions/upload-artifact@v4
+        with:
+          name: reviewed-test-execution-blocker-report-patch
+          path: |
+            reviewed-test-execution-blocker-report.patch
+            reviewed-test-execution-blocker-report.sha256
+          if-no-files-found: error
+          retention-days: 7
