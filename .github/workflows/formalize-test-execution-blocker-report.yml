@@ -64,18 +64,21 @@ jobs:
           path.write_bytes(patch)
           print(f"patch_bytes={len(patch)} sha256={actual}")
           '@ | python -
-          git apply --check --binary .formal-test-execution-blocker-report.patch
-          git apply --binary .formal-test-execution-blocker-report.patch
+          git apply --stat .formal-test-execution-blocker-report.patch
+          git apply --check --index --binary .formal-test-execution-blocker-report.patch
+          git apply --index --binary --verbose .formal-test-execution-blocker-report.patch
+          git status --short
           git diff --check
 
       - name: Capture recovered patch diagnostics
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path formal-diagnostics -Force | Out-Null
-          git diff --name-status origin/main | Out-File -LiteralPath formal-diagnostics\changed-files.txt -Encoding utf8
-          git diff --stat origin/main | Out-File -LiteralPath formal-diagnostics\diff-stat.txt -Encoding utf8
-          git diff -- src\unit_test_runner\contracts\kinds.py | Out-File -LiteralPath formal-diagnostics\kinds.diff -Encoding utf8
-          git diff -- vscode\extension\package.json | Out-File -LiteralPath formal-diagnostics\package-json.diff -Encoding utf8
+          git status --short | Out-File -LiteralPath formal-diagnostics\status.txt -Encoding utf8
+          git diff --cached --name-status origin/main | Out-File -LiteralPath formal-diagnostics\changed-files.txt -Encoding utf8
+          git diff --cached --stat origin/main | Out-File -LiteralPath formal-diagnostics\diff-stat.txt -Encoding utf8
+          git diff --cached -- src\unit_test_runner\contracts\kinds.py | Out-File -LiteralPath formal-diagnostics\kinds.diff -Encoding utf8
+          git diff --cached -- vscode\extension\package.json | Out-File -LiteralPath formal-diagnostics\package-json.diff -Encoding utf8
           Get-Content -LiteralPath formal-diagnostics\changed-files.txt
 
       - name: Upload recovered patch diagnostics
