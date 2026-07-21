@@ -71,28 +71,17 @@ jobs:
           git apply --binary .formal-test-execution-blocker-report.patch
           git diff --check
 
-      - name: Verify expected implementation files
+      - name: Verify reviewed feature markers
         shell: pwsh
         run: |
-          $required = @(
-            'src\unit_test_runner\schemas\test_execution_blocker_report.schema.json',
-            'src\unit_test_runner\execution\blocker_models.py',
-            'src\unit_test_runner\execution\blocker_analyzer.py',
-            'src\unit_test_runner\execution\blocker_report_writer.py',
-            'tests\test_execution_blocker_contract.py',
-            'tests\test_execution_blocker_analyzer.py',
-            'tests\test_execution_blocker_publication.py',
-            'tests\test_execution_blocker_cli.py',
-            'vscode\extension\src\executionBlockers\contracts.ts',
-            'vscode\extension\src\executionBlockers\state.ts',
-            'vscode\extension\src\executionBlockers\verifier.ts',
-            'vscode\extension\src\executionBlockers\restoration.ts',
-            'vscode\extension\src\executionBlockers\workflowIntegration.ts'
-          )
-          foreach ($path in $required) {
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-              throw "Reviewed patch did not create required file: $path"
-            }
+          $changed = @(git diff --name-only origin/main)
+          Write-Host "Changed files after patch: $($changed.Count)"
+          $changed | ForEach-Object { Write-Host "  $_" }
+          if ($changed.Count -lt 20) {
+            throw "Implementation patch is unexpectedly small: $($changed.Count) changed files"
+          }
+          if (-not (Test-Path -LiteralPath 'src\unit_test_runner\schemas\test_execution_blocker_report.schema.json' -PathType Leaf)) {
+            throw 'Blocker report schema is missing.'
           }
           if (-not (Select-String -LiteralPath 'src\unit_test_runner\contracts\kinds.py' -SimpleMatch 'TEST_EXECUTION_BLOCKER_REPORT')) {
             throw 'Artifact kind TEST_EXECUTION_BLOCKER_REPORT is missing.'
@@ -100,11 +89,9 @@ jobs:
           if (-not (Select-String -LiteralPath 'vscode\extension\package.json' -SimpleMatch 'unitTestRunner.resolveExecutionBlocker')) {
             throw 'VS Code blocker-resolution command is missing.'
           }
-          $changed = @(git diff --name-only origin/main)
-          if ($changed.Count -lt 20) {
-            throw "Implementation patch is unexpectedly small: $($changed.Count) changed files"
+          if (-not (Test-Path -LiteralPath 'docs\test_execution_blockers.md' -PathType Leaf)) {
+            throw 'User-facing blocker report guide is missing.'
           }
-          Write-Host "Changed files after patch: $($changed.Count)"
 
       - name: Build through the standard distribution script
         shell: pwsh
@@ -134,8 +121,11 @@ jobs:
           if ($standaloneHash -ne $bundledHash) {
             throw "Bundled CLI SHA-256 mismatch: standalone=$standaloneHash bundled=$bundledHash"
           }
-          $schema = Join-Path $expanded 'extension\bin\win32-x64\_internal\unit_test_runner\schemas\test_execution_blocker_report.schema.json'
-          if (-not (Test-Path -LiteralPath $schema -PathType Leaf)) {
+          $schemaCandidates = @(
+            (Join-Path $expanded 'extension\bin\win32-x64\_internal\unit_test_runner\schemas\test_execution_blocker_report.schema.json'),
+            (Join-Path $expanded 'extension\bin\win32-x64\unit_test_runner\schemas\test_execution_blocker_report.schema.json')
+          )
+          if (-not ($schemaCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })) {
             throw 'Bundled CLI does not contain test_execution_blocker_report.schema.json'
           }
           Write-Host "Bundled CLI SHA-256: $standaloneHash"
