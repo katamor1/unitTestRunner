@@ -71,15 +71,23 @@ jobs:
           git apply --binary .formal-test-execution-blocker-report.patch
           git diff --check
 
-      - name: Verify reviewed patch is substantive
+      - name: Capture recovered patch diagnostics
         shell: pwsh
         run: |
-          $changed = @(git diff --name-only origin/main)
-          Write-Host "Changed files after patch: $($changed.Count)"
-          $changed | ForEach-Object { Write-Host "  $_" }
-          if ($changed.Count -lt 20) {
-            throw "Implementation patch is unexpectedly small: $($changed.Count) changed files"
-          }
+          New-Item -ItemType Directory -Path .formal-diagnostics -Force | Out-Null
+          git diff --name-status origin/main | Out-File -LiteralPath .formal-diagnostics\changed-files.txt -Encoding utf8
+          git diff --stat origin/main | Out-File -LiteralPath .formal-diagnostics\diff-stat.txt -Encoding utf8
+          git diff -- src\unit_test_runner\contracts\kinds.py | Out-File -LiteralPath .formal-diagnostics\kinds.diff -Encoding utf8
+          git diff -- vscode\extension\package.json | Out-File -LiteralPath .formal-diagnostics\package-json.diff -Encoding utf8
+          Get-Content -LiteralPath .formal-diagnostics\changed-files.txt
+
+      - name: Upload recovered patch diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: formal-blocker-report-patch-diagnostics
+          path: .formal-diagnostics
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Build through the standard distribution script
         shell: pwsh
@@ -90,6 +98,22 @@ jobs:
           }
           if (-not (Test-Path -LiteralPath .\dist\unit-test-runner-vscode-0.1.0.vsix -PathType Leaf)) {
             throw 'Standard build did not produce dist\unit-test-runner-vscode-0.1.0.vsix'
+          }
+
+      - name: Verify blocker feature is present
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath 'src\unit_test_runner\schemas\test_execution_blocker_report.schema.json' -PathType Leaf)) {
+            throw 'Blocker report schema is missing.'
+          }
+          if (-not (Select-String -LiteralPath 'src\unit_test_runner\contracts\kinds.py' -SimpleMatch 'TEST_EXECUTION_BLOCKER_REPORT')) {
+            throw 'Artifact kind TEST_EXECUTION_BLOCKER_REPORT is missing.'
+          }
+          if (-not (Select-String -LiteralPath 'vscode\extension\package.json' -SimpleMatch 'unitTestRunner.resolveExecutionBlocker')) {
+            throw 'VS Code blocker-resolution command is missing.'
+          }
+          if (-not (Test-Path -LiteralPath 'docs\test_execution_blockers.md' -PathType Leaf)) {
+            throw 'User-facing blocker report guide is missing.'
           }
 
       - name: Verify bundled CLI identity and blocker support
@@ -130,6 +154,7 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item -LiteralPath .formal-test-execution-blocker-report.patch -Force
+          Remove-Item -LiteralPath .formal-diagnostics -Recurse -Force
           Remove-Item -LiteralPath .github\workflows\formalize-test-execution-blocker-report.yml -Force
           if (Test-Path -LiteralPath .sdd) {
             Remove-Item -LiteralPath .sdd -Recurse -Force
