@@ -1,9 +1,6 @@
 name: Formalize Test Execution Blocker Report
 
 on:
-  push:
-    branches:
-      - feat/test-execution-blocker-report-formal
   pull_request:
     branches:
       - main
@@ -18,7 +15,7 @@ permissions:
 
 concurrency:
   group: formalize-test-execution-blocker-report
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   formalize:
