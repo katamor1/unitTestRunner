@@ -24,6 +24,7 @@ class ArtifactKind(StrEnum):
     BUILD_COMPLETION_ITERATION = "build_completion_iteration"
     BUILD_COMPLETION_HISTORY = "build_completion_history"
     TEST_EXECUTION_REPORT = "test_execution_report"
+    TEST_EXECUTION_BLOCKER_REPORT = "test_execution_blocker_report"
     TEST_RESULT = "test_result"
     EVIDENCE_MANIFEST = "evidence_manifest"
     FUNCTION_DOSSIER = "function_dossier"
