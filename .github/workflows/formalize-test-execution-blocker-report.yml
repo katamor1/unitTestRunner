@@ -74,18 +74,18 @@ jobs:
       - name: Capture recovered patch diagnostics
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path .formal-diagnostics -Force | Out-Null
-          git diff --name-status origin/main | Out-File -LiteralPath .formal-diagnostics\changed-files.txt -Encoding utf8
-          git diff --stat origin/main | Out-File -LiteralPath .formal-diagnostics\diff-stat.txt -Encoding utf8
-          git diff -- src\unit_test_runner\contracts\kinds.py | Out-File -LiteralPath .formal-diagnostics\kinds.diff -Encoding utf8
-          git diff -- vscode\extension\package.json | Out-File -LiteralPath .formal-diagnostics\package-json.diff -Encoding utf8
-          Get-Content -LiteralPath .formal-diagnostics\changed-files.txt
+          New-Item -ItemType Directory -Path formal-diagnostics -Force | Out-Null
+          git diff --name-status origin/main | Out-File -LiteralPath formal-diagnostics\changed-files.txt -Encoding utf8
+          git diff --stat origin/main | Out-File -LiteralPath formal-diagnostics\diff-stat.txt -Encoding utf8
+          git diff -- src\unit_test_runner\contracts\kinds.py | Out-File -LiteralPath formal-diagnostics\kinds.diff -Encoding utf8
+          git diff -- vscode\extension\package.json | Out-File -LiteralPath formal-diagnostics\package-json.diff -Encoding utf8
+          Get-Content -LiteralPath formal-diagnostics\changed-files.txt
 
       - name: Upload recovered patch diagnostics
         uses: actions/upload-artifact@v4
         with:
           name: formal-blocker-report-patch-diagnostics
-          path: .formal-diagnostics
+          path: formal-diagnostics
           if-no-files-found: error
           retention-days: 7
 
@@ -154,7 +154,7 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item -LiteralPath .formal-test-execution-blocker-report.patch -Force
-          Remove-Item -LiteralPath .formal-diagnostics -Recurse -Force
+          Remove-Item -LiteralPath formal-diagnostics -Recurse -Force
           Remove-Item -LiteralPath .github\workflows\formalize-test-execution-blocker-report.yml -Force
           if (Test-Path -LiteralPath .sdd) {
             Remove-Item -LiteralPath .sdd -Recurse -Force
