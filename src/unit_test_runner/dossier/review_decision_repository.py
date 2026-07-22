@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Callable, TypeVar
 from uuid import uuid4
 
 from unit_test_runner.cli.artifacts import ProducedArtifact
@@ -51,6 +52,11 @@ class ReviewDecisionWriteResult:
 
 class InvalidReviewDecisionLedgerError(ValueError):
     pass
+
+
+_T = TypeVar("_T")
+_WINDOWS_SHARING_RETRY_SECONDS = 1.0
+_WINDOWS_SHARING_RETRY_DELAY_SECONDS = 0.01
 
 
 class ReviewDecisionRepository:
@@ -182,11 +188,11 @@ class ReviewDecisionRepository:
             )
             try:
                 _write_exclusive_fsync(temporary, final_bytes)
-                os.replace(temporary, self._path)
+                _replace_with_windows_retry(temporary, self._path)
                 _fsync_directory(self._path.parent)
             finally:
                 try:
-                    temporary.unlink()
+                    _unlink_with_windows_retry(temporary)
                 except FileNotFoundError:
                     pass
             snapshot = self.load()
@@ -341,6 +347,40 @@ def _is_symlink_or_reparse(path: Path) -> bool:
     return bool(attributes & reparse_flag)
 
 
+def _running_on_windows() -> bool:
+    return os.name == "nt"
+
+
+def _retry_windows_permission_error(
+    operation: Callable[[], _T],
+    *,
+    timeout_seconds: float = _WINDOWS_SHARING_RETRY_SECONDS,
+) -> _T:
+    deadline = time.monotonic() + max(0.0, timeout_seconds)
+    last_permission_error: PermissionError | None = None
+    while True:
+        if last_permission_error is not None and time.monotonic() >= deadline:
+            raise last_permission_error
+        try:
+            return operation()
+        except PermissionError as error:
+            if not _running_on_windows():
+                raise
+            last_permission_error = error
+            now = time.monotonic()
+            if now >= deadline:
+                raise
+            time.sleep(min(_WINDOWS_SHARING_RETRY_DELAY_SECONDS, deadline - now))
+
+
+def _replace_with_windows_retry(source: Path, destination: Path) -> None:
+    _retry_windows_permission_error(lambda: os.replace(source, destination))
+
+
+def _unlink_with_windows_retry(path: Path) -> None:
+    _retry_windows_permission_error(path.unlink)
+
+
 @contextmanager
 def _exclusive_lock(path: Path, *, timeout_seconds: float = 10.0):
     deadline = time.monotonic() + timeout_seconds
@@ -348,11 +388,19 @@ def _exclusive_lock(path: Path, *, timeout_seconds: float = 10.0):
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
-    while descriptor is None:
+
+    def open_lock() -> int:
         if _is_symlink_or_reparse(path):
             raise ValueError("Review ledger lock must not be a symlink or reparse point.")
+        return os.open(path, flags, 0o600)
+
+    while descriptor is None:
         try:
-            descriptor = os.open(path, flags, 0o600)
+            remaining = max(0.0, deadline - time.monotonic())
+            descriptor = _retry_windows_permission_error(
+                open_lock,
+                timeout_seconds=remaining,
+            )
         except FileExistsError:
             if _is_symlink_or_reparse(path):
                 raise ValueError(
@@ -368,7 +416,7 @@ def _exclusive_lock(path: Path, *, timeout_seconds: float = 10.0):
     finally:
         os.close(descriptor)
         try:
-            path.unlink()
+            _unlink_with_windows_retry(path)
         except FileNotFoundError:
             pass
 

@@ -28,6 +28,7 @@ from unit_test_runner.dossier.review_decision_repository import (
     ReviewDecisionRepository,
     ReviewDecisionWriteStatus,
 )
+from unit_test_runner.dossier import review_decision_repository as repository_module
 
 
 class StableReviewIdTests(unittest.TestCase):
@@ -579,6 +580,205 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
                 else item.subject_fingerprint
             ),
         )
+
+    def test_permission_error_is_not_retried_outside_windows(self):
+        attempts = 0
+
+        def denied():
+            nonlocal attempts
+            attempts += 1
+            raise PermissionError(13, "injected non-Windows permission denial")
+
+        with mock.patch.object(
+            repository_module,
+            "_running_on_windows",
+            return_value=False,
+        ):
+            with self.assertRaisesRegex(PermissionError, "non-Windows"):
+                repository_module._retry_windows_permission_error(denied)
+
+        self.assertEqual(1, attempts)
+
+    def test_windows_permission_error_retry_stops_at_deadline(self):
+        attempts = 0
+
+        def denied():
+            nonlocal attempts
+            attempts += 1
+            raise PermissionError(13, "persistent Windows sharing denial")
+
+        with mock.patch.object(
+            repository_module,
+            "_running_on_windows",
+            return_value=True,
+        ), mock.patch.object(
+            repository_module.time,
+            "monotonic",
+            side_effect=(0.0, 0.0, 0.25),
+        ), mock.patch.object(repository_module.time, "sleep") as sleep:
+            with self.assertRaisesRegex(PermissionError, "persistent Windows"):
+                repository_module._retry_windows_permission_error(
+                    denied,
+                    timeout_seconds=0.25,
+                )
+
+        self.assertEqual(1, attempts)
+        sleep.assert_called_once_with(0.01)
+
+    def test_lock_retries_one_transient_windows_permission_error(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            lock_path = Path(temporary) / ".review_decisions.json.lock"
+            original_open = repository_module.os.open
+            attempts = 0
+
+            def transient_open(path, flags, mode=0o777):
+                nonlocal attempts
+                if Path(path) == lock_path:
+                    attempts += 1
+                    if attempts == 1:
+                        raise PermissionError(
+                            13,
+                            "injected Windows sharing denial",
+                        )
+                return original_open(path, flags, mode)
+
+            with mock.patch.object(
+                repository_module,
+                "_running_on_windows",
+                return_value=True,
+            ), mock.patch.object(
+                repository_module.os,
+                "open",
+                side_effect=transient_open,
+            ):
+                with repository_module._exclusive_lock(
+                    lock_path,
+                    timeout_seconds=0.25,
+                ):
+                    self.assertTrue(lock_path.exists())
+
+            self.assertEqual(2, attempts)
+            self.assertFalse(lock_path.exists())
+
+    def test_lock_permission_retry_stops_at_the_lock_deadline(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            lock_path = Path(temporary) / ".review_decisions.json.lock"
+            attempts = 0
+
+            def denied_open(path, flags, mode=0o777):
+                nonlocal attempts
+                attempts += 1
+                raise PermissionError(13, "persistent Windows sharing denial")
+
+            with mock.patch.object(
+                repository_module,
+                "_running_on_windows",
+                return_value=True,
+            ), mock.patch.object(
+                repository_module.os,
+                "open",
+                side_effect=denied_open,
+            ), mock.patch.object(
+                repository_module.time,
+                "monotonic",
+                side_effect=(0.0, 0.0, 0.0, 0.0, 0.25),
+            ), mock.patch.object(repository_module.time, "sleep") as sleep:
+                with self.assertRaisesRegex(PermissionError, "persistent Windows"):
+                    with repository_module._exclusive_lock(
+                        lock_path,
+                        timeout_seconds=0.25,
+                    ):
+                        self.fail("persistent sharing denial must not acquire the lock")
+
+            self.assertEqual(1, attempts)
+            sleep.assert_called_once_with(0.01)
+            self.assertFalse(lock_path.exists())
+
+    def test_lock_cleanup_retries_one_transient_windows_permission_error(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            lock_path = Path(temporary) / ".review_decisions.json.lock"
+            original_unlink = repository_module.Path.unlink
+            attempts = 0
+
+            def transient_unlink(path, *args, **kwargs):
+                nonlocal attempts
+                if path == lock_path:
+                    attempts += 1
+                    if attempts == 1:
+                        raise PermissionError(
+                            13,
+                            "injected Windows sharing denial",
+                        )
+                return original_unlink(path, *args, **kwargs)
+
+            with mock.patch.object(
+                repository_module,
+                "_running_on_windows",
+                return_value=True,
+            ), mock.patch.object(
+                repository_module.Path,
+                "unlink",
+                new=transient_unlink,
+            ):
+                with repository_module._exclusive_lock(lock_path):
+                    self.assertTrue(lock_path.exists())
+
+            self.assertEqual(2, attempts)
+            self.assertFalse(lock_path.exists())
+
+    def test_record_retries_transient_windows_replace_and_preserves_final_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository, item = self._repository(root)
+            path = repository.path
+            original_replace = repository_module.os.replace
+            attempts = 0
+
+            def transient_replace(source, destination):
+                nonlocal attempts
+                if Path(destination) == path:
+                    attempts += 1
+                    if attempts == 1:
+                        raise PermissionError(
+                            13,
+                            "injected Windows sharing denial",
+                        )
+                return original_replace(source, destination)
+
+            with mock.patch.object(
+                repository_module,
+                "_running_on_windows",
+                return_value=True,
+            ), mock.patch.object(
+                repository_module.os,
+                "replace",
+                side_effect=transient_replace,
+            ):
+                result = self._record(repository, item)
+
+            self.assertEqual(2, attempts)
+            self.assertEqual(ReviewDecisionWriteStatus.WRITTEN, result.status)
+            self.assertEqual(path.read_bytes(), result.snapshot.raw_bytes)
+            self.assertEqual(
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+                result.snapshot.sha256,
+            )
+            self.assertEqual(result.snapshot.sha256, result.artifact.sha256)
+            self.assertFalse(list(path.parent.glob(".review_decisions.json.*.tmp")))
+
+    def test_lock_symlink_or_reparse_remains_fail_closed_before_retry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            lock_path = Path(temporary) / ".review_decisions.json.lock"
+            with mock.patch.object(
+                repository_module,
+                "_is_symlink_or_reparse",
+                return_value=True,
+            ), mock.patch.object(repository_module.os, "open") as open_lock:
+                with self.assertRaisesRegex(ValueError, "symlink|reparse"):
+                    with repository_module._exclusive_lock(lock_path):
+                        self.fail("unsafe lock must never be acquired")
+
+            open_lock.assert_not_called()
 
     def test_unknown_id_and_subject_guard_write_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
