@@ -31,6 +31,12 @@ from unit_test_runner.dossier.review_decision_repository import (
 from unit_test_runner.dossier import review_decision_repository as repository_module
 
 
+def _windows_permission_error(winerror: int, message: str) -> PermissionError:
+    error = PermissionError(13, message)
+    error.winerror = winerror
+    return error
+
+
 class StableReviewIdTests(unittest.TestCase):
     def test_stable_id_normalizes_unicode_whitespace_and_separators(self):
         first = build_review_id(
@@ -605,7 +611,10 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
         def denied():
             nonlocal attempts
             attempts += 1
-            raise PermissionError(13, "persistent Windows sharing denial")
+            raise _windows_permission_error(
+                32,
+                "persistent Windows sharing denial",
+            )
 
         with mock.patch.object(
             repository_module,
@@ -625,6 +634,57 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
         self.assertEqual(1, attempts)
         sleep.assert_called_once_with(0.01)
 
+    def test_windows_acl_denial_is_not_retried(self):
+        attempts = 0
+
+        def denied():
+            nonlocal attempts
+            attempts += 1
+            raise _windows_permission_error(5, "injected Windows ACL denial")
+
+        with mock.patch.object(
+            repository_module,
+            "_running_on_windows",
+            return_value=True,
+        ), mock.patch.object(
+            repository_module.time,
+            "monotonic",
+            side_effect=(0.0, 0.0, 1.0),
+        ), mock.patch.object(repository_module.time, "sleep") as sleep:
+            with self.assertRaisesRegex(PermissionError, "ACL denial"):
+                repository_module._retry_windows_permission_error(denied)
+
+        self.assertEqual(1, attempts)
+        sleep.assert_not_called()
+
+    def test_explicit_windows_sharing_violations_are_retried(self):
+        for winerror in (32, 33):
+            with self.subTest(winerror=winerror):
+                attempts = 0
+
+                def transient():
+                    nonlocal attempts
+                    attempts += 1
+                    if attempts == 1:
+                        raise _windows_permission_error(
+                            winerror,
+                            "injected Windows sharing violation",
+                        )
+                    return "recovered"
+
+                with mock.patch.object(
+                    repository_module,
+                    "_running_on_windows",
+                    return_value=True,
+                ), mock.patch.object(repository_module.time, "sleep") as sleep:
+                    self.assertEqual(
+                        "recovered",
+                        repository_module._retry_windows_permission_error(transient),
+                    )
+
+                self.assertEqual(2, attempts)
+                sleep.assert_called_once_with(0.01)
+
     def test_lock_retries_one_transient_windows_permission_error(self):
         with tempfile.TemporaryDirectory() as temporary:
             lock_path = Path(temporary) / ".review_decisions.json.lock"
@@ -636,8 +696,8 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
                 if Path(path) == lock_path:
                     attempts += 1
                     if attempts == 1:
-                        raise PermissionError(
-                            13,
+                        raise _windows_permission_error(
+                            32,
                             "injected Windows sharing denial",
                         )
                 return original_open(path, flags, mode)
@@ -668,7 +728,10 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
             def denied_open(path, flags, mode=0o777):
                 nonlocal attempts
                 attempts += 1
-                raise PermissionError(13, "persistent Windows sharing denial")
+                raise _windows_permission_error(
+                    32,
+                    "persistent Windows sharing denial",
+                )
 
             with mock.patch.object(
                 repository_module,
@@ -681,7 +744,7 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
             ), mock.patch.object(
                 repository_module.time,
                 "monotonic",
-                side_effect=(0.0, 0.0, 0.0, 0.0, 0.25),
+                side_effect=(0.0, 0.20, 0.24, 0.26),
             ), mock.patch.object(repository_module.time, "sleep") as sleep:
                 with self.assertRaisesRegex(PermissionError, "persistent Windows"):
                     with repository_module._exclusive_lock(
@@ -705,8 +768,8 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
                 if path == lock_path:
                     attempts += 1
                     if attempts == 1:
-                        raise PermissionError(
-                            13,
+                        raise _windows_permission_error(
+                            32,
                             "injected Windows sharing denial",
                         )
                 return original_unlink(path, *args, **kwargs)
@@ -726,6 +789,51 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
             self.assertEqual(2, attempts)
             self.assertFalse(lock_path.exists())
 
+    def test_lock_cleanup_never_deletes_a_successor_after_retry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lock_path = root / ".review_decisions.json.lock"
+            successor = root / "successor.lock"
+            successor_bytes = b"successor-owner\n"
+            original_unlink = repository_module.Path.unlink
+            unlink_attempts = 0
+
+            def transient_unlink(path, *args, **kwargs):
+                nonlocal unlink_attempts
+                if path == lock_path:
+                    unlink_attempts += 1
+                    if unlink_attempts == 1:
+                        raise _windows_permission_error(
+                            32,
+                            "injected Windows sharing denial",
+                        )
+                return original_unlink(path, *args, **kwargs)
+
+            def install_successor(_delay):
+                successor.write_bytes(successor_bytes)
+                repository_module.os.replace(successor, lock_path)
+
+            with mock.patch.object(
+                repository_module,
+                "_running_on_windows",
+                return_value=True,
+            ), mock.patch.object(
+                repository_module.Path,
+                "unlink",
+                new=transient_unlink,
+            ), mock.patch.object(
+                repository_module.time,
+                "sleep",
+                side_effect=install_successor,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "ownership"):
+                    with repository_module._exclusive_lock(lock_path):
+                        self.assertTrue(lock_path.exists())
+
+            self.assertEqual(1, unlink_attempts)
+            self.assertTrue(lock_path.exists())
+            self.assertEqual(successor_bytes, lock_path.read_bytes())
+
     def test_record_retries_transient_windows_replace_and_preserves_final_bytes(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -739,8 +847,8 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
                 if Path(destination) == path:
                     attempts += 1
                     if attempts == 1:
-                        raise PermissionError(
-                            13,
+                        raise _windows_permission_error(
+                            32,
                             "injected Windows sharing denial",
                         )
                 return original_replace(source, destination)

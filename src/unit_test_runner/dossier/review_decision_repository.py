@@ -57,6 +57,7 @@ class InvalidReviewDecisionLedgerError(ValueError):
 _T = TypeVar("_T")
 _WINDOWS_SHARING_RETRY_SECONDS = 1.0
 _WINDOWS_SHARING_RETRY_DELAY_SECONDS = 0.01
+_WINDOWS_TRANSIENT_PERMISSION_WINERRORS = frozenset({32, 33})
 
 
 class ReviewDecisionRepository:
@@ -351,12 +352,22 @@ def _running_on_windows() -> bool:
     return os.name == "nt"
 
 
+def _is_transient_windows_permission_error(error: PermissionError) -> bool:
+    return (
+        _running_on_windows()
+        and getattr(error, "winerror", None)
+        in _WINDOWS_TRANSIENT_PERMISSION_WINERRORS
+    )
+
+
 def _retry_windows_permission_error(
     operation: Callable[[], _T],
     *,
     timeout_seconds: float = _WINDOWS_SHARING_RETRY_SECONDS,
+    deadline: float | None = None,
 ) -> _T:
-    deadline = time.monotonic() + max(0.0, timeout_seconds)
+    if deadline is None:
+        deadline = time.monotonic() + max(0.0, timeout_seconds)
     last_permission_error: PermissionError | None = None
     while True:
         if last_permission_error is not None and time.monotonic() >= deadline:
@@ -364,7 +375,7 @@ def _retry_windows_permission_error(
         try:
             return operation()
         except PermissionError as error:
-            if not _running_on_windows():
+            if not _is_transient_windows_permission_error(error):
                 raise
             last_permission_error = error
             now = time.monotonic()
@@ -381,11 +392,35 @@ def _unlink_with_windows_retry(path: Path) -> None:
     _retry_windows_permission_error(path.unlink)
 
 
+def _lock_file_identity(metadata: os.stat_result) -> tuple[int, int]:
+    return (int(metadata.st_dev), int(metadata.st_ino))
+
+
+def _assert_owned_lock(
+    path: Path,
+    *,
+    expected_identity: tuple[int, int],
+    expected_token: bytes,
+) -> None:
+    if _is_symlink_or_reparse(path):
+        raise ValueError("Review ledger lock must not be a symlink or reparse point.")
+    current_identity = _lock_file_identity(os.stat(path, follow_symlinks=False))
+    if current_identity != expected_identity or path.read_bytes() != expected_token:
+        raise RuntimeError(
+            "Review ledger lock ownership changed before cleanup; refusing to unlink."
+        )
+
+
 @contextmanager
 def _exclusive_lock(path: Path, *, timeout_seconds: float = 10.0):
     deadline = time.monotonic() + timeout_seconds
     descriptor: int | None = None
-    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    flags = (
+        os.O_CREAT
+        | os.O_EXCL
+        | os.O_WRONLY
+        | getattr(os, "O_BINARY", 0)
+    )
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
 
@@ -395,11 +430,12 @@ def _exclusive_lock(path: Path, *, timeout_seconds: float = 10.0):
         return os.open(path, flags, 0o600)
 
     while descriptor is None:
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Timed out acquiring review ledger lock: {path}")
         try:
-            remaining = max(0.0, deadline - time.monotonic())
             descriptor = _retry_windows_permission_error(
                 open_lock,
-                timeout_seconds=remaining,
+                deadline=deadline,
             )
         except FileExistsError:
             if _is_symlink_or_reparse(path):
@@ -409,16 +445,34 @@ def _exclusive_lock(path: Path, *, timeout_seconds: float = 10.0):
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"Timed out acquiring review ledger lock: {path}")
             time.sleep(0.01)
+    ownership_token = f"{os.getpid()}:{uuid4().hex}\n".encode("ascii")
+    ownership_identity: tuple[int, int] | None = None
     try:
-        os.write(descriptor, f"{os.getpid()}\n".encode("ascii"))
+        unwritten = memoryview(ownership_token)
+        while unwritten:
+            written = os.write(descriptor, unwritten)
+            if written <= 0:
+                raise OSError("Failed to write review ledger lock ownership token.")
+            unwritten = unwritten[written:]
         os.fsync(descriptor)
+        ownership_identity = _lock_file_identity(os.fstat(descriptor))
         yield
     finally:
         os.close(descriptor)
-        try:
-            _unlink_with_windows_retry(path)
-        except FileNotFoundError:
-            pass
+
+        if ownership_identity is not None:
+            def unlink_owned_lock() -> None:
+                _assert_owned_lock(
+                    path,
+                    expected_identity=ownership_identity,
+                    expected_token=ownership_token,
+                )
+                path.unlink()
+
+            try:
+                _retry_windows_permission_error(unlink_owned_lock)
+            except FileNotFoundError:
+                pass
 
 
 def _write_exclusive_fsync(path: Path, data: bytes) -> None:
