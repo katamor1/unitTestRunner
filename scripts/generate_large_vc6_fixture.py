@@ -98,10 +98,12 @@ def generate_fixture(
     output_root: Path | str,
     source_entries: int,
     perf_root: Path | str,
+    dependency_fanout: int = 1,
 ) -> dict[str, object]:
     base = Path(base_root).expanduser().resolve()
     output = Path(output_root).expanduser().resolve()
     boundary = Path(perf_root).expanduser().resolve()
+    _validate_dependency_fanout(dependency_fanout)
 
     if not base.is_dir():
         raise FileNotFoundError(f"base fixture directory does not exist: {base}")
@@ -132,7 +134,12 @@ def generate_fixture(
             file_name = f"large_module_{index:0{width}d}.c"
             generated_paths.append(f"..\\src\\generated\\{file_name}")
             (generated_dir / file_name).write_text(
-                render_generated_source(index, generated_count, width),
+                render_generated_source(
+                    index,
+                    generated_count,
+                    width,
+                    dependency_fanout=dependency_fanout,
+                ),
                 encoding="utf-8",
             )
 
@@ -157,6 +164,7 @@ def generate_fixture(
         "base_source_entries": base_source_entries,
         "source_entries_in_target_project": source_entries,
         "generated_source_files": generated_count,
+        "dependency_fanout": dependency_fanout,
         "dsp_registration": registration,
         "total_files_on_disk": count_files(output) + (0 if manifest_path.exists() else 1),
         "target": dict(TARGET),
@@ -321,7 +329,18 @@ def _sample_paths(paths: Sequence[str], limit: int = 5) -> str:
     return ", ".join(sample) + suffix
 
 
-def render_generated_source(index: int, generated_count: int, width: int) -> str:
+def _validate_dependency_fanout(dependency_fanout: int) -> None:
+    if dependency_fanout <= 0:
+        raise ValueError("dependency_fanout must be a positive integer")
+
+
+def render_generated_source(
+    index: int,
+    generated_count: int,
+    width: int,
+    dependency_fanout: int = 1,
+) -> str:
+    _validate_dependency_fanout(dependency_fanout)
     name = f"UtrLarge_Module_{index:0{width}d}"
     lines = [
         '#include "device_control.h"',
@@ -330,9 +349,13 @@ def render_generated_source(index: int, generated_count: int, width: int) -> str
         "",
     ]
     if generated_count > 1:
-        next_index = (index + 1) % generated_count
-        next_name = f"UtrLarge_Module_{next_index:0{width}d}"
-        lines.extend([f"int {next_name}(int seed);", ""])
+        neighbor_count = min(dependency_fanout, generated_count - 1)
+        neighbor_names = [
+            f"UtrLarge_Module_{(index + offset) % generated_count:0{width}d}"
+            for offset in range(1, neighbor_count + 1)
+        ]
+        lines.extend(f"int {neighbor_name}(int seed);" for neighbor_name in neighbor_names)
+        lines.append("")
     lines.extend(
         [
             f"int {name}(int seed)",
@@ -345,13 +368,12 @@ def render_generated_source(index: int, generated_count: int, width: int) -> str
         ]
     )
     if generated_count > 1:
+        lines.append("    if (seed > 0 && (seed % 17) == 0) {")
         lines.extend(
-            [
-                "    if (seed > 0 && (seed % 17) == 0) {",
-                f"        value += {next_name}(seed - 1);",
-                "    }",
-            ]
+            f"        value += {neighbor_name}(seed - 1);"
+            for neighbor_name in neighbor_names
         )
+        lines.append("    }")
     lines.extend(
         [
             "    if ((seed % 29) == 0) {",
@@ -381,6 +403,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", type=Path, default=default_perf_root())
     parser.add_argument("--output", type=Path)
     parser.add_argument("--entries", type=int)
+    parser.add_argument("--dependency-fanout", type=int, default=1)
     parser.add_argument(
         "--tiers",
         nargs="?",
@@ -394,6 +417,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = build_parser().parse_args(list(argv) if argv is not None else None)
     if args.tiers is not None and (args.entries is not None or args.output is not None):
         raise ValueError("--tiers cannot be combined with --entries or --output")
+    _validate_dependency_fanout(args.dependency_fanout)
 
     perf_root = args.root.expanduser().resolve()
     base_root = args.base.expanduser().resolve()
@@ -404,6 +428,7 @@ def main(argv: Iterable[str] | None = None) -> int:
                 output_root=output_root_for_entries(perf_root, entries),
                 source_entries=entries,
                 perf_root=perf_root,
+                dependency_fanout=args.dependency_fanout,
             )
             for entries in parse_tier_entries(args.tiers)
         ]
@@ -419,7 +444,13 @@ def main(argv: Iterable[str] | None = None) -> int:
         if entries <= 0:
             raise ValueError("--entries must be a positive integer")
         output_root = args.output or output_root_for_entries(perf_root, entries)
-        payload = generate_fixture(base_root, output_root, entries, perf_root)
+        payload = generate_fixture(
+            base_root,
+            output_root,
+            entries,
+            perf_root,
+            dependency_fanout=args.dependency_fanout,
+        )
 
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0

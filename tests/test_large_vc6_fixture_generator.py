@@ -102,6 +102,12 @@ class LargeVc6FixtureGeneratorTests(unittest.TestCase):
 
         self.assertEqual("7000,16000,31000", args.tiers)
 
+    def test_dependency_fanout_option_defaults_to_one_and_accepts_an_explicit_value(self):
+        parser = generator.build_parser()
+
+        self.assertEqual(1, parser.parse_args([]).dependency_fanout)
+        self.assertEqual(16, parser.parse_args(["--dependency-fanout", "16"]).dependency_fanout)
+
     def test_empty_tiers_value_is_rejected_instead_of_using_default_entries(self):
         with mock.patch.dict("os.environ", {"UNIT_TEST_RUNNER_LARGE_ENTRIES": "1"}):
             with self.assertRaisesRegex(ValueError, "at least one positive integer"):
@@ -207,10 +213,112 @@ class LargeVc6FixtureGeneratorTests(unittest.TestCase):
         self.assertEqual(4, manifest["source_entries_in_target_project"])
         self.assertEqual(4, manifest["dsp_registration"]["source_entries"])
         self.assertEqual(3, manifest["dsp_registration"]["generated_source_entries"])
+        self.assertEqual(1, manifest["dependency_fanout"])
         self.assertEqual(
             sum(1 for path in output.rglob("*") if path.is_file()),
             manifest["total_files_on_disk"],
         )
+
+    def test_default_fanout_preserves_existing_rendered_source_text(self):
+        expected = "\n".join(
+            [
+                '#include "device_control.h"',
+                "",
+                "extern unsigned long g_system_tick;",
+                "",
+                "int UtrLarge_Module_00002(int seed);",
+                "",
+                "int UtrLarge_Module_00001(int seed)",
+                "{",
+                "    int value;",
+                "    value = seed + 1;",
+                "    if ((value & 1) != 0) {",
+                "        value += 1;",
+                "    }",
+                "    if (seed > 0 && (seed % 17) == 0) {",
+                "        value += UtrLarge_Module_00002(seed - 1);",
+                "    }",
+                "    if ((seed % 29) == 0) {",
+                "        g_system_tick += (unsigned long)(value & 255);",
+                "    }",
+                "    return value;",
+                "}",
+                "",
+            ]
+        )
+
+        self.assertEqual(expected, generator.render_generated_source(1, 3, 5))
+        self.assertEqual(expected, generator.render_generated_source(1, 3, 5, dependency_fanout=1))
+
+    def test_fanout_emits_distinct_neighbors_in_offset_order_with_wraparound(self):
+        source = generator.render_generated_source(2, 4, 5, dependency_fanout=16)
+        expected_neighbors = [
+            "UtrLarge_Module_00003",
+            "UtrLarge_Module_00000",
+            "UtrLarge_Module_00001",
+        ]
+
+        prototypes = [
+            source.index(f"int {name}(int seed);")
+            for name in expected_neighbors
+        ]
+        calls = [
+            source.index(f"value += {name}(seed - 1);")
+            for name in expected_neighbors
+        ]
+        self.assertEqual(sorted(prototypes), prototypes)
+        self.assertEqual(sorted(calls), calls)
+        self.assertNotIn("int UtrLarge_Module_00002(int seed);", source)
+        self.assertNotIn("value += UtrLarge_Module_00002(seed - 1);", source)
+        self.assertEqual(1, source.count("UtrLarge_Module_00003(int seed);"))
+        self.assertEqual(1, source.count("UtrLarge_Module_00000(int seed);"))
+        self.assertEqual(1, source.count("UtrLarge_Module_00001(int seed);"))
+
+    def test_generate_fixture_records_fanout_and_tier_generation_passes_it_through(self):
+        output = self.perf_root / "unit-test-runner-large-4"
+        summary = generator.generate_fixture(
+            self.base,
+            output,
+            4,
+            self.perf_root,
+            dependency_fanout=2,
+        )
+        self.assertEqual(2, summary["dependency_fanout"])
+        generated = (output / "src" / "generated" / "large_module_00000.c").read_text(encoding="utf-8")
+        self.assertIn("int UtrLarge_Module_00001(int seed);", generated)
+        self.assertIn("int UtrLarge_Module_00002(int seed);", generated)
+
+        generator.main(
+            [
+                "--base",
+                str(self.base),
+                "--root",
+                str(self.perf_root),
+                "--tiers",
+                "2,3",
+                "--dependency-fanout",
+                "2",
+            ]
+        )
+        for entries in (2, 3):
+            manifest = json.loads(
+                (self.perf_root / f"unit-test-runner-large-{entries}" / "manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(2, manifest["dependency_fanout"])
+
+    def test_non_positive_dependency_fanout_is_rejected(self):
+        output = self.perf_root / "unit-test-runner-large-2"
+
+        with self.assertRaisesRegex(ValueError, "dependency_fanout must be a positive integer"):
+            generator.generate_fixture(
+                self.base,
+                output,
+                2,
+                self.perf_root,
+                dependency_fanout=0,
+            )
 
     def test_generate_fixture_fails_closed_if_dsp_registration_is_incomplete(self):
         output = self.perf_root / "unit-test-runner-large-4"
