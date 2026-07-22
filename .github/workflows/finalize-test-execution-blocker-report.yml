@@ -1,0 +1,121 @@
+name: Finalize Test Execution Blocker Report
+
+on:
+  push:
+    branches:
+      - stage/test-execution-blocker-report-merge
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-test-execution-blocker-report
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout staging branch
+        uses: actions/checkout@v4
+        with:
+          ref: stage/test-execution-blocker-report-merge
+          fetch-depth: 0
+
+      - name: Detect complete payload
+        id: payload
+        shell: pwsh
+        run: |
+          $parts = @(Get-ChildItem -LiteralPath .sdd -Filter 'feature.patch.gz.b64.*' -File -ErrorAction SilentlyContinue | Sort-Object Name)
+          $present = (Test-Path -LiteralPath .sdd\ready -PathType Leaf) -and
+                     (Test-Path -LiteralPath .sdd\patch.sha256 -PathType Leaf) -and
+                     ($parts.Count -gt 0)
+          "present=$($present.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Set up Python
+        if: steps.payload.outputs.present == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node
+        if: steps.payload.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: vscode/extension/package-lock.json
+
+      - name: Reconstruct exact reviewed patch
+        if: steps.payload.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          @'
+          import base64
+          import gzip
+          import hashlib
+          from pathlib import Path
+
+          parts = sorted(Path('.sdd').glob('feature.patch.gz.b64.*'))
+          encoded = b''.join(part.read_bytes() for part in parts)
+          compressed = base64.b64decode(encoded, validate=True)
+          patch = gzip.decompress(compressed)
+          expected = Path('.sdd/patch.sha256').read_text(encoding='utf-8').strip()
+          actual = hashlib.sha256(patch).hexdigest()
+          if actual != expected:
+              raise SystemExit(f'patch SHA-256 mismatch: expected {expected}, got {actual}')
+          out = Path(r'${{ runner.temp }}') / 'feature.patch'
+          out.write_bytes(patch)
+          print(f'patch_bytes={len(patch)} sha256={actual} parts={len(parts)}')
+          '@ | python -
+
+      - name: Create clean one-parent feature commit
+        if: steps.payload.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          git fetch origin main
+          git reset --hard origin/main
+          git clean -fdx
+          $patch = Join-Path $env:RUNNER_TEMP 'feature.patch'
+          git apply --check --binary $patch
+          git apply --binary $patch
+          git diff --check
+          git config user.name OpenAI
+          git config user.email noreply@openai.com
+          git add -A
+          git commit -m 'feat: add test execution blocker reports'
+          "feature_commit=$(git rev-parse HEAD)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build through the standard distribution script
+        if: steps.payload.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_distribution.ps1
+          if (-not (Test-Path -LiteralPath .\dist\unit-test-runner.exe -PathType Leaf)) {
+            throw 'Standard build did not produce dist\unit-test-runner.exe'
+          }
+          if (-not (Test-Path -LiteralPath .\dist\unit-test-runner-vscode-0.1.0.vsix -PathType Leaf)) {
+            throw 'Standard build did not produce dist\unit-test-runner-vscode-0.1.0.vsix'
+          }
+          if ((git status --porcelain --untracked-files=no).Count -ne 0) {
+            git status --short
+            throw 'Standard build modified tracked source files'
+          }
+
+      - name: Upload verified standard distribution
+        if: steps.payload.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-runner-blocker-report-standard-distribution
+          path: |
+            dist/unit-test-runner.exe
+            dist/unit-test-runner-vscode-0.1.0.vsix
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish clean feature branch
+        if: steps.payload.outputs.present == 'true' && success()
+        shell: pwsh
+        run: |
+          git push origin HEAD:refs/heads/feat/test-execution-blocker-report-formal --force
