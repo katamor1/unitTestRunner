@@ -1,0 +1,108 @@
+name: Stage and Verify Formal Test Execution Blocker Report
+
+on:
+  push:
+    branches:
+      - staging/test-execution-blocker-report-final-20260721
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stage-test-execution-blocker-report-final-20260721
+  cancel-in-progress: false
+
+jobs:
+  verify-and-publish:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout staging branch
+        uses: actions/checkout@v4
+        with:
+          ref: staging/test-execution-blocker-report-final-20260721
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: vscode/extension/package-lock.json
+
+      - name: Verify base and apply exact feature patch
+        shell: pwsh
+        run: |
+          $expectedBase = (Get-Content -LiteralPath .formal\base-sha.txt -Raw -Encoding UTF8).Trim()
+          git fetch origin main
+          $actualBase = (git rev-parse origin/main).Trim()
+          if ($actualBase -ne $expectedBase) {
+            throw "main moved: expected $expectedBase, got $actualBase"
+          }
+          @'
+          import base64
+          import gzip
+          import hashlib
+          from pathlib import Path
+
+          encoded = Path('.formal/feature.patch.gz.b64').read_text(encoding='ascii')
+          compressed = base64.b64decode(encoded, validate=True)
+          patch = gzip.decompress(compressed)
+          expected = Path('.formal/patch-sha256.txt').read_text(encoding='ascii').strip()
+          actual = hashlib.sha256(patch).hexdigest()
+          if actual != expected:
+              raise SystemExit(f'patch SHA-256 mismatch: expected {expected}, got {actual}')
+          Path('.formal/feature.patch').write_bytes(patch)
+          print(f'patch_bytes={len(patch)} sha256={actual}')
+          '@ | python -
+          git apply --check --binary .formal\feature.patch
+          git apply --binary .formal\feature.patch
+          git add -A
+          git diff --cached --check
+          git diff --cached --name-status origin/main
+
+      - name: Build through the standard distribution script
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_distribution.ps1
+          if (-not (Test-Path -LiteralPath .\dist\unit-test-runner.exe -PathType Leaf)) {
+            throw 'Standard build did not produce dist\unit-test-runner.exe'
+          }
+          if (-not (Test-Path -LiteralPath .\dist\unit-test-runner-vscode-0.1.0.vsix -PathType Leaf)) {
+            throw 'Standard build did not produce dist\unit-test-runner-vscode-0.1.0.vsix'
+          }
+
+      - name: Upload standard distribution outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-runner-blocker-report-standard-distribution
+          path: |
+            dist/unit-test-runner.exe
+            dist/unit-test-runner-vscode-0.1.0.vsix
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish one clean formal commit
+        shell: pwsh
+        run: |
+          $base = (Get-Content -LiteralPath .formal\base-sha.txt -Raw -Encoding UTF8).Trim()
+          $finalBranch = 'feat/test-execution-blocker-report-final-20260721'
+          Remove-Item -LiteralPath .formal -Recurse -Force
+          Remove-Item -LiteralPath .github\workflows\stage-test-execution-blocker-report-final.yml -Force
+          git add -A
+          git diff --cached --check
+          if (git diff --cached --name-only | Select-String -Pattern '^(\.formal/|\.github/workflows/stage-test-execution-blocker-report-final\.yml$)') {
+            throw 'Temporary staging files remain in the clean tree.'
+          }
+          git config user.name OpenAI
+          git config user.email noreply@openai.com
+          $tree = (git write-tree).Trim()
+          $cleanCommit = ('feat: add test execution blocker reports' | git commit-tree $tree -p $base).Trim()
+          if (-not $cleanCommit) { throw 'git commit-tree did not return a commit SHA' }
+          git push origin "${cleanCommit}:refs/heads/${finalBranch}"
+          "clean_commit=$cleanCommit" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "final_branch=$finalBranch" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
