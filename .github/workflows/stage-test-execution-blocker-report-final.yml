@@ -4,6 +4,14 @@ on:
   push:
     branches:
       - staging/test-execution-blocker-report-final-20260721
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
 
 permissions:
   contents: write
