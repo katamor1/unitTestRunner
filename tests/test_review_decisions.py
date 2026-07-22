@@ -871,6 +871,50 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
         repository_module.os.name == "nt",
         "O_TEMPORARY handle semantics require Windows",
     )
+    def test_windows_token_generation_failure_closes_acquired_lock_handle(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            lock_path = Path(temporary) / ".review_decisions.json.lock"
+            original_open = repository_module.os.open
+            original_close = repository_module.os.close
+            acquired_descriptors = []
+
+            def tracking_open(path, flags, mode=0o777):
+                descriptor = original_open(path, flags, mode)
+                acquired_descriptors.append(descriptor)
+                return descriptor
+
+            with mock.patch.object(
+                repository_module.os,
+                "open",
+                side_effect=tracking_open,
+            ), mock.patch.object(
+                repository_module,
+                "uuid4",
+                side_effect=OSError("injected token generation failure"),
+            ):
+                with self.assertRaisesRegex(OSError, "token generation"):
+                    with repository_module._exclusive_lock(lock_path):
+                        self.fail("token generation failure must precede the body")
+
+            path_existed_before_probe = lock_path.exists()
+            leaked_descriptors = 0
+            self.assertEqual(1, len(acquired_descriptors))
+            for descriptor in acquired_descriptors:
+                try:
+                    original_close(descriptor)
+                except OSError:
+                    pass
+                else:
+                    leaked_descriptors += 1
+
+            self.assertFalse(path_existed_before_probe)
+            self.assertEqual(0, leaked_descriptors)
+            self.assertFalse(lock_path.exists())
+
+    @unittest.skipUnless(
+        repository_module.os.name == "nt",
+        "O_TEMPORARY handle semantics require Windows",
+    )
     def test_windows_partial_initialization_failures_delete_lock_on_close(self):
         for failure in ("partial_write", "fsync"):
             with self.subTest(

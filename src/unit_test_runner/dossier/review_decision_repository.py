@@ -439,9 +439,9 @@ def _exclusive_lock(path: Path, *, timeout_seconds: float = 10.0):
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"Timed out acquiring review ledger lock: {path}")
             time.sleep(0.01)
-    ownership_token = f"{os.getpid()}:{uuid4().hex}\n".encode("ascii")
     primary_error: BaseException | None = None
     try:
+        ownership_token = f"{os.getpid()}:{uuid4().hex}\n".encode("ascii")
         unwritten = memoryview(ownership_token)
         while unwritten:
             written = os.write(descriptor, unwritten)
