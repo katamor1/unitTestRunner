@@ -120,7 +120,9 @@ jobs:
               compressed_hash = hashlib.sha256(compressed).hexdigest()
               diagnostics["compressed_bytes"] = len(compressed)
               diagnostics["compressed_sha256"] = compressed_hash
-              if compressed_hash != "5a1c0e0bff864efa9bfe27258d7c669d0ac0a060337dd49922eb2a2d96b91cba":
+              if len(compressed) != 45353:
+                  raise ValueError(f"unexpected compressed patch size: {len(compressed)}")
+              if compressed_hash != "f9396853845f7bb00713c91257d0659e64174ed35ed87ff86b4c390cc74555db":
                   raise ValueError(f"compressed patch SHA-256 mismatch: {compressed_hash}")
               patch = gzip.decompress(compressed)
               patch_hash = hashlib.sha256(patch).hexdigest()
