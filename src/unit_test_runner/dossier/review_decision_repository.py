@@ -370,8 +370,12 @@ def _retry_windows_permission_error(
         deadline = time.monotonic() + max(0.0, timeout_seconds)
     last_permission_error: PermissionError | None = None
     while True:
-        if last_permission_error is not None and time.monotonic() >= deadline:
-            raise last_permission_error
+        if time.monotonic() >= deadline:
+            if last_permission_error is not None:
+                raise last_permission_error
+            raise TimeoutError(
+                "Windows sharing retry deadline expired before the operation."
+            )
         try:
             return operation()
         except PermissionError as error:
@@ -392,29 +396,11 @@ def _unlink_with_windows_retry(path: Path) -> None:
     _retry_windows_permission_error(path.unlink)
 
 
-def _lock_file_identity(metadata: os.stat_result) -> tuple[int, int]:
-    return (int(metadata.st_dev), int(metadata.st_ino))
-
-
-def _assert_owned_lock(
-    path: Path,
-    *,
-    expected_identity: tuple[int, int],
-    expected_token: bytes,
-) -> None:
-    if _is_symlink_or_reparse(path):
-        raise ValueError("Review ledger lock must not be a symlink or reparse point.")
-    current_identity = _lock_file_identity(os.stat(path, follow_symlinks=False))
-    if current_identity != expected_identity or path.read_bytes() != expected_token:
-        raise RuntimeError(
-            "Review ledger lock ownership changed before cleanup; refusing to unlink."
-        )
-
-
 @contextmanager
 def _exclusive_lock(path: Path, *, timeout_seconds: float = 10.0):
     deadline = time.monotonic() + timeout_seconds
     descriptor: int | None = None
+    running_on_windows = _running_on_windows()
     flags = (
         os.O_CREAT
         | os.O_EXCL
@@ -423,6 +409,14 @@ def _exclusive_lock(path: Path, *, timeout_seconds: float = 10.0):
     )
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
+    if running_on_windows:
+        temporary_flag = getattr(os, "O_TEMPORARY", None)
+        if not isinstance(temporary_flag, int) or temporary_flag <= 0:
+            raise RuntimeError(
+                "Windows review ledger locks require os.O_TEMPORARY "
+                "for handle-bound deletion."
+            )
+        flags |= temporary_flag
 
     def open_lock() -> int:
         if _is_symlink_or_reparse(path):
@@ -446,7 +440,7 @@ def _exclusive_lock(path: Path, *, timeout_seconds: float = 10.0):
                 raise TimeoutError(f"Timed out acquiring review ledger lock: {path}")
             time.sleep(0.01)
     ownership_token = f"{os.getpid()}:{uuid4().hex}\n".encode("ascii")
-    ownership_identity: tuple[int, int] | None = None
+    primary_error: BaseException | None = None
     try:
         unwritten = memoryview(ownership_token)
         while unwritten:
@@ -455,24 +449,39 @@ def _exclusive_lock(path: Path, *, timeout_seconds: float = 10.0):
                 raise OSError("Failed to write review ledger lock ownership token.")
             unwritten = unwritten[written:]
         os.fsync(descriptor)
-        ownership_identity = _lock_file_identity(os.fstat(descriptor))
         yield
+    except BaseException as error:
+        primary_error = error
+        raise
     finally:
-        os.close(descriptor)
+        cleanup_errors: list[OSError] = []
+        try:
+            os.close(descriptor)
+        except OSError as error:
+            cleanup_errors.append(error)
 
-        if ownership_identity is not None:
-            def unlink_owned_lock() -> None:
-                _assert_owned_lock(
-                    path,
-                    expected_identity=ownership_identity,
-                    expected_token=ownership_token,
-                )
-                path.unlink()
-
+        if not running_on_windows:
             try:
-                _retry_windows_permission_error(unlink_owned_lock)
+                path.unlink()
             except FileNotFoundError:
                 pass
+            except OSError as error:
+                cleanup_errors.append(error)
+
+        if cleanup_errors:
+            if primary_error is not None:
+                for cleanup_error in cleanup_errors:
+                    primary_error.add_note(
+                        "Review ledger lock cleanup failed without masking "
+                        f"the primary exception: {cleanup_error!r}"
+                    )
+            else:
+                first_cleanup_error = cleanup_errors[0]
+                for cleanup_error in cleanup_errors[1:]:
+                    first_cleanup_error.add_note(
+                        f"Additional review ledger lock cleanup failure: {cleanup_error!r}"
+                    )
+                raise first_cleanup_error
 
 
 def _write_exclusive_fsync(path: Path, data: bytes) -> None:

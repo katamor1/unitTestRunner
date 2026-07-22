@@ -623,7 +623,7 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
         ), mock.patch.object(
             repository_module.time,
             "monotonic",
-            side_effect=(0.0, 0.0, 0.25),
+            side_effect=(0.0, 0.0, 0.0, 0.25),
         ), mock.patch.object(repository_module.time, "sleep") as sleep:
             with self.assertRaisesRegex(PermissionError, "persistent Windows"):
                 repository_module._retry_windows_permission_error(
@@ -633,6 +633,22 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
 
         self.assertEqual(1, attempts)
         sleep.assert_called_once_with(0.01)
+
+    def test_past_absolute_deadline_never_calls_operation(self):
+        operation = mock.Mock()
+
+        with mock.patch.object(
+            repository_module.time,
+            "monotonic",
+            return_value=0.26,
+        ):
+            with self.assertRaisesRegex(TimeoutError, "deadline"):
+                repository_module._retry_windows_permission_error(
+                    operation,
+                    deadline=0.25,
+                )
+
+        operation.assert_not_called()
 
     def test_windows_acl_denial_is_not_retried(self):
         attempts = 0
@@ -704,7 +720,7 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
 
             with mock.patch.object(
                 repository_module,
-                "_running_on_windows",
+                "_is_transient_windows_permission_error",
                 return_value=True,
             ), mock.patch.object(
                 repository_module.os,
@@ -735,7 +751,7 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
 
             with mock.patch.object(
                 repository_module,
-                "_running_on_windows",
+                "_is_transient_windows_permission_error",
                 return_value=True,
             ), mock.patch.object(
                 repository_module.os,
@@ -744,7 +760,7 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
             ), mock.patch.object(
                 repository_module.time,
                 "monotonic",
-                side_effect=(0.0, 0.20, 0.24, 0.26),
+                side_effect=(0.0, 0.20, 0.20, 0.24, 0.26),
             ), mock.patch.object(repository_module.time, "sleep") as sleep:
                 with self.assertRaisesRegex(PermissionError, "persistent Windows"):
                     with repository_module._exclusive_lock(
@@ -757,82 +773,183 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
             sleep.assert_called_once_with(0.01)
             self.assertFalse(lock_path.exists())
 
-    def test_lock_cleanup_retries_one_transient_windows_permission_error(self):
+    def test_outer_lock_deadline_prevents_any_open(self):
         with tempfile.TemporaryDirectory() as temporary:
             lock_path = Path(temporary) / ".review_decisions.json.lock"
-            original_unlink = repository_module.Path.unlink
-            attempts = 0
+            with mock.patch.object(
+                repository_module.time,
+                "monotonic",
+                side_effect=(0.0, 0.25),
+            ), mock.patch.object(
+                repository_module.os,
+                "open",
+            ) as open_lock:
+                with self.assertRaisesRegex(TimeoutError, "Timed out acquiring"):
+                    with repository_module._exclusive_lock(
+                        lock_path,
+                        timeout_seconds=0.25,
+                    ):
+                        self.fail("an expired lock deadline must never open")
 
-            def transient_unlink(path, *args, **kwargs):
-                nonlocal attempts
-                if path == lock_path:
-                    attempts += 1
-                    if attempts == 1:
-                        raise _windows_permission_error(
-                            32,
-                            "injected Windows sharing denial",
-                        )
-                return original_unlink(path, *args, **kwargs)
+            open_lock.assert_not_called()
+            self.assertFalse(lock_path.exists())
 
+    def test_windows_lock_fails_closed_without_temporary_flag(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            lock_path = Path(temporary) / ".review_decisions.json.lock"
             with mock.patch.object(
                 repository_module,
                 "_running_on_windows",
                 return_value=True,
             ), mock.patch.object(
-                repository_module.Path,
-                "unlink",
-                new=transient_unlink,
+                repository_module.os,
+                "O_TEMPORARY",
+                None,
+                create=True,
+            ), mock.patch.object(repository_module.os, "open") as open_lock:
+                with self.assertRaisesRegex(RuntimeError, "O_TEMPORARY"):
+                    with repository_module._exclusive_lock(lock_path):
+                        self.fail("Windows lock must require delete-on-close")
+
+            open_lock.assert_not_called()
+            self.assertFalse(lock_path.exists())
+
+    @unittest.skipUnless(
+        repository_module.os.name == "nt",
+        "O_TEMPORARY handle semantics require Windows",
+    )
+    def test_windows_lock_open_uses_temporary_flag(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            lock_path = Path(temporary) / ".review_decisions.json.lock"
+            original_open = repository_module.os.open
+            observed_flags = []
+
+            def tracking_open(path, flags, mode=0o777):
+                observed_flags.append(flags)
+                return original_open(path, flags, mode)
+
+            with mock.patch.object(
+                repository_module.os,
+                "open",
+                side_effect=tracking_open,
             ):
                 with repository_module._exclusive_lock(lock_path):
                     self.assertTrue(lock_path.exists())
 
-            self.assertEqual(2, attempts)
+            self.assertTrue(hasattr(repository_module.os, "O_TEMPORARY"))
+            self.assertEqual(1, len(observed_flags))
+            self.assertTrue(observed_flags[0] & repository_module.os.O_TEMPORARY)
             self.assertFalse(lock_path.exists())
 
-    def test_lock_cleanup_never_deletes_a_successor_after_retry(self):
+    @unittest.skipUnless(
+        repository_module.os.name == "nt",
+        "O_TEMPORARY handle semantics require Windows",
+    )
+    def test_windows_close_then_successor_creation_is_never_path_unlinked(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             lock_path = root / ".review_decisions.json.lock"
-            successor = root / "successor.lock"
             successor_bytes = b"successor-owner\n"
-            original_unlink = repository_module.Path.unlink
-            unlink_attempts = 0
+            original_close = repository_module.os.close
 
-            def transient_unlink(path, *args, **kwargs):
-                nonlocal unlink_attempts
-                if path == lock_path:
-                    unlink_attempts += 1
-                    if unlink_attempts == 1:
-                        raise _windows_permission_error(
-                            32,
-                            "injected Windows sharing denial",
-                        )
-                return original_unlink(path, *args, **kwargs)
+            def close_then_create_successor(descriptor):
+                original_close(descriptor)
+                lock_path.write_bytes(successor_bytes)
 
-            def install_successor(_delay):
-                successor.write_bytes(successor_bytes)
-                repository_module.os.replace(successor, lock_path)
+            with mock.patch.object(
+                repository_module.os,
+                "close",
+                side_effect=close_then_create_successor,
+            ):
+                with repository_module._exclusive_lock(lock_path):
+                    self.assertTrue(lock_path.exists())
 
+            self.assertTrue(lock_path.exists())
+            self.assertEqual(successor_bytes, lock_path.read_bytes())
+
+    @unittest.skipUnless(
+        repository_module.os.name == "nt",
+        "O_TEMPORARY handle semantics require Windows",
+    )
+    def test_windows_partial_initialization_failures_delete_lock_on_close(self):
+        for failure in ("partial_write", "fsync"):
+            with self.subTest(
+                failure=failure
+            ), tempfile.TemporaryDirectory() as temporary:
+                lock_path = Path(temporary) / ".review_decisions.json.lock"
+                if failure == "partial_write":
+                    original_write = repository_module.os.write
+                    writes = 0
+
+                    def partial_then_fail(descriptor, data):
+                        nonlocal writes
+                        writes += 1
+                        if writes == 1:
+                            return original_write(descriptor, data[:1])
+                        raise OSError("injected partial token write failure")
+
+                    failure_patch = mock.patch.object(
+                        repository_module.os,
+                        "write",
+                        side_effect=partial_then_fail,
+                    )
+                else:
+                    failure_patch = mock.patch.object(
+                        repository_module.os,
+                        "fsync",
+                        side_effect=OSError("injected fsync failure"),
+                    )
+
+                with failure_patch:
+                    with self.assertRaisesRegex(OSError, "injected"):
+                        with repository_module._exclusive_lock(lock_path):
+                            self.fail("initialization failure must precede the body")
+
+                self.assertFalse(lock_path.exists())
+
+    def test_non_windows_partial_initialization_failure_unlinks_created_lock(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            lock_path = Path(temporary) / ".review_decisions.json.lock"
             with mock.patch.object(
                 repository_module,
                 "_running_on_windows",
-                return_value=True,
+                return_value=False,
             ), mock.patch.object(
-                repository_module.Path,
-                "unlink",
-                new=transient_unlink,
-            ), mock.patch.object(
-                repository_module.time,
-                "sleep",
-                side_effect=install_successor,
+                repository_module.os,
+                "write",
+                side_effect=OSError("injected non-Windows token failure"),
             ):
-                with self.assertRaisesRegex(RuntimeError, "ownership"):
+                with self.assertRaisesRegex(OSError, "non-Windows token failure"):
                     with repository_module._exclusive_lock(lock_path):
-                        self.assertTrue(lock_path.exists())
+                        self.fail("initialization failure must precede the body")
 
-            self.assertEqual(1, unlink_attempts)
-            self.assertTrue(lock_path.exists())
-            self.assertEqual(successor_bytes, lock_path.read_bytes())
+            self.assertFalse(lock_path.exists())
+
+    @unittest.skipUnless(
+        repository_module.os.name == "nt",
+        "O_TEMPORARY handle semantics require Windows",
+    )
+    def test_body_exception_is_not_masked_by_close_cleanup_error(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            lock_path = Path(temporary) / ".review_decisions.json.lock"
+            original_close = repository_module.os.close
+
+            def close_then_fail(descriptor):
+                original_close(descriptor)
+                raise OSError("injected close cleanup failure")
+
+            with mock.patch.object(
+                repository_module.os,
+                "close",
+                side_effect=close_then_fail,
+            ):
+                with self.assertRaisesRegex(LookupError, "body failure") as caught:
+                    with repository_module._exclusive_lock(lock_path):
+                        raise LookupError("body failure")
+
+            notes = getattr(caught.exception, "__notes__", ())
+            self.assertTrue(any("cleanup" in note for note in notes))
+            self.assertFalse(lock_path.exists())
 
     def test_record_retries_transient_windows_replace_and_preserves_final_bytes(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -855,7 +972,7 @@ class ReviewDecisionRepositoryTests(unittest.TestCase):
 
             with mock.patch.object(
                 repository_module,
-                "_running_on_windows",
+                "_is_transient_windows_permission_error",
                 return_value=True,
             ), mock.patch.object(
                 repository_module.os,
