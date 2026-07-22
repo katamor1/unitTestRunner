@@ -69,8 +69,9 @@ jobs:
           actual = hashlib.sha256(patch).hexdigest()
           if actual != expected:
               raise SystemExit(f'patch SHA-256 mismatch: expected {expected}, got {actual}')
-          out = Path(r'${{ runner.temp }}') / 'feature.patch'
-          out.write_bytes(patch)
+          temp = Path(r'${{ runner.temp }}')
+          (temp / 'feature.patch').write_bytes(patch)
+          (temp / 'windows-path-fix.patch').write_bytes(Path('.sdd/windows-path-fix.patch').read_bytes())
           print(f'patch_bytes={len(patch)} sha256={actual} files={len(parts)}')
           '@ | python -
 
@@ -81,8 +82,11 @@ jobs:
           git reset --hard origin/main
           git clean -fdx
           $patch = Join-Path $env:RUNNER_TEMP 'feature.patch'
+          $windowsFix = Join-Path $env:RUNNER_TEMP 'windows-path-fix.patch'
           git apply --check --binary $patch
           git apply --binary $patch
+          git apply --check $windowsFix
+          git apply $windowsFix
           git diff --check
           if (-not (Test-Path -LiteralPath .\src\unit_test_runner\execution\blocker_analyzer.py -PathType Leaf)) {
             throw 'Applied feature does not contain blocker_analyzer.py'
