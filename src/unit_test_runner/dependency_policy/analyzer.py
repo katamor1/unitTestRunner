@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -21,12 +22,57 @@ from .models import (
     DependencyRewriteSite,
     ExternalObjectPolicyEntry,
 )
-from .signature_resolver import reachable_header_paths, resolve_dependency_signature
+from .signature_resolver import (
+    build_dependency_signature_catalog,
+    reachable_header_paths,
+    resolve_dependency_signature_from_catalog,
+)
 
 _SUPPORTED_DIRECT_KINDS = {"external_function", "same_file_function", "standard_library"}
 _UNSUPPORTED_KINDS = {"macro_like", "function_pointer", "member_call", "function_address_use", "unknown", "same_file_static_function", "mixed_call_forms"}
 _VALID_DEPENDENCY_MODES = {"auto", "real", "stub"}
 _VALID_OBJECT_MODES = {"auto", "real", "fixture"}
+
+
+@dataclass
+class _ImplementationSourceCache:
+    root: Path
+    digests: dict[Path, Any] = field(default_factory=dict)
+    source_texts: dict[Path, str] = field(default_factory=dict)
+    digest_failures: set[Path] = field(default_factory=set)
+
+    def source_path(self, implementation_source: Path) -> Path:
+        path = implementation_source if implementation_source.is_absolute() else self.root / implementation_source
+        try:
+            return path.resolve()
+        except OSError:
+            return path
+
+    def digest(self, implementation_source: Path) -> Any | None:
+        path = self.source_path(implementation_source)
+        if path in self.digests:
+            return self.digests[path]
+        if path in self.digest_failures:
+            return None
+        try:
+            digest = build_source_digest(path)
+        except (OSError, UnicodeError, ValueError, KeyError, AttributeError):
+            self.digest_failures.add(path)
+            return None
+        self.digests[path] = digest
+        self.source_texts[path] = digest.source.text
+        return digest
+
+    def source_text(self, implementation_source: Path) -> str:
+        path = self.source_path(implementation_source)
+        if path in self.source_texts:
+            return self.source_texts[path]
+        try:
+            text = decode_bytes_auto(path.read_bytes())
+        except OSError:
+            text = ""
+        self.source_texts[path] = text
+        return text
 
 
 def analyze_dependency_policy(
@@ -64,6 +110,20 @@ def analyze_dependency_policy(
         if name:
             grouped_calls[name].append(call)
 
+    signature_catalog = build_dependency_signature_catalog(
+        grouped_calls,
+        workspace_root=root,
+        target_source=target,
+        reachable_headers=reachable_headers,
+        project_headers=project_header_candidates,
+        project_sources=sources,
+    )
+    resolved_signatures = {
+        callee: resolve_dependency_signature_from_catalog(callee, catalog=signature_catalog, calls=calls)
+        for callee, calls in grouped_calls.items()
+    }
+    implementation_cache = _ImplementationSourceCache(root)
+
     dependencies: list[DependencyPolicyEntry] = []
     for callee, calls in grouped_calls.items():
         call_kinds = {_refined_call_kind(call, target_masked_text) for call in calls}
@@ -76,23 +136,15 @@ def analyze_dependency_policy(
         ):
             target_kind = "function_address_use"
         configured_mode = existing_dependency_modes.get(callee, "auto")
-        signature = resolve_dependency_signature(
-            callee,
-            workspace_root=root,
-            target_source=target,
-            reachable_headers=reachable_headers,
-            project_headers=project_header_candidates,
-            project_sources=sources,
-            calls=calls,
-        )
+        signature = resolved_signatures[callee]
         implementation_source = signature.definition_source
-        callee_globals = _callee_global_names(root, implementation_source, callee, target_globals)
-        shared_globals = sorted(target_globals.intersection(callee_globals))
         external_link_calls = (
-            _implementation_external_link_calls(root, implementation_source, callee)
+            _implementation_external_link_calls(implementation_cache, implementation_source, callee)
             if configured_mode != "stub" and signature.resolution in {"exact", "compatible_inferred"}
             else []
         )
+        callee_globals = _callee_global_names(implementation_cache, implementation_source, callee, target_globals)
+        shared_globals = sorted(target_globals.intersection(callee_globals))
         evidence = _dependency_evidence(
             callee,
             target_kind,
@@ -364,14 +416,18 @@ def _analyze_external_objects(
         raw = str(item.get("raw") or "")
         if storage == "extern" or re.match(r"\s*(?:extern|EXTERN)\b", raw):
             declarations.append(item)
+    requested_symbols = [str(item.get("name") or "") for item in declarations]
+    requested_symbols = [symbol for symbol in requested_symbols if symbol]
+    declaration_headers = _declaration_header_map(requested_symbols, headers, root)
+    definition_sources = _object_definition_map(requested_symbols, sources)
     result: list[ExternalObjectPolicyEntry] = []
     for declaration in declarations:
         symbol = str(declaration.get("name") or "")
         if not symbol:
             continue
         configured_mode = existing_modes.get(symbol, "auto")
-        declaration_header = _find_declaration_header(symbol, headers, root)
-        definition_candidates = [_relative(path, root) for path in _find_object_definitions(symbol, sources)]
+        declaration_header = declaration_headers.get(symbol)
+        definition_candidates = [_relative(path, root) for path in definition_sources.get(symbol, [])]
         resolved_mode, review_status, warnings = _resolve_object_mode(configured_mode, definition_candidates)
         definition_source = definition_candidates[0] if resolved_mode == "real" and len(definition_candidates) == 1 else None
         evidence = []
@@ -419,15 +475,16 @@ def _resolve_object_mode(configured_mode: str, candidates: list[Path]) -> tuple[
 
 
 def _implementation_external_link_calls(
-    root: Path,
+    cache: _ImplementationSourceCache,
     implementation_source: Path | None,
     callee: str,
 ) -> list[str]:
     if implementation_source is None:
         return []
-    path = implementation_source if implementation_source.is_absolute() else root / implementation_source
     try:
-        digest = build_source_digest(path)
+        digest = cache.digest(implementation_source)
+        if digest is None:
+            return []
         location = locate_function(digest, callee)
         if location.status != "found":
             return []
@@ -446,14 +503,15 @@ def _implementation_external_link_calls(
     )
 
 
-def _callee_global_names(root: Path, implementation_source: Path | None, callee: str, target_globals: set[str]) -> set[str]:
+def _callee_global_names(
+    cache: _ImplementationSourceCache,
+    implementation_source: Path | None,
+    callee: str,
+    target_globals: set[str],
+) -> set[str]:
     if implementation_source is None:
         return set()
-    path = implementation_source if implementation_source.is_absolute() else root / implementation_source
-    try:
-        text = decode_bytes_auto(path.read_bytes())
-    except OSError:
-        return set()
+    text = cache.source_text(implementation_source)
     body = _function_body(text, callee)
     if body is None:
         return set()
@@ -489,28 +547,37 @@ def _matching(text: str, start: int, open_char: str, close_char: str) -> int:
     return -1
 
 
-def _find_declaration_header(symbol: str, headers: list[Path], root: Path) -> Path | None:
-    pattern = re.compile(rf"(?m)^\s*(?:extern|EXTERN)\b[^;\n]*\b{re.escape(symbol)}\b[^;\n]*;")
+def _declaration_header_map(symbols: Iterable[str], headers: list[Path], root: Path) -> dict[str, Path]:
+    requested = set(symbols)
+    result: dict[str, Path] = {}
+    declaration_pattern = re.compile(r"(?m)^\s*(?:extern|EXTERN)\b[^;\n]*;")
     for header in headers:
         try:
-            if pattern.search(decode_bytes_auto(header.read_bytes())):
-                return _relative(header, root)
+            text = decode_bytes_auto(header.read_bytes())
         except OSError:
             continue
-    return None
+        for match in declaration_pattern.finditer(text):
+            for name in re.findall(r"\b[A-Za-z_]\w*\b", match.group(0)):
+                if name in requested and name not in result:
+                    result[name] = _relative(header, root)
+    return result
 
 
-def _find_object_definitions(symbol: str, sources: list[Path]) -> list[Path]:
-    result: list[Path] = []
+def _object_definition_map(symbols: Iterable[str], sources: list[Path]) -> dict[str, list[Path]]:
+    requested = set(symbols)
+    result = {symbol: [] for symbol in requested}
     for source in sources:
         try:
             text = decode_bytes_auto(source.read_bytes())
         except OSError:
             continue
         definitions = find_file_scope_object_definitions(text)
-        if any(item.name == symbol and item.storage_class != "static" for item in definitions):
-            result.append(source.resolve())
-    return _unique_paths(result)
+        names = set()
+        for item in definitions:
+            if item.name in requested and item.storage_class != "static" and item.name not in names:
+                result[item.name].append(source)
+                names.add(item.name)
+    return result
 
 
 def _target_global_names(payload: dict[str, Any]) -> set[str]:

@@ -133,7 +133,7 @@ class DependencyPolicyScalingTests(unittest.TestCase):
                 item.declaration_header,
                 item.definition_source,
                 item.definition_candidates,
-                [(evidence.kind, evidence.message, evidence.source, evidence.weight) for evidence in item.evidence],
+                [(evidence.kind, evidence.detail, evidence.source, evidence.weight) for evidence in item.evidence],
                 item.warnings,
             )
             for item in report.external_objects
@@ -191,6 +191,97 @@ class DependencyPolicyScalingTests(unittest.TestCase):
         self.assertEqual(expected_paths, one_callee_paths)
         self.assertEqual(expected_paths, twenty_callee_paths)
         self.assertEqual(one_callee_paths, twenty_callee_paths)
+
+    def test_catalog_results_equal_public_wrapper_results(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project = self._project(Path(temp_dir))
+            catalog = self._build_catalog(project, project["callees"])
+            resolver = getattr(signature_resolver, "resolve_dependency_signature_from_catalog", None)
+            self.assertIsNotNone(
+                resolver,
+                "dependency-policy scaling requires resolve_dependency_signature_from_catalog(callee, *, catalog, calls)",
+            )
+
+            indexed = [
+                resolver(callee, catalog=catalog, calls=[]).to_dict()
+                for callee in project["callees"]
+            ]
+            wrapped = [
+                signature_resolver.resolve_dependency_signature(
+                    callee,
+                    workspace_root=project["root"],
+                    target_source=project["target"],
+                    reachable_headers=[project["header"]],
+                    project_headers=[project["header"]],
+                    project_sources=project["project_sources"],
+                    calls=[],
+                ).to_dict()
+                for callee in project["callees"]
+            ]
+
+        self.assertEqual(wrapped, indexed)
+
+    def test_analysis_builds_one_source_digest_for_callees_sharing_an_implementation_source(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            include = root / "include"
+            sources = root / "src"
+            include.mkdir(parents=True)
+            sources.mkdir(parents=True)
+            header = include / "shared.h"
+            header.write_text(
+                "extern int g_shared;\n"
+                "int Shared_First(int value);\n"
+                "int Shared_Second(int value);\n",
+                encoding="utf-8",
+            )
+            target = sources / "target.c"
+            target.write_text(
+                '#include "shared.h"\n'
+                "int Target(int value)\n"
+                "{\n"
+                "    return Shared_First(value) + Shared_Second(value) + g_shared;\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            implementation = sources / "shared.c"
+            implementation.write_text(
+                '#include "shared.h"\n'
+                "int g_shared;\n"
+                "int Shared_First(int value) { return value + g_shared; }\n"
+                "int Shared_Second(int value) { return value - g_shared; }\n",
+                encoding="utf-8",
+            )
+            calls = [
+                {
+                    "call_id": f"call-{index}",
+                    "name": name,
+                    "target_kind": "external_function",
+                    "arguments": [{"raw": "value", "argument_kind": "parameter", "passing_mode_hint": "by_value"}],
+                    "return_usage": {"usage_kind": "expression"},
+                }
+                for index, name in enumerate(("Shared_First", "Shared_Second"), start=1)
+            ]
+
+            real_builder = analyzer.build_source_digest
+            with patch.object(analyzer, "build_source_digest", wraps=real_builder) as build_digest:
+                report = analyzer.analyze_dependency_policy(
+                    workspace_root=root,
+                    target_source=target,
+                    source_digest={"preprocessor": {"includes": [{"resolved_candidates": [str(header)]}]}},
+                    function_signature={"function": {"name": "Target"}},
+                    global_access={
+                        "file_scope_declarations": [],
+                        "global_accesses": [{"name": "g_shared"}],
+                    },
+                    call_report={"calls": calls, "stub_candidates": []},
+                    project_sources=[target, implementation],
+                    project_headers=[header],
+                )
+
+        self.assertEqual("resolved", report.status)
+        self.assertEqual(["real", "real"], [item.resolved_mode for item in report.dependencies])
+        self.assertEqual(1, build_digest.call_count)
 
     def test_external_object_definitions_are_parsed_once_per_source(self):
         with tempfile.TemporaryDirectory() as temp_dir:

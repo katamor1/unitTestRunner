@@ -44,6 +44,66 @@ class _SignatureCandidate:
         )
 
 
+@dataclass
+class DependencySignatureCatalog:
+    workspace_root: Path
+    declaration_candidates: dict[str, list[_SignatureCandidate]]
+    definition_candidates: dict[str, list[_SignatureCandidate]]
+
+
+def build_dependency_signature_catalog(
+    callees: Iterable[str],
+    *,
+    workspace_root: Path | str,
+    target_source: Path | str,
+    reachable_headers: Iterable[Path | str],
+    project_headers: Iterable[Path | str],
+    project_sources: Iterable[Path | str],
+) -> DependencySignatureCatalog:
+    root = Path(workspace_root).resolve()
+    requested = list(dict.fromkeys(str(callee) for callee in callees if str(callee)))
+    reachable = _unique_paths(reachable_headers)
+    project_candidates = _unique_paths(project_headers)
+    headers = [*reachable, *[path for path in project_candidates if path not in reachable]]
+    sources = _unique_paths([target_source, *project_sources])
+    candidate_paths = [*headers, *[path for path in sources if path not in headers]]
+    typedefs = _collect_typedefs(candidate_paths)
+    declarations = {callee: [] for callee in requested}
+    definitions = {callee: [] for callee in requested}
+    requested_set = set(requested)
+    header_set = set(headers)
+    source_set = set(sources)
+    for path in candidate_paths:
+        found = _find_requested_signature_candidates(
+            path,
+            requested_set,
+            allow_declarations=path in header_set,
+            allow_definitions=path in source_set,
+            typedefs=typedefs,
+        )
+        for callee, candidate in found:
+            target = definitions if candidate.is_definition else declarations
+            target[callee].append(candidate)
+    return DependencySignatureCatalog(root, declarations, definitions)
+
+
+def resolve_dependency_signature_from_catalog(
+    callee: str,
+    *,
+    catalog: DependencySignatureCatalog,
+    calls: list[dict[str, Any]],
+) -> ResolvedSignature:
+    declaration_candidates = catalog.declaration_candidates.get(callee, [])
+    definition_candidates = catalog.definition_candidates.get(callee, [])
+    return _resolve_signature_candidates(
+        callee,
+        root=catalog.workspace_root,
+        declaration_candidates=declaration_candidates,
+        definition_candidates=definition_candidates,
+        calls=calls,
+    )
+
+
 def resolve_dependency_signature(
     callee: str,
     *,
@@ -54,19 +114,25 @@ def resolve_dependency_signature(
     project_sources: Iterable[Path | str] = (),
     calls: list[dict[str, Any]],
 ) -> ResolvedSignature:
-    root = Path(workspace_root).resolve()
-    reachable = _unique_paths(reachable_headers)
-    project_candidates = _unique_paths(project_headers)
-    headers = [*reachable, *[path for path in project_candidates if path not in reachable]]
-    sources = _unique_paths([target_source, *project_sources])
-    typedefs = _collect_typedefs([*headers, *sources])
-    declaration_candidates: list[_SignatureCandidate] = []
-    definition_candidates: list[_SignatureCandidate] = []
-    for path in headers:
-        declaration_candidates.extend(_find_signature_candidates(path, callee, want_definition=False, typedefs=typedefs))
-    for path in sources:
-        definition_candidates.extend(_find_signature_candidates(path, callee, want_definition=True, typedefs=typedefs))
+    catalog = build_dependency_signature_catalog(
+        [callee],
+        workspace_root=workspace_root,
+        target_source=target_source,
+        reachable_headers=reachable_headers,
+        project_headers=project_headers,
+        project_sources=project_sources,
+    )
+    return resolve_dependency_signature_from_catalog(callee, catalog=catalog, calls=calls)
 
+
+def _resolve_signature_candidates(
+    callee: str,
+    *,
+    root: Path,
+    declaration_candidates: list[_SignatureCandidate],
+    definition_candidates: list[_SignatureCandidate],
+    calls: list[dict[str, Any]],
+) -> ResolvedSignature:
     candidates = declaration_candidates + definition_candidates
     if candidates:
         keys: dict[tuple[Any, ...], list[_SignatureCandidate]] = {}
@@ -131,14 +197,24 @@ def reachable_header_paths(source_digest: dict[str, Any]) -> list[Path]:
     return result
 
 
-def _find_signature_candidates(path: Path, callee: str, *, want_definition: bool, typedefs: dict[str, str]) -> list[_SignatureCandidate]:
+def _find_requested_signature_candidates(
+    path: Path,
+    callees: set[str],
+    *,
+    allow_declarations: bool,
+    allow_definitions: bool,
+    typedefs: dict[str, str],
+) -> list[tuple[str, _SignatureCandidate]]:
     try:
         text = decode_bytes_auto(path.read_bytes())
     except OSError:
         return []
-    result: list[_SignatureCandidate] = []
-    for match in re.finditer(rf"\b{re.escape(callee)}\s*\(", text):
-        name_start = match.start()
+    result: list[tuple[str, _SignatureCandidate]] = []
+    for match in re.finditer(r"\b([A-Za-z_]\w*)\s*\(", text):
+        callee = match.group(1)
+        if callee not in callees:
+            continue
+        name_start = match.start(1)
         if name_start > 0 and text[name_start - 1] == "*":
             continue
         open_paren = text.find("(", match.start())
@@ -150,11 +226,10 @@ def _find_signature_candidates(path: Path, callee: str, *, want_definition: bool
             continue
         terminator = text[next_index]
         is_definition = terminator == "{"
-        if want_definition != is_definition:
-            if not want_definition and terminator != ";":
-                continue
-            if want_definition:
-                continue
+        if is_definition and not allow_definitions:
+            continue
+        if not is_definition and (terminator != ";" or not allow_declarations):
+            continue
         start = _signature_start(text, name_start)
         prefix = _strip_preprocessor(text[start:name_start]).strip()
         if not _looks_like_type_prefix(prefix):
@@ -166,7 +241,21 @@ def _find_signature_candidates(path: Path, callee: str, *, want_definition: bool
         parameters = _parse_parameters(parameter_text, typedefs)
         return_canonical, return_category = _canonical_type(return_type, typedefs)
         prototype = _render_prototype(return_type, convention, callee, parameters)
-        result.append(_SignatureCandidate(path.resolve(), is_definition, return_type, return_canonical, return_category, convention, parameters, prototype))
+        result.append(
+            (
+                callee,
+                _SignatureCandidate(
+                    path,
+                    is_definition,
+                    return_type,
+                    return_canonical,
+                    return_category,
+                    convention,
+                    parameters,
+                    prototype,
+                ),
+            )
+        )
     return result
 
 
