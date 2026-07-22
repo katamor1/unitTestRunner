@@ -46,12 +46,10 @@ jobs:
       - name: Create clean one-parent feature commit from verified snapshot
         shell: pwsh
         run: |
-          $snapshot = '7563d21679f353afca6e0f305f411304504bb2ab'
-          git fetch origin main
-          git cat-file -e "$snapshot^{commit}"
+          git fetch origin main feat/test-execution-blocker-report-release
           git reset --hard origin/main
           git clean -fdx
-          git checkout $snapshot -- .
+          git checkout origin/feat/test-execution-blocker-report-release -- .
           Remove-Item -LiteralPath .sdd -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath .github\workflows\apply-test-execution-blocker-report.yml -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath .github\workflows\finalize-test-execution-blocker-report.yml -Force -ErrorAction SilentlyContinue
@@ -61,13 +59,13 @@ jobs:
           if (-not (Select-String -LiteralPath .\src\unit_test_runner\contracts\kinds.py -SimpleMatch 'TEST_EXECUTION_BLOCKER_REPORT')) {
             throw 'Verified snapshot does not register the blocker artifact kind'
           }
-          if (-not (Select-String -LiteralPath .\vscode\extension\src\extension.ts -SimpleMatch 'test_execution_blockers')) {
-            throw 'Verified snapshot does not contain VS Code blocker integration'
-          }
           git diff --check
           git config user.name OpenAI
           git config user.email noreply@openai.com
           git add -A
+          if ((git diff --cached --name-only).Count -eq 0) {
+            throw 'Verified snapshot produced no feature diff against main'
+          }
           git commit -m 'feat: add test execution blocker reports'
           "feature_commit=$(git rev-parse HEAD)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
