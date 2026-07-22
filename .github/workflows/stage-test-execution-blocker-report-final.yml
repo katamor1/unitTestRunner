@@ -103,8 +103,9 @@ jobs:
           Remove-Item -LiteralPath .github\workflows\stage-test-execution-blocker-report-final.yml -Force
           git add -A
           git diff --cached --check
-          if (git diff --cached --name-only | Select-String -Pattern '^(\.formal/|\.github/workflows/stage-test-execution-blocker-report-final\.yml$)') {
-            throw 'Temporary staging files remain in the clean tree.'
+          $temporaryPaths = @(git ls-files -- .formal .github/workflows/stage-test-execution-blocker-report-final.yml)
+          if ($temporaryPaths.Count -gt 0) {
+            throw "Temporary staging files remain in the clean index: $($temporaryPaths -join ', ')"
           }
           git config user.name OpenAI
           git config user.email noreply@openai.com
