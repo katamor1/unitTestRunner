@@ -52,11 +52,16 @@ def analyze_calls(
     global_access: GlobalAccessReport,
     link_providers_by_name: dict[str, list[LinkProvider]] | None = None,
     link_warnings: list[CallAnalyzerWarning] | None = None,
+    defined_functions_by_name: dict[str, dict[str, object]] | None = None,
 ) -> CallReport:
     body = body_text(digest, function_location, masked=True)
     original_body = body_text(digest, function_location, masked=False)
     base_offset = body_base_offset(function_location)
-    defined = {item["name"]: item for item in list_functions(digest.source.path)}
+    defined = (
+        defined_functions_by_name
+        if defined_functions_by_name is not None
+        else {item["name"]: item for item in list_functions(digest.source.path)}
+    )
     macro_names = {macro.name for macro in digest.macros if macro.is_function_like}
     parameter_names = {parameter.name for parameter in function_signature.parameters if parameter.name}
     pointer_parameters = {

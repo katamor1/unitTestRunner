@@ -10,6 +10,7 @@ from unit_test_runner.encoding import decode_bytes_auto
 from unit_test_runner.c_analyzer.call_analyzer import analyze_calls
 from unit_test_runner.c_analyzer.function_locator import locate_functions
 from unit_test_runner.c_analyzer.global_access_analyzer import analyze_global_access
+from unit_test_runner.c_analyzer.legacy import list_functions
 from unit_test_runner.c_analyzer.object_definition_finder import find_file_scope_object_definitions
 from unit_test_runner.c_analyzer.masker import mask_source_text
 from unit_test_runner.c_analyzer.signature_extractor import extract_signature
@@ -41,6 +42,9 @@ class _ImplementationSourceCache:
     source_texts: dict[Path, str] = field(default_factory=dict)
     digest_failures: set[Path] = field(default_factory=set)
     function_locations: dict[Path, dict[str, Any]] = field(default_factory=dict)
+    fallback_function_bodies: dict[Path, dict[str, str]] = field(default_factory=dict)
+    defined_functions_by_source: dict[Path, dict[str, dict[str, object]]] = field(default_factory=dict)
+    defined_function_failures: set[Path] = field(default_factory=set)
 
     def source_path(self, implementation_source: Path) -> Path:
         path = implementation_source if implementation_source.is_absolute() else self.root / implementation_source
@@ -77,14 +81,25 @@ class _ImplementationSourceCache:
 
     def index_functions(self, implementation_source: Path, callees: Iterable[str]) -> None:
         path = self.source_path(implementation_source)
+        requested = list(dict.fromkeys(callees))
         digest = self.digest(implementation_source)
-        self.function_locations[path] = locate_functions(digest, callees) if digest is not None else {}
+        if digest is None:
+            self.function_locations[path] = {}
+            self.fallback_function_bodies[path] = _index_function_bodies(
+                self.source_text(implementation_source),
+                requested,
+            )
+            return
+        self.function_locations[path] = locate_functions(digest, requested)
 
     def function_location(self, implementation_source: Path, callee: str) -> Any | None:
         path = self.source_path(implementation_source)
         return self.function_locations.get(path, {}).get(callee)
 
     def function_body(self, implementation_source: Path, callee: str) -> str | None:
+        path = self.source_path(implementation_source)
+        if path in self.fallback_function_bodies:
+            return self.fallback_function_bodies[path].get(callee)
         location = self.function_location(implementation_source, callee)
         if location is None:
             return None
@@ -105,6 +120,20 @@ class _ImplementationSourceCache:
             return None
         text = self.source_text(implementation_source)
         return text[body_range.start.offset + 1 : body_range.end.offset]
+
+    def defined_functions(self, implementation_source: Path) -> dict[str, dict[str, object]] | None:
+        path = self.source_path(implementation_source)
+        if path in self.defined_functions_by_source:
+            return self.defined_functions_by_source[path]
+        if path in self.defined_function_failures:
+            return None
+        try:
+            defined = {item["name"]: item for item in list_functions(path)}
+        except (OSError, UnicodeError, ValueError, KeyError, AttributeError):
+            self.defined_function_failures.add(path)
+            return None
+        self.defined_functions_by_source[path] = defined
+        return defined
 
 
 def analyze_dependency_policy(
@@ -534,7 +563,16 @@ def _implementation_external_link_calls(
             return []
         signature = extract_signature(digest, location)
         global_access = analyze_global_access(digest, location, signature)
-        call_report = analyze_calls(digest, location, signature, global_access)
+        defined_functions = cache.defined_functions(implementation_source)
+        if defined_functions is None:
+            return []
+        call_report = analyze_calls(
+            digest,
+            location,
+            signature,
+            global_access,
+            defined_functions_by_name=defined_functions,
+        )
     except (OSError, UnicodeError, ValueError, KeyError, AttributeError):
         return []
     unsafe_kinds = {"external_function", "linked_library_function"}
@@ -562,8 +600,17 @@ def _callee_global_names(
 
 
 def _function_body(text: str, name: str) -> str | None:
-    for match in re.finditer(rf"\b{re.escape(name)}\s*\(", text):
-        open_paren = text.find("(", match.start())
+    return _index_function_bodies(text, [name]).get(name)
+
+
+def _index_function_bodies(text: str, names: Iterable[str]) -> dict[str, str]:
+    requested = set(names)
+    result: dict[str, str] = {}
+    for match in re.finditer(r"\b([A-Za-z_]\w*)\s*\(", text):
+        name = match.group(1)
+        if name not in requested or name in result:
+            continue
+        open_paren = text.find("(", match.start(1))
         close_paren = _matching(text, open_paren, "(", ")")
         if close_paren == -1:
             continue
@@ -574,8 +621,10 @@ def _function_body(text: str, name: str) -> str | None:
             continue
         close_brace = _matching(text, brace, "{", "}")
         if close_brace != -1:
-            return text[brace + 1 : close_brace]
-    return None
+            result[name] = text[brace + 1 : close_brace]
+            if len(result) == len(requested):
+                break
+    return result
 
 
 def _matching(text: str, start: int, open_char: str, close_char: str) -> int:

@@ -2,6 +2,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -9,6 +10,7 @@ SRC_ROOT = REPO_ROOT / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
 from unit_test_runner.c_analyzer.call_analyzer import analyze_calls
+from unit_test_runner.c_analyzer import call_analyzer
 from unit_test_runner.c_analyzer.call_models import LinkProvider
 from unit_test_runner.c_analyzer.function_locator import locate_function
 from unit_test_runner.c_analyzer.global_access_analyzer import analyze_global_access
@@ -71,6 +73,23 @@ class LinkedLibraryCallAnalysisTests(unittest.TestCase):
             call = next(item for item in payload["calls"] if item["name"] == "ProductCalc")
             self.assertEqual("external_function", call["target_kind"])
             self.assertIn("ProductCalc", {item["name"] for item in payload["stub_candidates"]})
+
+    def test_precomputed_defined_functions_preserve_results_without_legacy_rescan(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            inputs = self._analysis_inputs(Path(temp_dir))
+            expected = analyze_calls(*inputs).to_dict()
+
+            with patch.object(
+                call_analyzer,
+                "list_functions",
+                side_effect=AssertionError("precomputed functions must bypass legacy scanning"),
+            ):
+                actual = analyze_calls(
+                    *inputs,
+                    defined_functions_by_name={"Consumer": {"name": "Consumer", "static": False}},
+                ).to_dict()
+
+        self.assertEqual(expected, actual)
 
     def test_standard_library_classification_precedes_link_provider(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -14,6 +14,7 @@ sys.path.insert(0, str(SRC_ROOT))
 from unit_test_runner.dependency_policy import analyzer
 from unit_test_runner.dependency_policy import signature_resolver
 from unit_test_runner.c_analyzer import function_locator
+from unit_test_runner.c_analyzer import legacy
 
 
 class DependencyPolicyScalingTests(unittest.TestCase):
@@ -319,7 +320,7 @@ class DependencyPolicyScalingTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            def scan_counts(requested: list[str]) -> tuple[int, int]:
+            def scan_counts(requested: list[str]) -> tuple[int, int, int, int]:
                 calls = [
                     {
                         "call_id": f"call-{index}",
@@ -338,9 +339,13 @@ class DependencyPolicyScalingTests(unittest.TestCase):
                 ]
                 real_annotate = function_locator.annotate_brace_depth
                 real_body = analyzer._function_body
+                real_legacy_read = legacy._read_text
+                real_legacy_mask = legacy.mask_comments_and_strings
                 with (
                     patch.object(function_locator, "annotate_brace_depth", wraps=real_annotate) as location_scan,
                     patch.object(analyzer, "_function_body", wraps=real_body) as body_scan,
+                    patch.object(legacy, "_read_text", wraps=real_legacy_read) as legacy_read,
+                    patch.object(legacy, "mask_comments_and_strings", wraps=real_legacy_mask) as legacy_scan,
                 ):
                     report = analyzer.analyze_dependency_policy(
                         workspace_root=root,
@@ -359,13 +364,79 @@ class DependencyPolicyScalingTests(unittest.TestCase):
                     )
                 self.assertEqual("resolved", report.status)
                 self.assertEqual(["real"] * len(requested), [item.resolved_mode for item in report.dependencies])
-                return location_scan.call_count, body_scan.call_count
+                return (
+                    location_scan.call_count,
+                    body_scan.call_count,
+                    legacy_read.call_count,
+                    legacy_scan.call_count,
+                )
 
             one_callee = scan_counts(callees[:1])
             many_callees = scan_counts(callees)
 
         self.assertEqual(one_callee, many_callees)
-        self.assertEqual((1, 0), one_callee)
+        self.assertEqual((1, 0, 1, 1), one_callee)
+
+    def test_digest_decode_failure_keeps_replacement_decoded_shared_global_policy(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            header = root / "invalid_bytes.h"
+            target = root / "target.c"
+            implementation = root / "invalid_bytes.c"
+            header.write_text(
+                "extern int g_shared;\nint Invalid_Bytes_Helper(int value);\n",
+                encoding="utf-8",
+            )
+            target.write_text(
+                '#include "invalid_bytes.h"\n'
+                "int Target(int value) { return Invalid_Bytes_Helper(value) + g_shared; }\n",
+                encoding="utf-8",
+            )
+            implementation.write_bytes(
+                b"/* invalid source byte: \x81 */\n"
+                b'#include "invalid_bytes.h"\n'
+                b"int g_shared;\n"
+                b"int Invalid_Bytes_Helper(int value) { return value + g_shared; }\n"
+            )
+
+            report = analyzer.analyze_dependency_policy(
+                workspace_root=root,
+                target_source=target,
+                source_digest={
+                    "preprocessor": {"includes": [{"resolved_candidates": [str(header)]}]}
+                },
+                function_signature={"function": {"name": "Target"}},
+                global_access={
+                    "file_scope_declarations": [],
+                    "global_accesses": [{"name": "g_shared"}],
+                },
+                call_report={
+                    "calls": [
+                        {
+                            "call_id": "call-1",
+                            "name": "Invalid_Bytes_Helper",
+                            "target_kind": "external_function",
+                            "arguments": [
+                                {
+                                    "raw": "value",
+                                    "argument_kind": "parameter",
+                                    "passing_mode_hint": "by_value",
+                                }
+                            ],
+                            "return_usage": {"usage_kind": "expression"},
+                        }
+                    ],
+                    "stub_candidates": [],
+                },
+                project_sources=[target, implementation],
+                project_headers=[header],
+            )
+
+        dependency = report.dependencies[0]
+        self.assertEqual("resolved", report.status)
+        self.assertEqual("real", dependency.resolved_mode)
+        self.assertEqual("resolved", dependency.review_status)
+        self.assertEqual(["g_shared"], dependency.shared_globals)
 
     def test_shared_global_lookup_keeps_first_complete_body_for_duplicate_definitions(self):
         with tempfile.TemporaryDirectory() as temp_dir:
