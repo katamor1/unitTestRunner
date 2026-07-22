@@ -13,6 +13,7 @@ sys.path.insert(0, str(SRC_ROOT))
 
 from unit_test_runner.dependency_policy import analyzer
 from unit_test_runner.dependency_policy import signature_resolver
+from unit_test_runner.c_analyzer import function_locator
 
 
 class DependencyPolicyScalingTests(unittest.TestCase):
@@ -282,6 +283,149 @@ class DependencyPolicyScalingTests(unittest.TestCase):
         self.assertEqual("resolved", report.status)
         self.assertEqual(["real", "real"], [item.resolved_mode for item in report.dependencies])
         self.assertEqual(1, build_digest.call_count)
+
+    def test_shared_implementation_function_scans_are_independent_of_callee_count(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            include = root / "include"
+            sources = root / "src"
+            include.mkdir(parents=True)
+            sources.mkdir(parents=True)
+            callees = [f"Shared_Scan_{index:02d}" for index in range(8)]
+            header = include / "shared_scan.h"
+            header.write_text(
+                "extern int g_shared_scan;\n"
+                + "".join(f"int {callee}(int value);\n" for callee in callees),
+                encoding="utf-8",
+            )
+            target = sources / "target.c"
+            target.write_text(
+                '#include "shared_scan.h"\n'
+                "int Target(int value)\n"
+                "{\n"
+                + "".join(f"    value += {callee}(value);\n" for callee in callees)
+                + "    return value + g_shared_scan;\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            implementation = sources / "shared_scan.c"
+            implementation.write_text(
+                '#include "shared_scan.h"\n'
+                "int g_shared_scan;\n"
+                + "".join(
+                    f"int {callee}(int value) {{ return value + g_shared_scan; }}\n"
+                    for callee in callees
+                ),
+                encoding="utf-8",
+            )
+
+            def scan_counts(requested: list[str]) -> tuple[int, int]:
+                calls = [
+                    {
+                        "call_id": f"call-{index}",
+                        "name": name,
+                        "target_kind": "external_function",
+                        "arguments": [
+                            {
+                                "raw": "value",
+                                "argument_kind": "parameter",
+                                "passing_mode_hint": "by_value",
+                            }
+                        ],
+                        "return_usage": {"usage_kind": "expression"},
+                    }
+                    for index, name in enumerate(requested, start=1)
+                ]
+                real_annotate = function_locator.annotate_brace_depth
+                real_body = analyzer._function_body
+                with (
+                    patch.object(function_locator, "annotate_brace_depth", wraps=real_annotate) as location_scan,
+                    patch.object(analyzer, "_function_body", wraps=real_body) as body_scan,
+                ):
+                    report = analyzer.analyze_dependency_policy(
+                        workspace_root=root,
+                        target_source=target,
+                        source_digest={
+                            "preprocessor": {"includes": [{"resolved_candidates": [str(header)]}]}
+                        },
+                        function_signature={"function": {"name": "Target"}},
+                        global_access={
+                            "file_scope_declarations": [],
+                            "global_accesses": [{"name": "g_shared_scan"}],
+                        },
+                        call_report={"calls": calls, "stub_candidates": []},
+                        project_sources=[target, implementation],
+                        project_headers=[header],
+                    )
+                self.assertEqual("resolved", report.status)
+                self.assertEqual(["real"] * len(requested), [item.resolved_mode for item in report.dependencies])
+                return location_scan.call_count, body_scan.call_count
+
+            one_callee = scan_counts(callees[:1])
+            many_callees = scan_counts(callees)
+
+        self.assertEqual(one_callee, many_callees)
+        self.assertEqual((1, 0), one_callee)
+
+    def test_shared_global_lookup_keeps_first_complete_body_for_duplicate_definitions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            header = root / "duplicate.h"
+            target = root / "target.c"
+            implementation = root / "duplicate.c"
+            header.write_text(
+                "extern int g_duplicate;\nint Duplicate_Helper(int value);\n",
+                encoding="utf-8",
+            )
+            target.write_text(
+                '#include "duplicate.h"\n'
+                "int Target(int value) { return Duplicate_Helper(value) + g_duplicate; }\n",
+                encoding="utf-8",
+            )
+            implementation.write_text(
+                '#include "duplicate.h"\n'
+                "int g_duplicate;\n"
+                "int Duplicate_Helper(int value) { return value + g_duplicate; }\n"
+                "int Duplicate_Helper(int value) { return value; }\n",
+                encoding="utf-8",
+            )
+
+            report = analyzer.analyze_dependency_policy(
+                workspace_root=root,
+                target_source=target,
+                source_digest={
+                    "preprocessor": {"includes": [{"resolved_candidates": [str(header)]}]}
+                },
+                function_signature={"function": {"name": "Target"}},
+                global_access={
+                    "file_scope_declarations": [],
+                    "global_accesses": [{"name": "g_duplicate"}],
+                },
+                call_report={
+                    "calls": [
+                        {
+                            "call_id": "call-1",
+                            "name": "Duplicate_Helper",
+                            "target_kind": "external_function",
+                            "arguments": [
+                                {
+                                    "raw": "value",
+                                    "argument_kind": "parameter",
+                                    "passing_mode_hint": "by_value",
+                                }
+                            ],
+                            "return_usage": {"usage_kind": "expression"},
+                        }
+                    ],
+                    "stub_candidates": [],
+                },
+                project_sources=[target, implementation],
+                project_headers=[header],
+            )
+
+        dependency = report.dependencies[0]
+        self.assertEqual("real", dependency.resolved_mode)
+        self.assertEqual(["g_duplicate"], dependency.shared_globals)
 
     def test_external_object_definitions_are_parsed_once_per_source(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from unit_test_runner.c_analyzer.function_location_writer import write_function_location
+from unit_test_runner.c_analyzer import function_locator
 from unit_test_runner.c_analyzer.function_locator import locate_function
 from unit_test_runner.c_analyzer.source_digest import build_source_digest
 
@@ -83,6 +84,26 @@ class CFunctionLocationTests(unittest.TestCase):
         self.assertIn("multiple_function_definitions", [warning.code for warning in duplicate.warnings])
         self.assertEqual("malformed", broken.status)
         self.assertIn("unmatched_opening_brace", [warning.code for warning in broken.warnings])
+
+    def test_bulk_locations_equal_individual_location_results(self):
+        digest = self.digest()
+        names = [
+            "StaticFunction",
+            "PrototypeOnly",
+            "PointerLike",
+            "MultilineHeader",
+            "OldStyle",
+            "ConditionalDuplicate",
+            "Broken",
+            "MissingFunction",
+        ]
+        bulk_locator = getattr(function_locator, "locate_functions", None)
+        self.assertIsNotNone(bulk_locator, "function location requires a bulk locate_functions API")
+
+        bulk = bulk_locator(digest, names)
+        individual = {name: locate_function(digest, name).to_dict() for name in names}
+
+        self.assertEqual(individual, {name: location.to_dict() for name, location in bulk.items()})
 
     def test_writer_emits_json_markdown_and_function_slice(self):
         digest = self.digest()

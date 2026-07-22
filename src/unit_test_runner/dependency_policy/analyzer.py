@@ -8,7 +8,7 @@ from typing import Any, Iterable
 
 from unit_test_runner.encoding import decode_bytes_auto
 from unit_test_runner.c_analyzer.call_analyzer import analyze_calls
-from unit_test_runner.c_analyzer.function_locator import locate_function
+from unit_test_runner.c_analyzer.function_locator import locate_functions
 from unit_test_runner.c_analyzer.global_access_analyzer import analyze_global_access
 from unit_test_runner.c_analyzer.object_definition_finder import find_file_scope_object_definitions
 from unit_test_runner.c_analyzer.masker import mask_source_text
@@ -40,6 +40,7 @@ class _ImplementationSourceCache:
     digests: dict[Path, Any] = field(default_factory=dict)
     source_texts: dict[Path, str] = field(default_factory=dict)
     digest_failures: set[Path] = field(default_factory=set)
+    function_locations: dict[Path, dict[str, Any]] = field(default_factory=dict)
 
     def source_path(self, implementation_source: Path) -> Path:
         path = implementation_source if implementation_source.is_absolute() else self.root / implementation_source
@@ -73,6 +74,37 @@ class _ImplementationSourceCache:
             text = ""
         self.source_texts[path] = text
         return text
+
+    def index_functions(self, implementation_source: Path, callees: Iterable[str]) -> None:
+        path = self.source_path(implementation_source)
+        digest = self.digest(implementation_source)
+        self.function_locations[path] = locate_functions(digest, callees) if digest is not None else {}
+
+    def function_location(self, implementation_source: Path, callee: str) -> Any | None:
+        path = self.source_path(implementation_source)
+        return self.function_locations.get(path, {}).get(callee)
+
+    def function_body(self, implementation_source: Path, callee: str) -> str | None:
+        location = self.function_location(implementation_source, callee)
+        if location is None:
+            return None
+        selected = location.selected_candidate
+        if selected is None:
+            selected = next(
+                (
+                    candidate
+                    for candidate in location.candidates
+                    if candidate.kind == "definition" and candidate.body_range is not None
+                ),
+                None,
+            )
+        if selected is None:
+            return None
+        body_range = selected.body_range
+        if body_range is None:
+            return None
+        text = self.source_text(implementation_source)
+        return text[body_range.start.offset + 1 : body_range.end.offset]
 
 
 def analyze_dependency_policy(
@@ -123,6 +155,16 @@ def analyze_dependency_policy(
         for callee, calls in grouped_calls.items()
     }
     implementation_cache = _ImplementationSourceCache(root)
+    implementation_groups: dict[Path, tuple[Path, list[str]]] = {}
+    for callee, signature in resolved_signatures.items():
+        if signature.definition_source is None:
+            continue
+        path = implementation_cache.source_path(signature.definition_source)
+        if path not in implementation_groups:
+            implementation_groups[path] = (signature.definition_source, [])
+        implementation_groups[path][1].append(callee)
+    for implementation_source, callees in implementation_groups.values():
+        implementation_cache.index_functions(implementation_source, callees)
 
     dependencies: list[DependencyPolicyEntry] = []
     for callee, calls in grouped_calls.items():
@@ -485,7 +527,9 @@ def _implementation_external_link_calls(
         digest = cache.digest(implementation_source)
         if digest is None:
             return []
-        location = locate_function(digest, callee)
+        location = cache.function_location(implementation_source, callee)
+        if location is None:
+            return []
         if location.status != "found":
             return []
         signature = extract_signature(digest, location)
@@ -511,8 +555,7 @@ def _callee_global_names(
 ) -> set[str]:
     if implementation_source is None:
         return set()
-    text = cache.source_text(implementation_source)
-    body = _function_body(text, callee)
+    body = cache.function_body(implementation_source, callee)
     if body is None:
         return set()
     return {name for name in target_globals if re.search(rf"\b{re.escape(name)}\b", body)}

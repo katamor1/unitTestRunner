@@ -1,22 +1,43 @@
 from __future__ import annotations
 
+from typing import Iterable
+
 from .brace_matcher import annotate_brace_depth, find_matching_token
 from .function_models import ConditionalContext, FunctionCandidate, FunctionLocation, FunctionLocatorWarning, SourcePosition, SourceRange
 from .source_models import LexToken, SourceDigest
 
 
 def locate_function(digest: SourceDigest, function_name: str) -> FunctionLocation:
+    return locate_functions(digest, [function_name])[function_name]
+
+
+def locate_functions(digest: SourceDigest, function_names: Iterable[str]) -> dict[str, FunctionLocation]:
+    requested = list(dict.fromkeys(function_names))
+    if not requested:
+        return {}
+    requested_set = set(requested)
     tokens = digest.tokens
     depths = annotate_brace_depth(tokens)
-    candidates: list[FunctionCandidate] = []
-    warnings: list[FunctionLocatorWarning] = []
+    candidates_by_name: dict[str, list[FunctionCandidate]] = {name: [] for name in requested}
+    warnings_by_name: dict[str, list[FunctionLocatorWarning]] = {name: [] for name in requested}
 
-    if any(macro.name == function_name and macro.is_function_like for macro in digest.macros):
-        warnings.append(FunctionLocatorWarning("macro_like_candidate_ignored", f"Function-like macro ignored: {function_name}"))
+    function_like_macros = {
+        macro.name
+        for macro in digest.macros
+        if macro.is_function_like and macro.name in requested_set
+    }
+    for function_name in requested:
+        if function_name in function_like_macros:
+            warnings_by_name[function_name].append(
+                FunctionLocatorWarning("macro_like_candidate_ignored", f"Function-like macro ignored: {function_name}")
+            )
 
     for index, token in enumerate(tokens):
-        if token.kind != "identifier" or token.value != function_name:
+        if token.kind != "identifier" or token.value not in requested_set:
             continue
+        function_name = token.value
+        candidates = candidates_by_name[function_name]
+        warnings = warnings_by_name[function_name]
         pointer_candidate = _function_pointer_candidate(tokens, index)
         if pointer_candidate:
             candidates.append(pointer_candidate)
@@ -49,6 +70,23 @@ def locate_function(digest: SourceDigest, function_name: str) -> FunctionLocatio
             warnings.append(FunctionLocatorWarning("old_style_definition_detected", f"Old-style function definition detected: {function_name}", token.line_number, token.column))
             warnings.extend(candidate_warnings)
 
+    return {
+        function_name: _finish_function_location(
+            digest,
+            function_name,
+            candidates_by_name[function_name],
+            warnings_by_name[function_name],
+        )
+        for function_name in requested
+    }
+
+
+def _finish_function_location(
+    digest: SourceDigest,
+    function_name: str,
+    candidates: list[FunctionCandidate],
+    warnings: list[FunctionLocatorWarning],
+) -> FunctionLocation:
     definitions = [candidate for candidate in candidates if candidate.kind == "definition" and candidate.body_range is not None]
     malformed = [candidate for candidate in candidates if candidate.kind == "definition" and candidate.body_range is None]
     if malformed and not definitions:
