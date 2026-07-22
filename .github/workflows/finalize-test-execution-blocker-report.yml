@@ -119,6 +119,34 @@ jobs:
           git clean -fdx
           git apply --check --binary $env:FEATURE_PATCH
           git apply --binary $env:FEATURE_PATCH
+          @'
+          from pathlib import Path
+
+          path = Path("tests/test_execution_run_history.py")
+          source = path.read_text(encoding="utf-8")
+          old = '''            self.assertEqual(
+              workspace / "runs" / "run-blocked" / "test_execution_blockers.json",
+              paths.blocker_report_json,
+            )
+            self.assertEqual(
+              workspace / "runs" / "run-blocked" / "test_execution_blockers.md",
+              paths.blocker_report_markdown,
+            )
+          '''
+          new = '''            resolved_workspace = workspace.resolve()
+            self.assertEqual(
+              resolved_workspace / "runs" / "run-blocked" / "test_execution_blockers.json",
+              paths.blocker_report_json,
+            )
+            self.assertEqual(
+              resolved_workspace / "runs" / "run-blocked" / "test_execution_blockers.md",
+              paths.blocker_report_markdown,
+            )
+          '''
+          if old not in source:
+              raise SystemExit("Windows run-path test block was not found")
+          path.write_text(source.replace(old, new), encoding="utf-8")
+          '@ | python -
           Remove-Item -LiteralPath .sdd -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath .github\workflows\apply-test-execution-blocker-report.yml -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath .github\workflows\finalize-test-execution-blocker-report.yml -Force -ErrorAction SilentlyContinue
