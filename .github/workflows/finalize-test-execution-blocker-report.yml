@@ -43,7 +43,7 @@ jobs:
           cache: npm
           cache-dependency-path: vscode/extension/package-lock.json
 
-      - name: Create clean one-parent feature commit from verified snapshot
+      - name: Prepare verified snapshot
         shell: pwsh
         run: |
           git fetch origin main feat/test-execution-blocker-report-release
@@ -53,6 +53,28 @@ jobs:
           Remove-Item -LiteralPath .sdd -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath .github\workflows\apply-test-execution-blocker-report.yml -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath .github\workflows\finalize-test-execution-blocker-report.yml -Force -ErrorAction SilentlyContinue
+          $diagnostic = Join-Path $env:RUNNER_TEMP 'snapshot-diagnostics.txt'
+          "HEAD=$(git rev-parse HEAD)" | Out-File $diagnostic -Encoding utf8
+          "release=$(git rev-parse origin/feat/test-execution-blocker-report-release)" | Out-File $diagnostic -Append -Encoding utf8
+          "blocker_analyzer=$(Test-Path -LiteralPath .\src\unit_test_runner\execution\blocker_analyzer.py -PathType Leaf)" | Out-File $diagnostic -Append -Encoding utf8
+          "artifact_kind=$([bool](Select-String -LiteralPath .\src\unit_test_runner\contracts\kinds.py -SimpleMatch 'TEST_EXECUTION_BLOCKER_REPORT' -ErrorAction SilentlyContinue))" | Out-File $diagnostic -Append -Encoding utf8
+          'status:' | Out-File $diagnostic -Append -Encoding utf8
+          git status --short | Out-File $diagnostic -Append -Encoding utf8
+          'diff-names:' | Out-File $diagnostic -Append -Encoding utf8
+          git diff --name-only | Out-File $diagnostic -Append -Encoding utf8
+
+      - name: Upload snapshot diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blocker-snapshot-diagnostics
+          path: ${{ runner.temp }}/snapshot-diagnostics.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Create clean one-parent feature commit
+        shell: pwsh
+        run: |
           if (-not (Test-Path -LiteralPath .\src\unit_test_runner\execution\blocker_analyzer.py -PathType Leaf)) {
             throw 'Verified snapshot does not contain blocker_analyzer.py'
           }
@@ -67,7 +89,6 @@ jobs:
             throw 'Verified snapshot produced no feature diff against main'
           }
           git commit -m 'feat: add test execution blocker reports'
-          "feature_commit=$(git rev-parse HEAD)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build through the standard distribution script
         shell: pwsh
