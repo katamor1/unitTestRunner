@@ -52,9 +52,16 @@ jobs:
           import hashlib
           from pathlib import Path
 
-          parts = sorted(Path('.sdd').glob('feature.patch.gz.b64.*'))
-          if len(parts) != 31:
-              raise SystemExit(f'Expected 31 patch chunks, found {len(parts)}')
+          parts = []
+          for index in range(31):
+              split_parts = sorted(Path('.sdd').glob(f'feature.patch.gz.b64.{index:03d}.*'))
+              if split_parts:
+                  parts.extend(split_parts)
+                  continue
+              exact = Path('.sdd') / f'feature.patch.gz.b64.{index:03d}'
+              if not exact.is_file():
+                  raise SystemExit(f'Missing patch chunk {index:03d}')
+              parts.append(exact)
           encoded = b''.join(part.read_bytes() for part in parts)
           compressed = base64.b64decode(encoded, validate=True)
           patch = gzip.decompress(compressed)
@@ -64,7 +71,7 @@ jobs:
               raise SystemExit(f'patch SHA-256 mismatch: expected {expected}, got {actual}')
           out = Path(r'${{ runner.temp }}') / 'feature.patch'
           out.write_bytes(patch)
-          print(f'patch_bytes={len(patch)} sha256={actual} chunks={len(parts)}')
+          print(f'patch_bytes={len(patch)} sha256={actual} files={len(parts)}')
           '@ | python -
 
       - name: Create clean one-parent feature commit
