@@ -1,0 +1,20 @@
+diff --git a/tests/test_execution_run_history.py b/tests/test_execution_run_history.py
+index 103a364..3361c53 100644
+--- a/tests/test_execution_run_history.py
++++ b/tests/test_execution_run_history.py
+@@ -85,12 +85,13 @@ class ExecutionRunHistoryTests(unittest.TestCase):
+         with tempfile.TemporaryDirectory() as temp_dir:
+             workspace = Path(temp_dir)
+             paths = create_run_paths(workspace, run_id="run-blocked")
++            resolved_workspace = workspace.resolve()
+             self.assertEqual(
+-                workspace / "runs" / "run-blocked" / "test_execution_blockers.json",
++                resolved_workspace / "runs" / "run-blocked" / "test_execution_blockers.json",
+                 paths.blocker_report_json,
+             )
+             self.assertEqual(
+-                workspace / "runs" / "run-blocked" / "test_execution_blockers.md",
++                resolved_workspace / "runs" / "run-blocked" / "test_execution_blockers.md",
+                 paths.blocker_report_markdown,
+             )
+ 
