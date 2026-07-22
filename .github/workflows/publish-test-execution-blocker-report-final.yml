@@ -29,14 +29,21 @@ jobs:
           ref: staging/test-execution-blocker-report-final-20260721
           fetch-depth: 0
 
-      - name: Verify exact patch and main base
+      - name: Verify main base
         shell: bash
         run: |
           set -euo pipefail
           expected_base="$(tr -d '\r\n' < .formal/base-sha.txt)"
           git fetch origin main
           actual_base="$(git rev-parse origin/main)"
+          echo "expected_base=$expected_base"
+          echo "actual_base=$actual_base"
           test "$actual_base" = "$expected_base"
+
+      - name: Decode and verify exact feature patch
+        shell: bash
+        run: |
+          set -euo pipefail
           python - <<'PY'
           import base64
           import gzip
@@ -48,16 +55,27 @@ jobs:
           patch = gzip.decompress(compressed)
           expected = Path('.formal/patch-sha256.txt').read_text(encoding='ascii').strip()
           actual = hashlib.sha256(patch).hexdigest()
+          print(f'patch_bytes={len(patch)} expected_sha256={expected} actual_sha256={actual}')
           if actual != expected:
               raise SystemExit(f'patch SHA-256 mismatch: expected {expected}, got {actual}')
           Path('.formal/feature.patch').write_bytes(patch)
-          print(f'patch_bytes={len(patch)} sha256={actual}')
           PY
+
+      - name: Apply exact feature patch
+        shell: bash
+        run: |
+          set -euo pipefail
           git apply --check --binary .formal/feature.patch
           git apply --binary .formal/feature.patch
+
+      - name: Validate feature diff
+        shell: bash
+        run: |
+          set -euo pipefail
           rm -f .formal/feature.patch
           git add -A
           git diff --cached --check
+          git diff --cached --name-status origin/main
 
       - name: Create and push one clean formal commit
         shell: bash
