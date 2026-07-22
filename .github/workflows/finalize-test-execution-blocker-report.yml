@@ -4,14 +4,6 @@ on:
   push:
     branches:
       - stage/test-execution-blocker-report-merge
-  pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
 
 permissions:
   contents: write
@@ -43,43 +35,27 @@ jobs:
           cache: npm
           cache-dependency-path: vscode/extension/package-lock.json
 
-      - name: Prepare verified snapshot
+      - name: Recover verified implementation snapshot
         shell: pwsh
         run: |
-          git fetch origin main feat/test-execution-blocker-report-release
+          $snapshot = '7563d21679f353afca6e0f305f411304504bb2ab'
+          git fetch origin main
+          git fetch origin $snapshot
+          git cat-file -e "$snapshot^{commit}"
           git reset --hard origin/main
           git clean -fdx
-          git checkout origin/feat/test-execution-blocker-report-release -- .
+          git checkout $snapshot -- .
           Remove-Item -LiteralPath .sdd -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath .github\workflows\apply-test-execution-blocker-report.yml -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath .github\workflows\finalize-test-execution-blocker-report.yml -Force -ErrorAction SilentlyContinue
-          $diagnostic = Join-Path $env:RUNNER_TEMP 'snapshot-diagnostics.txt'
-          "HEAD=$(git rev-parse HEAD)" | Out-File $diagnostic -Encoding utf8
-          "release=$(git rev-parse origin/feat/test-execution-blocker-report-release)" | Out-File $diagnostic -Append -Encoding utf8
-          "blocker_analyzer=$(Test-Path -LiteralPath .\src\unit_test_runner\execution\blocker_analyzer.py -PathType Leaf)" | Out-File $diagnostic -Append -Encoding utf8
-          "artifact_kind=$([bool](Select-String -LiteralPath .\src\unit_test_runner\contracts\kinds.py -SimpleMatch 'TEST_EXECUTION_BLOCKER_REPORT' -ErrorAction SilentlyContinue))" | Out-File $diagnostic -Append -Encoding utf8
-          'status:' | Out-File $diagnostic -Append -Encoding utf8
-          git status --short | Out-File $diagnostic -Append -Encoding utf8
-          'diff-names:' | Out-File $diagnostic -Append -Encoding utf8
-          git diff --name-only | Out-File $diagnostic -Append -Encoding utf8
-
-      - name: Upload snapshot diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: blocker-snapshot-diagnostics
-          path: ${{ runner.temp }}/snapshot-diagnostics.txt
-          if-no-files-found: warn
-          retention-days: 7
-
-      - name: Create clean one-parent feature commit
-        shell: pwsh
-        run: |
           if (-not (Test-Path -LiteralPath .\src\unit_test_runner\execution\blocker_analyzer.py -PathType Leaf)) {
             throw 'Verified snapshot does not contain blocker_analyzer.py'
           }
           if (-not (Select-String -LiteralPath .\src\unit_test_runner\contracts\kinds.py -SimpleMatch 'TEST_EXECUTION_BLOCKER_REPORT')) {
             throw 'Verified snapshot does not register the blocker artifact kind'
+          }
+          if (-not (Select-String -LiteralPath .\vscode\extension\src\extension.ts -SimpleMatch 'test_execution_blockers')) {
+            throw 'Verified snapshot does not contain VS Code blocker integration'
           }
           git diff --check
           git config user.name OpenAI
@@ -116,7 +92,6 @@ jobs:
           retention-days: 14
 
       - name: Publish clean feature branch
-        if: success()
         shell: pwsh
         run: |
           git push origin HEAD:refs/heads/feat/test-execution-blocker-report-formal --force
