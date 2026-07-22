@@ -55,6 +55,7 @@ jobs:
           PY
           git apply --check --binary .formal/feature.patch
           git apply --binary .formal/feature.patch
+          rm -f .formal/feature.patch
           git add -A
           git diff --cached --check
 
