@@ -110,6 +110,7 @@ jobs:
               env_file.write(f"FEATURE_PATCH={patch_path}\n")
           print(f"verified patch bytes={len(patch)}")
           '@ | python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Create one clean feature commit
         shell: pwsh
@@ -124,29 +125,20 @@ jobs:
 
           path = Path("tests/test_execution_run_history.py")
           source = path.read_text(encoding="utf-8")
-          old = '''            self.assertEqual(
-              workspace / "runs" / "run-blocked" / "test_execution_blockers.json",
-              paths.blocker_report_json,
-            )
-            self.assertEqual(
-              workspace / "runs" / "run-blocked" / "test_execution_blockers.md",
-              paths.blocker_report_markdown,
-            )
-          '''
-          new = '''            resolved_workspace = workspace.resolve()
-            self.assertEqual(
-              resolved_workspace / "runs" / "run-blocked" / "test_execution_blockers.json",
-              paths.blocker_report_json,
-            )
-            self.assertEqual(
-              resolved_workspace / "runs" / "run-blocked" / "test_execution_blockers.md",
-              paths.blocker_report_markdown,
-            )
-          '''
-          if old not in source:
-              raise SystemExit("Windows run-path test block was not found")
-          path.write_text(source.replace(old, new), encoding="utf-8")
+          replacements = {
+              '                workspace / "runs" / "run-blocked" / "test_execution_blockers.json",':
+                  '                workspace.resolve() / "runs" / "run-blocked" / "test_execution_blockers.json",',
+              '                workspace / "runs" / "run-blocked" / "test_execution_blockers.md",':
+                  '                workspace.resolve() / "runs" / "run-blocked" / "test_execution_blockers.md",',
+          }
+          for old, new in replacements.items():
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"unexpected occurrence count for {old!r}: {count}")
+              source = source.replace(old, new)
+          path.write_text(source, encoding="utf-8")
           '@ | python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Remove-Item -LiteralPath .sdd -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath .github\workflows\apply-test-execution-blocker-report.yml -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath .github\workflows\finalize-test-execution-blocker-report.yml -Force -ErrorAction SilentlyContinue
