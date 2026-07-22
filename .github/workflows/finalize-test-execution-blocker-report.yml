@@ -150,7 +150,13 @@ jobs:
       - name: Build through the standard distribution script
         shell: pwsh
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_distribution.ps1
+          $log = Join-Path $env:RUNNER_TEMP 'standard-distribution-build.log'
+          & powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_distribution.ps1 *>&1 |
+            Tee-Object -FilePath $log
+          $buildExit = $LASTEXITCODE
+          if ($buildExit -ne 0) {
+            throw "Standard distribution build failed with exit code $buildExit"
+          }
           if (-not (Test-Path -LiteralPath .\dist\unit-test-runner.exe -PathType Leaf)) {
             throw 'Standard build did not produce dist\unit-test-runner.exe'
           }
@@ -161,6 +167,15 @@ jobs:
             git status --short
             throw 'Standard build modified tracked source files'
           }
+
+      - name: Upload standard build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-runner-standard-build-log
+          path: ${{ runner.temp }}/standard-distribution-build.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Upload verified standard distribution
         uses: actions/upload-artifact@v4
