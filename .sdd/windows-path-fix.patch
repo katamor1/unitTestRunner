@@ -18,3 +18,38 @@ index 103a364..3361c53 100644
                  paths.blocker_report_markdown,
              )
  
+diff --git a/scripts/build_distribution.ps1 b/scripts/build_distribution.ps1
+index 9481d96..da224b0 100644
+--- a/scripts/build_distribution.ps1
++++ b/scripts/build_distribution.ps1
+@@ -239,7 +239,9 @@ try {
+         "run-tests",
+         "--workspace", $smokeRoot,
+         "--run",
+-        "--executable", $exePath,
++        # Use the workspace-relative default executable path. The smoke is
++        # intentionally blocked before execution, and contract artifacts must
++        # not record the distribution executable as an external absolute path.
+         "--run-id", "release-blocked-smoke"
+     )
+     $blockerJson = Join-Path $smokeRoot "reports\test_execution_blockers.json"
+
+diff --git a/tests/test_distribution_build_script.py b/tests/test_distribution_build_script.py
+index 0c1dbdb..5575fa2 100644
+--- a/tests/test_distribution_build_script.py
++++ b/tests/test_distribution_build_script.py
+@@ -84,6 +84,14 @@ class DistributionBuildScriptTests(unittest.TestCase):
+             with self.subTest(fragment=fragment):
+                 self.assertIn(fragment, self.text)
+ 
++    def test_blocked_smoke_uses_workspace_relative_default_executable(self):
++        smoke_start = self.text.index('Invoke-NativeExpectedExit -FilePath $exePath -ExpectedExitCode 35')
++        smoke_end = self.text.index('$blockerJson =', smoke_start)
++        blocked_smoke = self.text[smoke_start:smoke_end]
++
++        self.assertNotIn('"--executable"', blocked_smoke)
++        self.assertIn('"--run-id", "release-blocked-smoke"', blocked_smoke)
++
+     def test_script_rejects_non_windows_hosts_and_stops_on_native_failures(self):
+         self.assertIn('$env:OS -ne "Windows_NT"', self.text)
+         self.assertIn('$ErrorActionPreference = "Stop"', self.text)
