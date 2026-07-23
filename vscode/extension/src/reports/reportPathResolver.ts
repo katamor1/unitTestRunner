@@ -21,6 +21,8 @@ export interface ReportPaths {
   harnessSkeletonReportMd?: string;
   buildProbeReportMd?: string;
   testExecutionReportMd?: string;
+  testExecutionBlockersJson?: string;
+  testExecutionBlockersMd?: string;
   evidencePackageMd?: string;
   changeImpactReportMd?: string;
   testCaseReconciliationReportMd?: string;
@@ -51,6 +53,8 @@ export function resolveReportPaths(workspace: string): ReportPaths {
     harnessSkeletonReportMd: dialect.join(reports, 'harness_skeleton_report.md'),
     buildProbeReportMd: dialect.join(reports, 'build_probe_report.md'),
     testExecutionReportMd: dialect.join(reports, 'test_execution_report.md'),
+    testExecutionBlockersJson: dialect.join(reports, 'test_execution_blockers.json'),
+    testExecutionBlockersMd: dialect.join(reports, 'test_execution_blockers.md'),
     evidencePackageMd: dialect.join(reports, 'evidence_package.md'),
     changeImpactReportMd: dialect.join(reports, 'change_impact_report.md'),
     testCaseReconciliationReportMd: dialect.join(reports, 'test_case_reconciliation_report.md'),

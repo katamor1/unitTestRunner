@@ -11,6 +11,12 @@ from typing import Any
 from unit_test_runner.contracts import ArtifactKind, ContractMode, RunOutcome, load_artifact
 from unit_test_runner.harness.c90_writer import sha256_file
 
+from .blocker_analyzer import BlockerAnalysisInput, analyze_test_execution_blockers
+from .blocker_models import BlockerPublicationDiagnostic, BlockerPublicationResult
+from .blocker_report_writer import (
+    clear_latest_test_execution_blockers,
+    publish_test_execution_blocker_report,
+)
 from .execution_models import (
     EvidenceManifest,
     ExecutionCommandResult,
@@ -32,7 +38,7 @@ from .executable_resolver import resolve_executable
 from .execution_runner import build_execution_command, run_test_executable_cases
 from .precondition_validator import validate_execution_preconditions
 from .report_loader import load_execution_run
-from .run_paths import create_run_paths
+from .run_paths import RunPaths, create_run_paths
 from .test_result_writer import (
     build_artifact_payload,
     current_producer_commit,
@@ -178,17 +184,42 @@ def execute_test_run(request: TestRunRequest) -> TestExecutionReport:
     execution_hash = sha256_file(paths.execution_report)
     if execution_hash is None:
         raise ValueError("Execution report was not published.")
+    blocker_publication = _publish_execution_blockers(
+        workspace=workspace,
+        paths=paths,
+        report=report,
+        execution_hash=execution_hash,
+        test_spec=test_case_design,
+        harness_report=harness_report,
+        build_probe_report=build_probe,
+        build_workspace_report=build_workspace,
+        subject=subject,
+        producer_commit=producer_commit,
+    )
+    report.blocker_publication = blocker_publication
+    pointer_data: dict[str, Any] = {
+        "run_id": paths.run_id,
+        "execution_report": {
+            "artifact_kind": ArtifactKind.TEST_EXECUTION_REPORT.value,
+            "path": paths.execution_report.relative_to(workspace).as_posix(),
+            "sha256": execution_hash,
+        },
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if blocker_publication.complete_history_view:
+        assert blocker_publication.run_json is not None
+        assert blocker_publication.run_markdown is not None
+        blocker_hash = sha256_file(blocker_publication.run_json)
+        if blocker_hash is not None:
+            pointer_data["blocker_report"] = {
+                "artifact_kind": ArtifactKind.TEST_EXECUTION_BLOCKER_REPORT.value,
+                "path": blocker_publication.run_json.relative_to(workspace).as_posix(),
+                "markdown_path": blocker_publication.run_markdown.relative_to(workspace).as_posix(),
+                "sha256": blocker_hash,
+            }
     pointer = build_artifact_payload(
         ArtifactKind.LATEST_RUN_POINTER,
-        {
-            "run_id": paths.run_id,
-            "execution_report": {
-                "artifact_kind": ArtifactKind.TEST_EXECUTION_REPORT.value,
-                "path": paths.execution_report.relative_to(workspace).as_posix(),
-                "sha256": execution_hash,
-            },
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        },
+        pointer_data,
         subject=subject,
         producer_commit=producer_commit,
     )
@@ -199,6 +230,57 @@ def execute_test_run(request: TestRunRequest) -> TestExecutionReport:
         atomic=True,
     )
     return report
+
+
+def _publish_execution_blockers(
+    *,
+    workspace: Path,
+    paths: RunPaths,
+    report: TestExecutionReport,
+    execution_hash: str,
+    test_spec: dict[str, Any],
+    harness_report: dict[str, Any],
+    build_probe_report: dict[str, Any],
+    build_workspace_report: dict[str, Any],
+    subject: dict[str, str],
+    producer_commit: str,
+) -> BlockerPublicationResult:
+    if report.status != RunOutcome.BLOCKED.value:
+        return clear_latest_test_execution_blockers(workspace)
+    try:
+        blocker_report = analyze_test_execution_blockers(
+            BlockerAnalysisInput(
+                workspace=workspace,
+                run_id=paths.run_id,
+                execution_report_path=paths.execution_report.relative_to(workspace),
+                execution_report_sha256=execution_hash,
+                report=report,
+                test_spec=test_spec,
+                harness_report=harness_report,
+                build_probe_report=build_probe_report,
+                build_workspace_report=build_workspace_report,
+            )
+        )
+        return publish_test_execution_blocker_report(
+            workspace,
+            paths,
+            blocker_report,
+            subject=subject,
+            producer_commit=producer_commit,
+        )
+    except Exception as error:
+        message = str(error)[:4096]
+        cleanup = clear_latest_test_execution_blockers(workspace)
+        return BlockerPublicationResult(
+            diagnostics=(
+                BlockerPublicationDiagnostic(
+                    code="blocker_report_write_failed",
+                    severity="warning",
+                    message=message,
+                ),
+                *cleanup.diagnostics,
+            )
+        )
 
 
 def validate_test_run_preflight(
@@ -382,6 +464,7 @@ def prepare_test_execution_evidence(
             run_id=report.run_paths.run_id,
         )
         loaded_report.run_paths = report.run_paths
+        loaded_report.blocker_publication = report.blocker_publication
         manifest.evidence_paths = evidence_paths
         return loaded_report, manifest
     reports = workspace / "reports"

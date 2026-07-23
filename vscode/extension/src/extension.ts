@@ -28,6 +28,7 @@ import {
   UnitTestRunnerCommandHandlers,
 } from './commands/commandRegistry';
 import { createQuickCommandHandlers } from './commands/quickCommands';
+import { parseCliEnvelopeValue } from './cli/cliEnvelope';
 import { CliResult, runCliInvocation } from './cli/cliRunner';
 import { formatCliFailureMessage, parseCliResult } from './cli/cliResultParser';
 import { DEFAULT_CLI_PATH, resolveCliPath } from './config/bundledCli';
@@ -52,7 +53,17 @@ import {
   sameTestInputWorkspace,
 } from './testInputEditor/workflowIntegration';
 import { readSelectedSuiteEntryIds, SuitePanelProvider } from './suite/suitePanel';
-import { WorkflowPanelProvider } from './workflow/workflowPanel';
+import { parseHandledBlockedRun } from './testExecutionBlockers/contracts';
+import { verifyBlockedRunArtifacts, VerifiedBlockedRun } from './testExecutionBlockers/verification';
+import {
+  blockerPrimaryActionTarget,
+  clearWorkflowRunBlocked,
+  isActualNonBlockedTestRun,
+  markWorkflowBlockerAutoOpened,
+  markWorkflowRunBlocked,
+  restoreWorkflowBlockerState,
+} from './testExecutionBlockers/workflowIntegration';
+import { resolveWorkflowReports, WorkflowPanelProvider } from './workflow/workflowPanel';
 import {
   completeAwaitingSaveIfMatches,
   createInitialWorkflowState,
@@ -138,6 +149,7 @@ export function activate(context: vscode.ExtensionContext): void {
     'unitTestRunner.buildProbeDryRun': async () => runWorkspaceCommand(context, output, 'buildProbeDryRun', workflowPanel),
     'unitTestRunner.runBuildProbe': async () => runWorkspaceCommand(context, output, 'buildProbeRun', workflowPanel),
     'unitTestRunner.runTests': async () => runWorkspaceCommand(context, output, 'runTests', workflowPanel),
+    'unitTestRunner.resolveExecutionBlocker': async () => resolveExecutionBlocker(context),
     'unitTestRunner.prepareEvidence': async () => runWorkspaceCommand(context, output, 'evidence', workflowPanel),
     'unitTestRunner.registerCurrentFunctionInSuite': async () => registerActiveFunctionInSuite(context, output, workflowPanel, suitePanel, suiteDashboard),
     'unitTestRunner.openSuite': async () => suiteDashboard.open(),
@@ -158,7 +170,27 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     ...registerUnitTestRunnerCommands(context, { registry: commandRegistry, handlers }),
   );
-  void refreshTestInputSummary(context, workflowPanel, testInputClient);
+  void restoreExecutionBlockerState(context, workflowPanel).finally(() => {
+    void refreshTestInputSummary(context, workflowPanel, testInputClient);
+  });
+}
+
+async function restoreExecutionBlockerState(
+  context: vscode.ExtensionContext,
+  workflowPanel: WorkflowPanelProvider,
+): Promise<void> {
+  const state = readWorkflowState(context);
+  const workspace = state.outputWorkspace
+    ?? state.reports?.workspace
+    ?? context.globalState.get<string>(LAST_WORKSPACE_KEY);
+  if (!workspace) {
+    return;
+  }
+  const next = restoreWorkflowBlockerState(state, workspace);
+  if (next !== state) {
+    await context.workspaceState.update(WORKFLOW_STATE_KEY, next);
+    workflowPanel.refresh();
+  }
 }
 
 export function deactivate(): void {
@@ -177,13 +209,14 @@ async function quickCheckActiveFunction(
   const outputWorkspace = buildQuickOutputWorkspace(settings, targetBase);
   const target = { ...targetBase, outputWorkspace };
   const invocation = buildQuickCheckInvocation(settings, target);
-  const reports = await executeInvocation(
+  const execution = await executeInvocation(
     context,
     output,
     invocation,
     outputWorkspace,
     workflowPanel,
   );
+  const reports = execution.reports;
   const kind: WorkflowCommandKind = profile === 'design'
     ? 'analyze'
     : profile === 'harness'
@@ -209,13 +242,14 @@ async function runFullGateForCurrentFunction(
   showValidation(settings);
   const target = await activeFunctionTarget(context);
   const invocation = buildFullGateAnalyzeInvocation(settings, target);
-  const reports = await executeInvocation(
+  const execution = await executeInvocation(
     context,
     output,
     invocation,
     target.outputWorkspace,
     workflowPanel,
   );
+  const reports = execution.reports;
   await recordWorkflowSuccess(context, workflowPanel, {
     kind: 'analyze',
     outputWorkspace: target.outputWorkspace,
@@ -315,7 +349,8 @@ async function analyzeActiveFunction(context: vscode.ExtensionContext, output: v
     outputWorkspace,
   };
   const invocation = buildAnalyzeFunctionInvocation(settings, target);
-  const reports = await executeInvocation(context, output, invocation, outputWorkspace, workflowPanel);
+  const execution = await executeInvocation(context, output, invocation, outputWorkspace, workflowPanel);
+  const reports = execution.reports;
   await recordWorkflowSuccess(context, workflowPanel, {
     kind: 'analyze',
     outputWorkspace,
@@ -346,7 +381,8 @@ async function reanalyzeActiveFunction(context: vscode.ExtensionContext, output:
     outputWorkspace,
   };
   const invocation = buildReanalyzeFunctionInvocation(settings, target);
-  const reports = await executeInvocation(context, output, invocation, outputWorkspace, workflowPanel);
+  const execution = await executeInvocation(context, output, invocation, outputWorkspace, workflowPanel);
+  const reports = execution.reports;
   await recordWorkflowSuccess(context, workflowPanel, {
     kind: 'reanalyze',
     outputWorkspace,
@@ -695,12 +731,75 @@ async function runWorkspaceCommand(context: vscode.ExtensionContext, output: vsc
   } else {
     invocation = buildPrepareEvidenceInvocation(settings, workspace);
   }
-  const parsedReports = await executeInvocation(context, output, invocation, workspace, workflowPanel);
+  const execution = await executeInvocation(context, output, invocation, workspace, workflowPanel);
+  if (execution.blocked) {
+    await recordWorkflowBlocked(context, workflowPanel, execution.blocked, execution.reports);
+    return;
+  }
   await recordWorkflowSuccess(context, workflowPanel, {
     kind: workflowCommandKind(kind),
     outputWorkspace: workspace,
-    reports: parsedReports,
+    reports: execution.reports,
   });
+}
+
+async function recordWorkflowBlocked(
+  context: vscode.ExtensionContext,
+  workflowPanel: WorkflowPanelProvider,
+  blocker: VerifiedBlockedRun,
+  reports: ReportPaths,
+): Promise<void> {
+  const current = readWorkflowState(context);
+  let state = markWorkflowRunBlocked({
+    ...current,
+    reports: { ...current.reports, ...reports },
+  }, blocker);
+  await context.workspaceState.update(WORKFLOW_STATE_KEY, state);
+  workflowPanel.refresh();
+  const count = blocker.count > 0 ? `${blocker.count}件の項目で` : '';
+  void vscode.window.showWarningMessage(
+    `UnitTestRunner: テスト実行は${count}ブロックされました。最初に行う操作: ${blocker.primaryActionLabel}`,
+  );
+  if (blocker.reportMarkdown && state.testExecutionBlockers?.autoOpenedRunId !== blocker.runId) {
+    try {
+      await openReport(blocker.reportMarkdown);
+      state = markWorkflowBlockerAutoOpened(state, blocker.runId);
+      await context.workspaceState.update(WORKFLOW_STATE_KEY, state);
+      workflowPanel.refresh();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      void vscode.window.showWarningMessage(
+        `UnitTestRunner: 実行ブロック項目レポートを開けませんでした。${message}`,
+      );
+    }
+  }
+}
+
+async function resolveExecutionBlocker(context: vscode.ExtensionContext): Promise<void> {
+  const state = readWorkflowState(context);
+  const blocker = state.testExecutionBlockers;
+  if (!blocker) {
+    void vscode.window.showWarningMessage('UnitTestRunner: 現在のテスト実行ブロック情報はありません。');
+    return;
+  }
+  const target = blockerPrimaryActionTarget(blocker.primaryAction);
+  if (target.kind === 'command') {
+    await vscode.commands.executeCommand(target.commandId);
+    return;
+  }
+  if (target.kind === 'report') {
+    const reportPath = resolveWorkflowReports(state)?.[target.reportKey];
+    if (typeof reportPath !== 'string' || !reportPath) {
+      throw new Error(`推奨操作のレポートが見つかりません: ${String(target.reportKey)}`);
+    }
+    await openReport(reportPath);
+    return;
+  }
+  const sourcePath = blocker.primarySourcePath ?? blocker.reportMarkdown ?? blocker.reportJson;
+  if (!sourcePath) {
+    throw new Error('開ける実行ブロック元ファイルがありません。');
+  }
+  await openReport(sourcePath);
 }
 
 interface ExecutionConfirmation {
@@ -731,7 +830,12 @@ function executionConfirmation(invocation: CliInvocation): ExecutionConfirmation
   };
 }
 
-async function executeInvocation(context: vscode.ExtensionContext, output: vscode.OutputChannel, invocation: CliInvocation, outputWorkspace: string, workflowPanel: WorkflowPanelProvider): Promise<ReportPaths> {
+interface InvocationExecutionResult {
+  reports: ReportPaths;
+  blocked?: VerifiedBlockedRun;
+}
+
+async function executeInvocation(context: vscode.ExtensionContext, output: vscode.OutputChannel, invocation: CliInvocation, outputWorkspace: string, workflowPanel: WorkflowPanelProvider): Promise<InvocationExecutionResult> {
   if (invocation.requiresConfirmation) {
     const confirmation = executionConfirmation(invocation);
     const selected = await vscode.window.showWarningMessage(
@@ -761,13 +865,48 @@ async function executeInvocation(context: vscode.ExtensionContext, output: vscod
     throw new Error('UnitTestRunner CLIの処理がタイムアウトしました。');
   }
   if (result.exitCode !== 0) {
+    let parsedEnvelope;
+    try {
+      parsedEnvelope = parseCliEnvelopeValue(JSON.parse(result.stdout));
+      const blockedDetails = parseHandledBlockedRun(parsedEnvelope, result.exitCode, invocation.args);
+      if (blockedDetails) {
+        const parsed = parseCliResult(result.stdout, result.stderr, outputWorkspace);
+        const blocked = verifyBlockedRunArtifacts(
+          outputWorkspace,
+          blockedDetails,
+          parsedEnvelope.producedArtifacts,
+        );
+        await context.globalState.update(LAST_WORKSPACE_KEY, parsed.reports.workspace);
+        return { reports: parsed.reports, blocked };
+      }
+    } catch {
+      parsedEnvelope = undefined;
+      // Malformed or unverified exit-35 output follows the normal CLI error path.
+    }
+    if (parsedEnvelope && isActualNonBlockedTestRun(parsedEnvelope, invocation.args)) {
+      await clearWorkflowBlockerAfterActualRun(context, workflowPanel, outputWorkspace);
+    }
     const message = formatCliFailureMessage(result.stdout, result.stderr, result.exitCode);
     await recordWorkflowError(context, workflowPanel, message);
     throw new Error(message);
   }
   const parsed = parseCliResult(result.stdout, result.stderr, outputWorkspace);
   await context.globalState.update(LAST_WORKSPACE_KEY, parsed.reports.workspace);
-  return parsed.reports;
+  return { reports: parsed.reports };
+}
+
+async function clearWorkflowBlockerAfterActualRun(
+  context: vscode.ExtensionContext,
+  workflowPanel: WorkflowPanelProvider,
+  workspace: string,
+): Promise<void> {
+  const current = readWorkflowState(context);
+  const cleared = clearWorkflowRunBlocked(current, workspace);
+  if (cleared === current) {
+    return;
+  }
+  await context.workspaceState.update(WORKFLOW_STATE_KEY, cleared);
+  workflowPanel.refresh();
 }
 
 async function executeSuiteInvocation(context: vscode.ExtensionContext, output: vscode.OutputChannel, invocation: CliInvocation, suitePanel: SuitePanelProvider, suiteDashboard: SuiteDashboardPanel): Promise<boolean> {

@@ -49,6 +49,49 @@ class DistributionBuildScriptTests(unittest.TestCase):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, self.text)
 
+    def test_packaged_vsix_keeps_bundled_cli_as_the_default_runtime(self):
+        for fragment in (
+            "$cliPathDefault = $manifest.contributes.configuration.properties.'unitTestRunner.cliPath'.default",
+            '$cliPathDefault -ne "unit-test-runner"',
+            'VSIX package.json no longer selects the bundled CLI by default',
+        ):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, self.text)
+
+    def test_vsix_verification_requires_the_exact_cli_built_in_dist(self):
+        for fragment in (
+            '[string]$ExpectedCliPath',
+            'Get-FileHash -LiteralPath $ExpectedCliPath -Algorithm SHA256',
+            '[System.Security.Cryptography.SHA256]::Create()',
+            'Bundled CLI hash does not match the freshly built distribution CLI',
+            'Test-VsixContainsBundledCli -VsixPath $vsixPath -ExpectedCliPath $exePath',
+        ):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, self.text)
+
+    def test_packaged_smoke_verifies_blocked_exit_and_reports(self):
+        for fragment in (
+            '"--phase", "execution"',
+            '"run-tests"',
+            '-ExpectedExitCode 35',
+            'reports\\test_execution_blockers.json',
+            'reports\\test_execution_blockers.md',
+            'extension/dist/testExecutionBlockers/contracts.js',
+            'extension/dist/testExecutionBlockers/verification.js',
+            'extension/dist/testExecutionBlockers/workflowIntegration.js',
+            'unitTestRunner.resolveExecutionBlocker',
+        ):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, self.text)
+
+    def test_blocked_smoke_uses_workspace_relative_default_executable(self):
+        smoke_start = self.text.index('Invoke-NativeExpectedExit -FilePath $exePath -ExpectedExitCode 35')
+        smoke_end = self.text.index('$blockerJson =', smoke_start)
+        blocked_smoke = self.text[smoke_start:smoke_end]
+
+        self.assertNotIn('"--executable"', blocked_smoke)
+        self.assertIn('"--run-id", "release-blocked-smoke"', blocked_smoke)
+
     def test_script_rejects_non_windows_hosts_and_stops_on_native_failures(self):
         self.assertIn('$env:OS -ne "Windows_NT"', self.text)
         self.assertIn('$ErrorActionPreference = "Stop"', self.text)

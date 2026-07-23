@@ -11,6 +11,8 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 
 処理は途中で失敗した時点で停止します。正常終了時は、生成したexeとVSIXの絶対パスをJSONで表示します。
 
+このスクリプトをWindows配布物の正規ビルド経路とします。生成されたVSIXには同じ実行で作成した `unit-test-runner.exe` が同梱されるため、利用者がPython wheelを別途インストールしたり、`unitTestRunner.cliPath` を手動設定したりする必要はありません。外部CLIを明示的に使う場合だけ `unitTestRunner.cliPath` を変更します。
+
 ## 一括で行う処理
 
 1. `.venv-release` を作り直す
@@ -19,10 +21,12 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 4. Pythonテストをモジュール単位で実行する
 5. `unit-test-runner.exe` を生成する
 6. 生成exeで `--version`、`--help`、`analyze-function --finalize-dossier`、`prepare-review` を実行する
-7. exeを `vscode/extension/bin/win32-x64/` へコピーする
-8. `npm ci` とVS Code拡張テストを実行する
-9. VSIXを生成する
-10. VSIX内に同梱exeが存在し、空でないことを確認する
+7. 生成exeでblocked実行スモークを行い、終了コード35と `test_execution_blockers.json/.md` の生成を確認する
+8. exeを `vscode/extension/bin/win32-x64/` へコピーする
+9. `npm ci` とVS Code拡張テストを実行する
+10. VSIXを生成する
+11. VSIX内の同梱exeが今回生成したexeと同一ハッシュであることを確認する
+12. VSIXにblocked導線のJavaScriptとコマンド登録が含まれ、`unitTestRunner.cliPath` の既定値が同梱CLIを選ぶ設定のままであることを確認する
 
 ## Schema同梱
 

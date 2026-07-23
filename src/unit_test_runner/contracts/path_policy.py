@@ -44,6 +44,8 @@ _DEFAULT_SCALAR_FIELDS = frozenset(
         "header_file",
         "stub_source_path",
         "stub_header_path",
+        "markdown_path",
+        "source_artifact",
     }
 )
 
@@ -63,6 +65,8 @@ _DEFAULT_NULLABLE_SCALAR_FIELDS = frozenset(
         "header_file",
         "stub_source_path",
         "stub_header_path",
+        "markdown_path",
+        "source_artifact",
     }
 )
 

@@ -12,6 +12,8 @@ class RunPaths:
     run_id: str
     root: Path
     execution_report: Path
+    blocker_report_json: Path
+    blocker_report_markdown: Path
     result_json: Path
     result_csv: Path
     stdout_log: Path
@@ -55,6 +57,8 @@ def validate_run_paths_available(workspace: Path, run_id: str) -> RunPaths:
         run_id=run_id,
         root=root,
         execution_report=root / "test_execution_report.json",
+        blocker_report_json=root / "test_execution_blockers.json",
+        blocker_report_markdown=root / "test_execution_blockers.md",
         result_json=root / "test_result.json",
         result_csv=root / "test_result.csv",
         stdout_log=logs / "stdout.log",

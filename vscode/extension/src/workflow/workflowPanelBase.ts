@@ -74,9 +74,25 @@ export function resolveWorkflowActionPresentation(
       danger = true;
     }
   }
-  const primary = status === 'current' && action.primary === true;
+  const blocker = state?.testExecutionBlockers;
+  if (action.id === 'openTestExecutionBlockers' && blocker) {
+    label = `実行ブロック項目を開く（${blocker.count}件）`;
+    danger = true;
+  }
+  if (action.id === 'resolveExecutionBlocker' && blocker) {
+    label = blocker.primaryActionLabel;
+    danger = true;
+  }
+  let primary = status === 'current' && action.primary === true;
+  if (blocker && action.id === 'resolveExecutionBlocker') {
+    primary = status === 'current' || status === undefined;
+  } else if (blocker && action.id === 'runTests') {
+    primary = false;
+  }
   const hidden = (status === 'done' && action.kind === 'confirmStep')
-    || (action.id === 'openTestInputEditor' && !state?.testInputSummary);
+    || (action.id === 'openTestInputEditor' && !state?.testInputSummary)
+    || (action.id === 'openTestExecutionBlockers' && !blocker?.reportMarkdown)
+    || (action.id === 'resolveExecutionBlocker' && !blocker);
   const classes = [primary ? 'primary' : '', danger ? 'danger' : '']
     .filter(Boolean)
     .join(' ');
@@ -121,6 +137,8 @@ export const SIMPLE_WORKFLOW_ACTIONS: WorkflowAction[] = [
 
 export const SIMPLE_SECONDARY_ACTIONS: WorkflowAction[] = [
   { id: 'openQuickSummary', kind: 'command', label: 'クイックチェックの概要を開く', commandId: 'unitTestRunner.openQuickSummary' },
+  { id: 'resolveExecutionBlocker', kind: 'command', label: '実行ブロックを解消', commandId: 'unitTestRunner.resolveExecutionBlocker', primary: true },
+  { id: 'openTestExecutionBlockers', kind: 'openReport', label: '実行ブロック項目を開く', reportKey: 'testExecutionBlockersMd' },
   { id: 'openTestInputEditor', kind: 'command', label: '未確定項目を入力', commandId: 'unitTestRunner.openTestInputEditor' },
   { id: 'openBuildProbeReport', kind: 'openReport', label: 'ビルド結果を開く', reportKey: 'buildProbeReportMd' },
   { id: 'openTestExecutionReport', kind: 'openReport', label: 'テスト結果を開く', reportKey: 'testExecutionReportMd' },
@@ -245,6 +263,7 @@ export function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState
   const workspace = state.outputWorkspace || state.reports?.workspace || '出力ワークスペースが選択されていません';
   const awaiting = state.awaitingSave ? `<div class="notice">保存を待っています: ${escapeHtml(state.awaitingSave.filePath)}</div>` : '';
   const error = state.lastError ? `<div class="error">前回のエラー: ${escapeHtml(state.lastError)}</div>` : '';
+  const blockerNotice = renderExecutionBlockerNotice(state);
   const running = runningLabel ? `<div class="busy" role="status">「${escapeHtml(runningLabel)}」を実行しています。<br><span>大きなプロジェクトでは時間がかかる場合があります。完了するまでほかの操作はできません。</span></div>` : '';
   const simplePanel = renderSimpleWorkflowPanel(functionName, workspace, steps, state);
   const fullPanel = renderFullWorkflowPanel(functionName, workspace, steps, optionalActions, state);
@@ -317,6 +336,7 @@ export function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState
   </div>
   ${awaiting}
   ${error}
+  ${blockerNotice}
   ${running}
   <section id="simplePanel" class="panel-view simple-panel">${simplePanel}</section>
   <section id="fullPanel" class="panel-view full-panel hidden">${fullPanel}</section>
@@ -385,6 +405,18 @@ export function renderWorkflowHtml(webview: vscode.Webview, state: WorkflowState
 </html>`;
 }
 
+function renderExecutionBlockerNotice(state: WorkflowState): string {
+  const blocker = state.testExecutionBlockers;
+  if (!blocker) {
+    return '';
+  }
+  const countText = blocker.count > 0 ? `${blocker.count}件の項目で` : '';
+  const diagnostics = blocker.publicationDiagnostics.length > 0
+    ? `<ul>${blocker.publicationDiagnostics.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+    : '';
+  return `<div class="notice blocker-notice" role="status"><strong>テスト実行は${countText}ブロックされました。</strong><br>最初に行う操作: ${escapeHtml(blocker.primaryActionLabel)}${diagnostics}</div>`;
+}
+
 function renderSimpleWorkflowPanel(functionName: string, workspace: string, steps: WorkflowStepViews, state: WorkflowState): string {
   const flow = simpleFlowSteps(steps);
   const doneCount = flow.filter((step) => step.status === 'done').length;
@@ -404,7 +436,7 @@ function renderSimpleWorkflowPanel(functionName: string, workspace: string, step
 </div>
 <div class="simple-flow">
   <h2>4ステップで実行</h2>
-  ${flow.map(renderSimpleFlowStep).join('')}
+  ${flow.map((step) => renderSimpleFlowStep(step, state)).join('')}
 </div>
 <div class="simple-card">
   <h2>結果と補助操作</h2>
@@ -452,12 +484,12 @@ function isStepDoneOrCurrentPast(steps: WorkflowStepViews, id: WorkflowStepId): 
   return step?.status === 'done' || step?.status === 'current';
 }
 
-function renderSimpleFlowStep(step: SimpleFlowStepView): string {
+function renderSimpleFlowStep(step: SimpleFlowStepView, state: WorkflowState): string {
   return `<section class="simple-flow-step ${step.status}">
   <span class="status">${workflowStatusLabel(step.status)}</span>
   <h3>${escapeHtml(step.title)}</h3>
   <p class="simple-meta">${escapeHtml(step.description)}</p>
-  <div class="actions">${renderAction(step.action, step.status)}</div>
+  <div class="actions">${renderAction(step.action, step.status, state)}</div>
 </section>`;
 }
 
@@ -540,6 +572,7 @@ function commandLabel(commandId?: string): string {
     'unitTestRunner.buildProbeDryRun': 'ビルドの事前確認を実行',
     'unitTestRunner.runBuildProbe': 'ビルドを実行',
     'unitTestRunner.runTests': 'テストを実行',
+    'unitTestRunner.resolveExecutionBlocker': '実行ブロックを解消',
     'unitTestRunner.prepareEvidence': '検証資料を作成',
   };
   return commandId ? labels[commandId] ?? commandId : 'コマンドを実行';

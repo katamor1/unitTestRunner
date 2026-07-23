@@ -36,6 +36,7 @@
     "onCommand:unitTestRunner.buildProbeDryRun",
     "onCommand:unitTestRunner.runBuildProbe",
     "onCommand:unitTestRunner.runTests",
+    "onCommand:unitTestRunner.resolveExecutionBlocker",
     "onCommand:unitTestRunner.prepareEvidence",
     "onCommand:unitTestRunner.registerCurrentFunctionInSuite",
     "onCommand:unitTestRunner.openSuite",
@@ -133,6 +134,10 @@
       {
         "command": "unitTestRunner.runTests",
         "title": "UnitTestRunner: テストを実行"
+      },
+      {
+        "command": "unitTestRunner.resolveExecutionBlocker",
+        "title": "UnitTestRunner: 実行ブロックを解消"
       },
       {
         "command": "unitTestRunner.prepareEvidence",

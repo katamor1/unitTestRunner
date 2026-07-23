@@ -95,11 +95,34 @@ def build_evidence_manifest_from_run(
             "実行元ラン固定レコード",
         ),
     ]
+    for blocker_path, kind, description in (
+        (
+            loaded_run.report_path.with_name("test_execution_blockers.json"),
+            "test_execution_blocker_report",
+            "テスト実行ブロッカーJSON",
+        ),
+        (
+            loaded_run.report_path.with_name("test_execution_blockers.md"),
+            "test_execution_blocker_report_markdown",
+            "テスト実行ブロッカーMarkdown",
+        ),
+    ):
+        if blocker_path.is_file():
+            run_files.append(
+                _existing_file(workspace, blocker_path, kind, description)
+            )
     test_reports = [
         item
         for item in run_files
         if item.file_kind
-        in {"test_execution_report", "test_result", "test_result_csv", "evidence_source_run"}
+        in {
+            "test_execution_report",
+            "test_result",
+            "test_result_csv",
+            "evidence_source_run",
+            "test_execution_blocker_report",
+            "test_execution_blocker_report_markdown",
+        }
     ]
     logs = [
         item

@@ -81,6 +81,51 @@ class ExecutionRunHistoryTests(unittest.TestCase):
                     entries[relative] = ("other",)
         return entries
 
+    def test_run_paths_reserve_blocker_report_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            paths = create_run_paths(workspace, run_id="run-blocked")
+            resolved_workspace = workspace.resolve()
+            self.assertEqual(
+                resolved_workspace / "runs" / "run-blocked" / "test_execution_blockers.json",
+                paths.blocker_report_json,
+            )
+            self.assertEqual(
+                resolved_workspace / "runs" / "run-blocked" / "test_execution_blockers.md",
+                paths.blocker_report_markdown,
+            )
+
+    def test_latest_run_pointer_accepts_matching_optional_blocker_reference(self):
+        from unit_test_runner.contracts import ArtifactKind, validate_payload
+        from unit_test_runner.execution.test_result_writer import build_artifact_payload
+
+        payload = build_artifact_payload(
+            ArtifactKind.LATEST_RUN_POINTER,
+            {
+                "run_id": "run-blocked",
+                "execution_report": {
+                    "artifact_kind": "test_execution_report",
+                    "path": "runs/run-blocked/test_execution_report.json",
+                    "sha256": "a" * 64,
+                },
+                "blocker_report": {
+                    "artifact_kind": "test_execution_blocker_report",
+                    "path": "runs/run-blocked/test_execution_blockers.json",
+                    "markdown_path": "runs/run-blocked/test_execution_blockers.md",
+                    "sha256": "b" * 64,
+                },
+                "updated_at": "2026-07-20T00:00:00+00:00",
+            },
+            subject={
+                "function_id": "fn_sample",
+                "source_path": "src/sample.c",
+                "source_sha256": "c" * 64,
+            },
+            producer_commit="test-commit",
+        )
+
+        self.assertEqual((), validate_payload(ArtifactKind.LATEST_RUN_POINTER, payload))
+
     def test_create_run_paths_rejects_an_existing_run_directory(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)

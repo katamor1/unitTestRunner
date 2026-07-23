@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
+    from .blocker_models import BlockerPublicationResult
     from .evidence_paths import EvidencePaths
     from .run_paths import RunPaths
 
@@ -326,6 +327,11 @@ class TestExecutionReport:
     policy: TestExecutionPolicy
     schema_version: str = "0.1"
     run_paths: RunPaths | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    blocker_publication: BlockerPublicationResult | None = field(
         default=None,
         repr=False,
         compare=False,

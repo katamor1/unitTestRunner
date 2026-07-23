@@ -1609,6 +1609,79 @@ def _expected_artifact_reference_violations(
     ]
 
 
+def _test_execution_blocker_report_semantic_violations(
+    payload: Mapping[str, Any],
+) -> list[ContractViolation]:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    blockers = data.get("blockers")
+    if not isinstance(blockers, list):
+        return []
+    violations: list[ContractViolation] = []
+    if data.get("blocker_count") != len(blockers):
+        violations.append(
+            ContractViolation(
+                "inconsistent_count",
+                "$.data.blocker_count",
+                "blocker_count must equal the number of blockers.",
+            )
+        )
+    expected_ids = [f"BLK-{index:03d}" for index in range(1, len(blockers) + 1)]
+    actual_ids = [
+        item.get("blocker_id")
+        for item in blockers
+        if isinstance(item, Mapping)
+    ]
+    if actual_ids != expected_ids:
+        violations.append(
+            ContractViolation(
+                "invalid_order",
+                "$.data.blockers",
+                "Blocker IDs must be sequential in report order.",
+            )
+        )
+    primary = data.get("primary_action")
+    if isinstance(primary, Mapping):
+        primary_code = primary.get("code")
+        first_code = None
+        if blockers and isinstance(blockers[0], Mapping):
+            action = blockers[0].get("recommended_action")
+            if isinstance(action, Mapping):
+                first_code = action.get("code")
+        if primary_code != first_code:
+            violations.append(
+                ContractViolation(
+                    "invalid_primary_action",
+                    "$.data.primary_action.code",
+                    "primary_action must match the first blocker action after stable sorting.",
+                )
+            )
+        affected = sum(
+            1
+            for item in blockers
+            if isinstance(item, Mapping)
+            and isinstance(item.get("recommended_action"), Mapping)
+            and item["recommended_action"].get("code") == primary_code
+        )
+        if primary.get("affected_count") != affected:
+            violations.append(
+                ContractViolation(
+                    "inconsistent_count",
+                    "$.data.primary_action.affected_count",
+                    "affected_count must equal blockers sharing the primary action.",
+                )
+            )
+    violations.extend(
+        _expected_artifact_reference_violations(
+            payload,
+            "execution_report",
+            ArtifactKind.TEST_EXECUTION_REPORT,
+        )
+    )
+    return violations
+
+
 def _latest_run_pointer_semantic_violations(
     payload: Mapping[str, Any],
 ) -> list[ContractViolation]:
@@ -1619,6 +1692,37 @@ def _latest_run_pointer_semantic_violations(
         ArtifactKind.TEST_EXECUTION_REPORT,
     )
     if isinstance(data, Mapping):
+        blocker = data.get("blocker_report")
+        if isinstance(blocker, Mapping):
+            actual_kind = blocker.get("artifact_kind")
+            if actual_kind != ArtifactKind.TEST_EXECUTION_BLOCKER_REPORT.value:
+                violations.append(
+                    ContractViolation(
+                        "invalid_reference",
+                        "$.data.blocker_report.artifact_kind",
+                        "blocker_report must reference test_execution_blocker_report; "
+                        f"received {actual_kind!r}.",
+                    )
+                )
+            run_id = str(data.get("run_id") or "")
+            expected_json = f"runs/{run_id}/test_execution_blockers.json"
+            expected_md = f"runs/{run_id}/test_execution_blockers.md"
+            if blocker.get("path") != expected_json:
+                violations.append(
+                    ContractViolation(
+                        "invalid_reference",
+                        "$.data.blocker_report.path",
+                        "Blocker path must match run_id.",
+                    )
+                )
+            if blocker.get("markdown_path") != expected_md:
+                violations.append(
+                    ContractViolation(
+                        "invalid_reference",
+                        "$.data.blocker_report.markdown_path",
+                        "Blocker Markdown path must match run_id.",
+                    )
+                )
         violations.extend(_timestamp_violation(data.get("updated_at"), "$.data.updated_at"))
     return violations
 
@@ -1799,6 +1903,7 @@ _ARTIFACT_SEMANTIC_VALIDATORS: dict[
     ArtifactKind.BUILD_COMPLETION_ITERATION.value: _no_artifact_semantic_violations,
     ArtifactKind.BUILD_COMPLETION_HISTORY.value: _no_artifact_semantic_violations,
     ArtifactKind.TEST_EXECUTION_REPORT.value: _test_execution_report_semantic_violations,
+    ArtifactKind.TEST_EXECUTION_BLOCKER_REPORT.value: _test_execution_blocker_report_semantic_violations,
     ArtifactKind.TEST_RESULT.value: _execution_count_semantic_violations,
     ArtifactKind.EVIDENCE_MANIFEST.value: _evidence_manifest_semantic_violations,
     ArtifactKind.FUNCTION_DOSSIER.value: _dossier_semantic_violations,
