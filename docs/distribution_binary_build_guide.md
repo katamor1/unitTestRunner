@@ -13,6 +13,15 @@
 
 Python packageのwheel/sdist公開、PyPI公開、DOCX/PDF文書化は対象外とする。
 
+通常の配布ビルドでは、以降の個別手順を手で組み立てず、リポジトリルートから次の標準スクリプトを実行する。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\build_distribution.ps1
+```
+
+このスクリプトが、exe生成、終了コード35のブロッカーレポート実動スモーク、VS Codeテスト、CLI同梱VSIX生成、同梱exeのSHA-256一致確認までを一括で行う。以下の章は、スクリプト内部の工程を確認・診断するための参考手順である。
+
 ## 2. 前提
 
 Windows PowerShellでリポジトリルートから実行する。

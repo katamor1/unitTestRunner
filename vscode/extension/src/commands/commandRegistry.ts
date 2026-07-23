@@ -33,6 +33,7 @@ export const UNIT_TEST_RUNNER_COMMAND_IDS = [
   'unitTestRunner.buildProbeDryRun',
   'unitTestRunner.runBuildProbe',
   'unitTestRunner.runTests',
+  'unitTestRunner.resolveExecutionBlocker',
   'unitTestRunner.prepareEvidence',
   'unitTestRunner.registerCurrentFunctionInSuite',
   'unitTestRunner.openSuite',

@@ -9,6 +9,14 @@ from unit_test_runner.contracts import validator as contract_validator
 
 
 class ContractRegistryTests(unittest.TestCase):
+    def test_blocker_report_contract_is_registered(self):
+        contract = get_contract(ArtifactKind.TEST_EXECUTION_BLOCKER_REPORT)
+        self.assertEqual("1.0.0", contract.current_version)
+        self.assertEqual(
+            "test_execution_blocker_report.schema.json",
+            contract.schema_resource,
+        )
+
     def test_registry_contains_one_current_contract_for_every_artifact_kind(self):
         contracts = tuple(iter_contracts())
 

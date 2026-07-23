@@ -300,6 +300,8 @@ class CliArtifactReferenceTests(unittest.TestCase):
                 run_id="run-origin",
                 root=run_root,
                 execution_report=run_root / "test_execution_report.json",
+                blocker_report_json=run_root / "test_execution_blockers.json",
+                blocker_report_markdown=run_root / "test_execution_blockers.md",
                 result_json=run_root / "test_result.json",
                 result_csv=run_root / "test_result.csv",
                 stdout_log=run_root / "logs" / "stdout.log",

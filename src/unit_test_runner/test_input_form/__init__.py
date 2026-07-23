@@ -24,8 +24,11 @@ from .models import (
 )
 from .field_locator import (
     CASE_LOCATIONS,
+    LocatedEditableControl,
+    LocatedEditableField,
     LocatedFormItem,
     canonical_bytes,
+    describe_test_spec_fields,
     digest,
     locate_form_items,
 )
@@ -52,6 +55,8 @@ __all__ = [
     "FormItem",
     "FormSuggestion",
     "FormSummary",
+    "LocatedEditableControl",
+    "LocatedEditableField",
     "LocatedFormItem",
     "TestInputChange",
     "TestInputChangeRequest",
@@ -60,6 +65,7 @@ __all__ = [
     "apply_test_input_form",
     "build_test_input_form",
     "canonical_bytes",
+    "describe_test_spec_fields",
     "digest",
     "editable_control_names",
     "execution_value_required",

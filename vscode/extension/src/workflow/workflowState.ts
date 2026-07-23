@@ -2,6 +2,7 @@ import * as path from 'path';
 
 import { ReportPaths } from '../reports/reportPathResolver';
 import { TestInputFormSummary } from '../testInputEditor/contracts';
+import type { ExecutionBlockerActionCode } from '../testExecutionBlockers/contracts';
 
 export const WORKFLOW_STATE_KEY = 'unitTestRunner.workflowState';
 
@@ -49,6 +50,23 @@ export interface AwaitingSave {
   startedAt: string;
 }
 
+
+export interface TestExecutionBlockerState {
+  status: 'blocked';
+  workspace: string;
+  runId: string;
+  count: number;
+  primaryAction: ExecutionBlockerActionCode;
+  primaryActionLabel: string;
+  reportJson?: string;
+  reportMarkdown?: string;
+  reportSha256?: string;
+  primarySourcePath?: string;
+  publicationDiagnostics: string[];
+  autoOpenedRunId?: string;
+  updatedAt: string;
+}
+
 export interface WorkflowState {
   settingsReady: boolean;
   outputWorkspace?: string;
@@ -58,6 +76,7 @@ export interface WorkflowState {
   awaitingSave?: AwaitingSave;
   lastError?: string;
   testInputSummary?: TestInputSummaryState;
+  testExecutionBlockers?: TestExecutionBlockerState;
   updatedAt?: string;
 }
 
@@ -246,6 +265,8 @@ export const WORKFLOW_STEP_DEFINITIONS: WorkflowStepDefinition[] = [
     requiredAction: '確認ダイアログで内容を確認し、テストを実行します。',
     actions: [
       { id: 'runTests', kind: 'command', label: 'テストを実行', repeatLabel: 'テストを再実行', commandId: 'unitTestRunner.runTests', primary: true, danger: true },
+      { id: 'openTestExecutionBlockers', kind: 'openReport', label: '実行ブロック項目を開く', reportKey: 'testExecutionBlockersMd' },
+      { id: 'resolveExecutionBlocker', kind: 'command', label: 'ブロックを解消', commandId: 'unitTestRunner.resolveExecutionBlocker' },
     ],
   },
   {
@@ -315,7 +336,9 @@ export function markWorkflowCommandSucceeded(state: WorkflowState, event: Workfl
   if (commandStep) {
     completed.add(commandStep);
   }
-  const reports = mergeReports(workspaceChanged ? undefined : state.reports, event.reports, event.outputWorkspace);
+  const clearBlockers = workspaceChanged || event.kind === 'runTests';
+  const mergedReports = mergeReports(workspaceChanged ? undefined : state.reports, event.reports, event.outputWorkspace);
+  const reports = clearBlockers ? removeBlockerReportPaths(mergedReports) : mergedReports;
   return {
     ...state,
     settingsReady: true,
@@ -326,6 +349,7 @@ export function markWorkflowCommandSucceeded(state: WorkflowState, event: Workfl
     awaitingSave: undefined,
     lastError: undefined,
     testInputSummary: workspaceChanged ? undefined : state.testInputSummary,
+    testExecutionBlockers: clearBlockers ? undefined : state.testExecutionBlockers,
     updatedAt: timestamp(),
   };
 }
@@ -476,6 +500,12 @@ function effectiveCompletedStepIds(state: WorkflowState, availability: WorkflowR
     completed.add('runTests');
     completed.add('prepareEvidence');
   }
+  if (state.testExecutionBlockers?.status === 'blocked') {
+    completed.delete('runTests');
+    completed.delete('prepareEvidence');
+    completed.delete('reviewEvidence');
+    completed.delete('complete');
+  }
   return completed;
 }
 
@@ -493,6 +523,14 @@ function mergeReports(current: Partial<ReportPaths> | undefined, incoming: Repor
     ...incoming,
     workspace: outputWorkspace ?? incoming?.workspace ?? current?.workspace,
   };
+}
+
+function removeBlockerReportPaths(reports: Partial<ReportPaths> | undefined): Partial<ReportPaths> | undefined {
+  if (!reports) {
+    return undefined;
+  }
+  const { testExecutionBlockersJson: _json, testExecutionBlockersMd: _markdown, ...remaining } = reports;
+  return remaining;
 }
 
 function sameFile(left: string, right: string): boolean {

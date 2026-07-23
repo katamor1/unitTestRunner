@@ -7,7 +7,13 @@ import json
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from .field_catalog import FIELD_RULES, FieldRule
+from .field_catalog import (
+    FIELD_RULES,
+    FieldRule,
+    execution_value_required,
+    label_for_parent,
+    required_for_confirmation,
+)
 from .models import TestInputFormError
 
 
@@ -33,6 +39,29 @@ def canonical_bytes(value: Mapping[str, Any]) -> bytes:
 
 def digest(value: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical_bytes(value)).hexdigest()
+
+
+@dataclass(frozen=True)
+class LocatedEditableControl:
+    name: str
+    value: Any
+    required_for_confirmation: bool
+    json_pointer: str
+
+
+@dataclass(frozen=True)
+class LocatedEditableField:
+    case_id: str
+    case_location: str
+    kind: str
+    label: str
+    item_id: str
+    subject_fingerprint: str
+    parent_pointer: str
+    confirmed: bool
+    execution_blocking: bool
+    editable: bool
+    controls: tuple[LocatedEditableControl, ...]
 
 
 @dataclass(frozen=True)
@@ -156,3 +185,45 @@ def locate_form_items(spec: Any) -> tuple[LocatedFormItem, ...]:
         else item
         for item in located
     )
+
+def _pointer_token(value: str) -> str:
+    return value.replace("~", "~0").replace("/", "~1")
+
+
+def describe_test_spec_fields(spec: Any) -> tuple[LocatedEditableField, ...]:
+    result: list[LocatedEditableField] = []
+    for item in locate_form_items(spec):
+        parent_pointer = (
+            f"/{_pointer_token(item.case_location)}/{item.case_index}"
+            f"/{_pointer_token(item.collection)}/{item.item_index}"
+        )
+        review_required = item.parent.get("review_required")
+        controls = tuple(
+            LocatedEditableControl(
+                name=control.name,
+                value=item.parent.get(control.name),
+                required_for_confirmation=required_for_confirmation(
+                    item.rule,
+                    control,
+                    item.parent,
+                ),
+                json_pointer=f"{parent_pointer}/{_pointer_token(control.name)}",
+            )
+            for control in item.rule.controls
+        )
+        result.append(
+            LocatedEditableField(
+                case_id=item.case_id,
+                case_location=item.case_location,
+                kind=item.kind,
+                label=label_for_parent(item.rule, item.parent),
+                item_id=item.item_id,
+                subject_fingerprint=item.subject_fingerprint,
+                parent_pointer=parent_pointer,
+                confirmed=review_required is False,
+                execution_blocking=execution_value_required(item.rule, item.parent),
+                editable=item.editable and type(review_required) is bool,
+                controls=controls,
+            )
+        )
+    return tuple(result)

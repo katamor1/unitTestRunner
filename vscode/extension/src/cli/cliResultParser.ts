@@ -149,6 +149,8 @@ function reportsFromSource(reportSource: Record<string, string>, workspace: stri
     harnessSkeletonReportMd: reportPath(reportSource.harness_skeleton_report_md),
     buildProbeReportMd: reportPath(reportSource.build_probe_report_md),
     testExecutionReportMd: reportPath(reportSource.test_execution_report_md),
+    testExecutionBlockersJson: reportPath(reportSource.test_execution_blockers_json),
+    testExecutionBlockersMd: reportPath(reportSource.test_execution_blockers_md),
     evidencePackageMd: reportPath(reportSource.evidence_package_md),
     changeImpactReportMd: reportPath(reportSource.change_impact_report_md),
     testCaseReconciliationReportMd: reportPath(reportSource.test_case_reconciliation_report_md),

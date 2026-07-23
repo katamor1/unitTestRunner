@@ -21,10 +21,19 @@ export interface CliExpectedArtifact {
   path: string;
 }
 
+export interface CliDiagnostic {
+  code: string;
+  severity: 'info' | 'warning' | 'error';
+  message: string;
+}
+
 export interface ParsedCliEnvelope {
   version: '1.0.0' | '0.1';
+  command: string;
   outcome?: CliRunOutcome;
   exitCode: number;
+  details: Record<string, unknown>;
+  diagnostics: CliDiagnostic[];
   producedArtifacts: CliProducedArtifact[];
   expectedArtifacts: CliExpectedArtifact[];
   reportedPaths: Record<string, string>;
@@ -140,8 +149,11 @@ function parseV1(raw: Record<string, unknown>): ParsedCliEnvelope {
   }
   return {
     version: '1.0.0',
+    command: data.command as string,
     outcome,
     exitCode: data.exit_code as number,
+    details: data.details as Record<string, unknown>,
+    diagnostics,
     producedArtifacts,
     expectedArtifacts,
     reportedPaths: reportPathsFromArtifacts(producedArtifacts),
@@ -179,7 +191,10 @@ function parseLegacy(raw: Record<string, unknown>): ParsedCliEnvelope {
   warnings.unshift('CLI v0.1 compatibility mode: migrate the CLI to the v1 envelope.');
   return {
     version: '0.1',
+    command: raw.command as string,
     exitCode: raw.exit_code as number,
+    details: data,
+    diagnostics: [],
     producedArtifacts: [],
     expectedArtifacts: [],
     reportedPaths,
@@ -222,7 +237,7 @@ function parseExpectedArtifact(value: unknown): CliExpectedArtifact {
 }
 
 
-function parseDiagnostic(value: unknown): { code: string; severity: string; message: string } {
+function parseDiagnostic(value: unknown): CliDiagnostic {
   if (!isRecord(value)
     || !hasOnlyKeys(value, ['code', 'severity', 'message'])
     || !nonEmptyString(value.code)
@@ -230,7 +245,11 @@ function parseDiagnostic(value: unknown): { code: string; severity: string; mess
     || typeof value.message !== 'string') {
     throw new Error('Malformed v1 CLI envelope: invalid diagnostic.');
   }
-  return { code: value.code, severity: String(value.severity), message: value.message };
+  return {
+    code: value.code,
+    severity: value.severity as CliDiagnostic['severity'],
+    message: value.message,
+  };
 }
 
 
@@ -286,6 +305,8 @@ const REPORT_KEY_BY_FILENAME: Record<string, string> = {
   'harness_skeleton_report.md': 'harness_skeleton_report_md',
   'build_probe_report.md': 'build_probe_report_md',
   'test_execution_report.md': 'test_execution_report_md',
+  'test_execution_blockers.json': 'test_execution_blockers_json',
+  'test_execution_blockers.md': 'test_execution_blockers_md',
   'evidence_package.md': 'evidence_package_md',
   'change_impact_report.md': 'change_impact_report_md',
   'test_case_reconciliation_report.md': 'test_case_reconciliation_report_md',

@@ -30,6 +30,16 @@
                   "pattern": "^runs/[^/]+/test_execution_report\\.json$"
                 }
               }
+            },
+            "blocker_report": {
+              "properties": {
+                "path": {
+                  "pattern": "^runs/[^/]+/test_execution_blockers\\.json$"
+                },
+                "markdown_path": {
+                  "pattern": "^runs/[^/]+/test_execution_blockers\\.md$"
+                }
+              }
             }
           }
         }

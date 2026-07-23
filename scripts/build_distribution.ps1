@@ -48,6 +48,31 @@ function Invoke-Native {
     }
 }
 
+function Invoke-NativeExpectedExit {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments,
+        [Parameter(Mandatory = $true)]
+        [int]$ExpectedExitCode,
+        [string]$WorkingDirectory = $repoRoot
+    )
+
+    Push-Location $WorkingDirectory
+    try {
+        Write-Host ("> " + $FilePath + " " + ($Arguments -join " "))
+        & $FilePath @Arguments
+        $actualExitCode = $LASTEXITCODE
+        if ($actualExitCode -ne $ExpectedExitCode) {
+            throw "Expected exit code $ExpectedExitCode, got ${actualExitCode}: $FilePath $($Arguments -join ' ')"
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 function Invoke-BootstrapPython {
     param([string[]]$Arguments)
 
@@ -63,15 +88,65 @@ function Invoke-BootstrapPython {
 }
 
 function Test-VsixContainsBundledCli {
-    param([Parameter(Mandatory = $true)][string]$VsixPath)
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$VsixPath,
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedCliPath
+    )
+
+    if (-not (Test-Path -LiteralPath $ExpectedCliPath -PathType Leaf)) {
+        throw "Expected distribution CLI does not exist: $ExpectedCliPath"
+    }
+    $expectedCliHash = (Get-FileHash -LiteralPath $ExpectedCliPath -Algorithm SHA256).Hash
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [System.IO.Compression.ZipFile]::OpenRead($VsixPath)
     try {
-        $entryName = "extension/bin/win32-x64/unit-test-runner.exe"
-        $entry = $archive.GetEntry($entryName)
-        if ($null -eq $entry -or $entry.Length -le 0) {
-            throw "VSIX does not contain a non-empty bundled CLI entry: $entryName"
+        $requiredEntries = @(
+            "extension/bin/win32-x64/unit-test-runner.exe",
+            "extension/dist/testExecutionBlockers/contracts.js",
+            "extension/dist/testExecutionBlockers/verification.js",
+            "extension/dist/testExecutionBlockers/workflowIntegration.js",
+            "extension/package.json"
+        )
+        foreach ($entryName in $requiredEntries) {
+            $entry = $archive.GetEntry($entryName)
+            if ($null -eq $entry -or $entry.Length -le 0) {
+                throw "VSIX does not contain a non-empty required entry: $entryName"
+            }
+        }
+        $bundledCliEntry = $archive.GetEntry("extension/bin/win32-x64/unit-test-runner.exe")
+        $bundledCliStream = $bundledCliEntry.Open()
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $bundledCliHashBytes = $sha256.ComputeHash($bundledCliStream)
+            $bundledCliHash = [System.BitConverter]::ToString($bundledCliHashBytes).Replace("-", "")
+        }
+        finally {
+            $sha256.Dispose()
+            $bundledCliStream.Dispose()
+        }
+        if ($bundledCliHash -ne $expectedCliHash) {
+            throw "Bundled CLI hash does not match the freshly built distribution CLI: expected $expectedCliHash, got $bundledCliHash"
+        }
+        $manifestEntry = $archive.GetEntry("extension/package.json")
+        $manifestStream = $manifestEntry.Open()
+        $reader = New-Object -TypeName System.IO.StreamReader -ArgumentList (, $manifestStream)
+        try {
+            $manifest = $reader.ReadToEnd() | ConvertFrom-Json
+        }
+        finally {
+            $reader.Dispose()
+            $manifestStream.Dispose()
+        }
+        $cliPathDefault = $manifest.contributes.configuration.properties.'unitTestRunner.cliPath'.default
+        if ($cliPathDefault -ne "unit-test-runner") {
+            throw "VSIX package.json no longer selects the bundled CLI by default"
+        }
+        $commands = @($manifest.contributes.commands | ForEach-Object { $_.command })
+        if ($commands -notcontains "unitTestRunner.resolveExecutionBlocker") {
+            throw "VSIX package.json does not contribute unitTestRunner.resolveExecutionBlocker"
         }
     }
     finally {
@@ -147,6 +222,7 @@ try {
         "--function", "Control_Update",
         "--configuration", "Control - Win32 Debug",
         "--project", "Control",
+        "--phase", "execution",
         "--out", $smokeRoot,
         "--finalize-dossier"
     )
@@ -158,6 +234,31 @@ try {
         "prepare-review",
         "--dossier", $dossierPath
     )
+    Invoke-NativeExpectedExit -FilePath $exePath -ExpectedExitCode 35 -Arguments @(
+        "--json",
+        "run-tests",
+        "--workspace", $smokeRoot,
+        "--run",
+        # Use the workspace-relative default executable path. The smoke is
+        # intentionally blocked before execution, and contract artifacts must
+        # not record the distribution executable as an external absolute path.
+        "--run-id", "release-blocked-smoke"
+    )
+    $blockerJson = Join-Path $smokeRoot "reports\test_execution_blockers.json"
+    $blockerMarkdown = Join-Path $smokeRoot "reports\test_execution_blockers.md"
+    if (-not (Test-Path -LiteralPath $blockerJson)) {
+        throw "Blocked smoke did not create reports\test_execution_blockers.json"
+    }
+    if (-not (Test-Path -LiteralPath $blockerMarkdown)) {
+        throw "Blocked smoke did not create reports\test_execution_blockers.md"
+    }
+    $blockerPayload = Get-Content -LiteralPath $blockerJson -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($blockerPayload.artifact_kind -ne "test_execution_blocker_report") {
+        throw "Blocked smoke created an unexpected blocker artifact kind"
+    }
+    if ([int]$blockerPayload.data.blocker_count -lt 1) {
+        throw "Blocked smoke report contains no blockers"
+    }
     $smokeSucceeded = $true
 }
 finally {
@@ -195,7 +296,7 @@ Invoke-Native -FilePath $npmCommand -Arguments @(
 if (-not (Test-Path -LiteralPath $vsixPath)) {
     throw "VSIX packaging did not create the expected file: $vsixPath"
 }
-Test-VsixContainsBundledCli -VsixPath $vsixPath
+Test-VsixContainsBundledCli -VsixPath $vsixPath -ExpectedCliPath $exePath
 
 [pscustomobject]@{
     executable = $exePath

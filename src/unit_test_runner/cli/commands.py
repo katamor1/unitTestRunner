@@ -1708,16 +1708,94 @@ def handle_run_tests(args: argparse.Namespace) -> CLIResult:
     outcome, exit_code = classify_test_run(report, execution_requested=True)
     payload["test_execution"]["status"] = outcome.state.value
     payload["evidence"]["status"] = outcome.state.value
+    blocker_details = _blocker_details(workspace, report)
+    if blocker_details is not None:
+        payload["blockers"] = blocker_details
+    message = "Test execution evidence prepared with the reported terminal outcome."
+    human_output = None
+    if blocker_details is not None:
+        available_path = (
+            blocker_details.get("latest_markdown")
+            or blocker_details.get("run_markdown")
+            or blocker_details.get("run_json")
+        )
+        message = f"Test execution was blocked by {blocker_details['count']} items."
+        if available_path:
+            message += f" See {available_path}."
+        human_output = _blocked_human_output(blocker_details)
     return CLIResult(
         status=outcome.state.value,
         exit_code=exit_code,
         command=args.command,
-        message="Test execution evidence prepared with the reported terminal outcome.",
+        message=message,
         data=payload,
         legacy_payload=payload,
+        human_output=human_output,
         outcome=outcome,
         artifacts=_run_artifacts(workspace, report, manifest),
+        diagnostics=_blocker_publication_diagnostics(report),
     )
+
+
+def _blocker_details(workspace: Path, report) -> dict[str, Any] | None:
+    publication = getattr(report, "blocker_publication", None)
+    blocker_report = getattr(publication, "report", None)
+    if (
+        getattr(report, "status", None) != RunOutcome.BLOCKED.value
+        or blocker_report is None
+    ):
+        return None
+    value: dict[str, Any] = {
+        "count": blocker_report.blocker_count,
+        "primary_action": blocker_report.primary_action.code,
+        "primary_action_label": blocker_report.primary_action.label,
+    }
+    for field, candidate in (
+        ("run_json", getattr(publication, "run_json", None)),
+        ("run_markdown", getattr(publication, "run_markdown", None)),
+        ("latest_json", getattr(publication, "latest_json", None)),
+        ("latest_markdown", getattr(publication, "latest_markdown", None)),
+    ):
+        relative = _published_workspace_path(workspace, candidate)
+        if relative is not None:
+            value[field] = relative
+    return value
+
+
+def _published_workspace_path(
+    workspace: Path,
+    candidate: Path | None,
+) -> str | None:
+    if candidate is None or not candidate.is_file():
+        return None
+    try:
+        return resolved_relative_to(candidate, workspace).as_posix()
+    except (OSError, ValueError):
+        return None
+
+
+def _blocker_publication_diagnostics(report) -> list[dict[str, str]]:
+    publication = getattr(report, "blocker_publication", None)
+    if publication is None:
+        return []
+    return [item.to_dict() for item in publication.diagnostics]
+
+
+def _blocked_human_output(details: dict[str, Any]) -> str:
+    path = (
+        details.get("latest_markdown")
+        or details.get("run_markdown")
+        or details.get("run_json")
+    )
+    lines = [
+        f"テスト実行は{details['count']}件の項目でブロックされました。",
+        "",
+        "最初に行う操作:",
+        f"  {details['primary_action_label']}",
+    ]
+    if path:
+        lines.extend(["", "一覧:", f"  {str(path).replace('/', os.sep)}"])
+    return "\n".join(lines) + "\n"
 
 
 def _plan_test_run(
@@ -1789,6 +1867,18 @@ def _run_artifacts(workspace: Path, report, manifest) -> list[ProducedArtifact]:
                 (run_paths.stderr_log, "test_execution_log"),
                 (run_paths.combined_log, "test_execution_log"),
             ]
+        )
+    publication = getattr(report, "blocker_publication", None)
+    if publication is not None:
+        candidates.extend(
+            (path, kind)
+            for path, kind in (
+                (publication.run_json, ArtifactKind.TEST_EXECUTION_BLOCKER_REPORT.value),
+                (publication.run_markdown, "test_execution_blocker_report_markdown"),
+                (publication.latest_json, ArtifactKind.TEST_EXECUTION_BLOCKER_REPORT.value),
+                (publication.latest_markdown, "test_execution_blocker_report_markdown"),
+            )
+            if path is not None
         )
     if evidence_paths is not None:
         candidates.extend(

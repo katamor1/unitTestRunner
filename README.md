@@ -216,6 +216,12 @@ VS Code上からの操作手順は [VS Code利用手順書](docs/vscode_usage_gu
 
 パネルから開いたレポートは保存検知で次工程へ進みます。編集不要の場合は、パネルの `保存済みとして確定` で次のアクションへ進めます。
 
+### テスト実行がBLOCKEDになった場合
+
+`run-tests --run` が終了コード `35`（`blocked`）になった場合、直接の阻害項目をまとめた `reports/test_execution_blockers.md` がVS Codeで自動表示されます。Workflowには `実行ブロック項目を開く（N件）` と、安定したaction codeに基づく最初の推奨操作が残ります。
+
+履歴の正本は `runs/<run_id>/test_execution_blockers.json` と `.md`、最新表示用は `reports/test_execution_blockers.json` と `.md` です。後続の実テスト実行が `blocked` 以外になった場合、最新表示用だけが削除され、履歴は残ります。`run-tests --plan` はブロッカー状態を生成・削除しません。通常のassertion失敗は `test_execution_report` で確認し、ブロッカーレポートには混在させません。レポート公開に失敗しても終了コード35は維持され、未検証ファイルの自動表示は行いません。
+
 複数関数の回帰確認は `スイート` パネルで管理します。各関数workspaceを明示的に `suite_manifest.json` へ登録し、タグまたはチェック選択した関数だけをまとめて実行できます。全件確認が必要な場合は `スイート全件GREEN確認` を明示実行します。未設定時のmanifestは `unitTestRunner.outputRoot/suites/default/suite_manifest.json` です。
 
 通常はパネルから設定します。手動でWorkspace設定を書く場合の代表例は以下です。
