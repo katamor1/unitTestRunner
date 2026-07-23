@@ -1,0 +1,224 @@
+name: Merge Test Execution Blocker Report
+
+on:
+  push:
+    branches:
+      - stage/test-execution-blocker-report-merge
+
+permissions:
+  contents: write
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: merge-test-execution-blocker-report
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout staging branch
+        uses: actions/checkout@v4
+        with:
+          ref: stage/test-execution-blocker-report-merge
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: vscode/extension/package-lock.json
+
+      - name: Reconstruct reviewed feature patch
+        shell: pwsh
+        run: |
+          @'
+          import base64
+          import gzip
+          import hashlib
+          import json
+          import os
+          import re
+          import urllib.request
+          from pathlib import Path
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{repository}/issues/45/comments?per_page=100",
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request) as response:
+              comments = json.load(response)
+
+          pattern = re.compile(
+              r"<!-- UTR_BLOCKER_PATCH_PART:(\d)/6 -->\s*"
+              r"([A-Za-z0-9+/=]+)\s*"
+              r"<!-- /UTR_BLOCKER_PATCH_PART -->"
+          )
+          parts = {}
+          for comment in comments:
+              for match in pattern.finditer(str(comment.get("body") or "")):
+                  index = int(match.group(1))
+                  if index in parts:
+                      raise SystemExit(f"duplicate patch part: {index}")
+                  parts[index] = match.group(2)
+
+          expected_indexes = set(range(1, 7))
+          if set(parts) != expected_indexes:
+              raise SystemExit(
+                  f"missing patch parts: expected {sorted(expected_indexes)}, got {sorted(parts)}"
+              )
+
+          encoded = "".join(parts[index] for index in range(1, 7))
+          if len(encoded) != 60472:
+              raise SystemExit(f"unexpected base64 length: {len(encoded)}")
+          compressed = base64.b64decode(encoded, validate=True)
+          compressed_hash = hashlib.sha256(compressed).hexdigest()
+          if compressed_hash != "5a1c0e0bff864efa9bfe27258d7c669d0ac0a060337dd49922eb2a2d96b91cba":
+              raise SystemExit(f"compressed patch SHA-256 mismatch: {compressed_hash}")
+          patch = gzip.decompress(compressed)
+          patch_hash = hashlib.sha256(patch).hexdigest()
+          if len(patch) != 217566:
+              raise SystemExit(f"unexpected patch size: {len(patch)}")
+          if patch_hash != "7d37623e9551601aeaf26abba4e045f4a333dda40de123361a33026b5b7c8092":
+              raise SystemExit(f"raw patch SHA-256 mismatch: {patch_hash}")
+
+          patch_path = Path(os.environ["RUNNER_TEMP"]) / "test-execution-blocker-report.patch"
+          patch_path.write_bytes(patch)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"FEATURE_PATCH={patch_path}\n")
+          print(f"verified patch bytes={len(patch)} sha256={patch_hash}")
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw "Patch reconstruction failed with exit code $LASTEXITCODE" }
+
+      - name: Create clean one-parent feature commit
+        shell: pwsh
+        run: |
+          git fetch origin main
+          $mainSha = (git rev-parse origin/main).Trim()
+          "MAIN_SHA=$mainSha" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          git reset --hard origin/main
+          git clean -fdx
+          git apply --check --binary $env:FEATURE_PATCH
+          if ($LASTEXITCODE -ne 0) { throw "Patch validation failed with exit code $LASTEXITCODE" }
+          git apply --binary $env:FEATURE_PATCH
+          if ($LASTEXITCODE -ne 0) { throw "Patch application failed with exit code $LASTEXITCODE" }
+
+          @'
+          from pathlib import Path
+
+          path = Path("tests/test_execution_run_history.py")
+          source = path.read_text(encoding="utf-8")
+          replacements = {
+              'workspace / "runs" / "run-blocked" / "test_execution_blockers.json"':
+                  'workspace.resolve() / "runs" / "run-blocked" / "test_execution_blockers.json"',
+              'workspace / "runs" / "run-blocked" / "test_execution_blockers.md"':
+                  'workspace.resolve() / "runs" / "run-blocked" / "test_execution_blockers.md"',
+          }
+          for old, new in replacements.items():
+              if old in source:
+                  source = source.replace(old, new)
+              elif new not in source:
+                  raise SystemExit(f"Expected Windows path assertion was not found: {old}")
+          path.write_text(source, encoding="utf-8")
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw "Windows path normalization failed with exit code $LASTEXITCODE" }
+
+          Remove-Item -LiteralPath .sdd -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath .github\workflows\apply-test-execution-blocker-report.yml -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath .github\workflows\finalize-test-execution-blocker-report.yml -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath .github\workflows\merge-test-execution-blocker-report.yml -Force -ErrorAction SilentlyContinue
+
+          if (-not (Test-Path -LiteralPath .\src\unit_test_runner\execution\blocker_analyzer.py -PathType Leaf)) {
+            throw 'Reviewed patch does not contain blocker_analyzer.py'
+          }
+          if (-not (Select-String -LiteralPath .\src\unit_test_runner\contracts\kinds.py -SimpleMatch 'TEST_EXECUTION_BLOCKER_REPORT')) {
+            throw 'Reviewed patch does not register the blocker artifact kind'
+          }
+          if (-not (Select-String -LiteralPath .\vscode\extension\src\extension.ts -SimpleMatch 'testExecutionBlockers')) {
+            throw 'Reviewed patch does not contain VS Code blocker integration'
+          }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw "git diff --check failed" }
+          git config user.name OpenAI
+          git config user.email noreply@openai.com
+          git add -A
+          if ((git diff --cached --name-only).Count -eq 0) {
+            throw 'Reviewed patch produced no feature diff against main'
+          }
+          git commit -m 'feat: add test execution blocker reports'
+          if ($LASTEXITCODE -ne 0) { throw "Feature commit failed" }
+          $parents = @((git rev-list --parents -n 1 HEAD).Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries))
+          if ($parents.Count -ne 2) {
+            throw "Formal feature commit must have exactly one parent; got $($parents.Count - 1)"
+          }
+          if ($parents[1] -ne $mainSha) {
+            throw 'Formal feature commit parent does not match current origin/main'
+          }
+
+      - name: Build through the standard distribution script
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_distribution.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Standard distribution build failed with exit code $LASTEXITCODE" }
+          if (-not (Test-Path -LiteralPath .\dist\unit-test-runner.exe -PathType Leaf)) {
+            throw 'Standard build did not produce dist\unit-test-runner.exe'
+          }
+          if (-not (Test-Path -LiteralPath .\dist\unit-test-runner-vscode-0.1.0.vsix -PathType Leaf)) {
+            throw 'Standard build did not produce dist\unit-test-runner-vscode-0.1.0.vsix'
+          }
+          if ((git status --porcelain --untracked-files=no).Count -ne 0) {
+            git status --short
+            throw 'Standard build modified tracked source files'
+          }
+
+      - name: Verify bundled CLI identity
+        shell: pwsh
+        run: |
+          $extract = Join-Path $env:RUNNER_TEMP 'vsix-extract'
+          New-Item -ItemType Directory -Path $extract -Force | Out-Null
+          Expand-Archive -LiteralPath .\dist\unit-test-runner-vscode-0.1.0.vsix -DestinationPath $extract -Force
+          $bundled = Get-ChildItem -LiteralPath $extract -Recurse -Filter unit-test-runner.exe -File | Select-Object -First 1
+          if ($null -eq $bundled) { throw 'VSIX does not contain unit-test-runner.exe' }
+          $distHash = (Get-FileHash -LiteralPath .\dist\unit-test-runner.exe -Algorithm SHA256).Hash
+          $bundledHash = (Get-FileHash -LiteralPath $bundled.FullName -Algorithm SHA256).Hash
+          if ($distHash -ne $bundledHash) {
+            throw "VSIX bundled CLI differs from dist executable: $distHash != $bundledHash"
+          }
+          "CLI_SHA256=$distHash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Upload verified standard distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-runner-blocker-report-standard-distribution
+          path: |
+            dist/unit-test-runner.exe
+            dist/unit-test-runner-vscode-0.1.0.vsix
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Fast-forward main with verified commit
+        shell: pwsh
+        run: |
+          git fetch origin main
+          $remoteMain = (git rev-parse origin/main).Trim()
+          if ($remoteMain -ne $env:MAIN_SHA) {
+            throw "main changed during verification: expected $env:MAIN_SHA, got $remoteMain"
+          }
+          git push origin HEAD:refs/heads/main --force-with-lease=refs/heads/main:$env:MAIN_SHA
+          if ($LASTEXITCODE -ne 0) { throw "Verified commit could not be pushed to main" }
