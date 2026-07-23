@@ -39,19 +39,7 @@
 
 ### 0.3 Exact reconciliation product scope and audited regressions
 
-The product diff is evaluated as `reviewed_base_sha...reviewed_head_sha`, not from historical `969ce946`. It may contain any necessary subset of these exact paths; an unchanged path may be omitted, but no other path is permitted without another reviewed plan amendment:
-
-- `src/unit_test_runner/contracts/validator.py`
-- `src/unit_test_runner/dossier/finalizer.py`
-- `src/unit_test_runner/dossier/review_workflow.py`
-- `src/unit_test_runner/review_ids.py`
-- `src/unit_test_runner/test_spec/generation.py`
-- `src/unit_test_runner/test_spec/identity.py`
-- `src/unit_test_runner/test_spec/models.py`
-- `tests/test_dossier_review_workflow.py`
-- `tests/test_review_decisions.py`
-- `tests/test_test_spec_contract.py`
-- `docs/superpowers/plans/2026-07-15-phase1-task6-gate-evidence.md`
+The product diff is evaluated as `reviewed_base_sha...reviewed_head_sha`, not from historical `969ce946`. The sole current product allowlist is the case-sensitive, wildcard-free, **139-path** `$allowedExact` array in section 0.4. It is the maximum reviewed Task 6 scope: a candidate may leave an allowlisted path unchanged, but the allowlist does not authorize omitting a requirement, slice, regression, or gate. No path outside that exact array may be changed or committed. If a legitimate implementation needs another path, stop before the product change and merge a separate one-path, plan-only amendment with fresh reviews and hosted verification. This readiness-plan path is the already-merged amendment base and is deliberately outside the product allowlist.
 
 This is a current-main reconciliation, not only a tuple-fix replay. The candidate must remediate all **28 audited current regressions** in the following closed groups and preserve their tests:
 
@@ -109,17 +97,145 @@ $reviewedHead = '<reviewed_head_sha>'
 $gateHead = '<reviewed_head_or_exact_merge_sha>'
 $gateKind = '<candidate_or_merge>'
 $allowedExact = @(
-  'src/unit_test_runner/contracts/validator.py',
-  'src/unit_test_runner/dossier/finalizer.py',
-  'src/unit_test_runner/dossier/review_workflow.py',
+  'pyproject.toml',
+  'docs/superpowers/plans/2026-07-15-phase1-task6-gate-evidence.md',
+  'src/unit_test_runner/atomic_io.py',
+  'src/unit_test_runner/build/build_workspace_generator.py',
+  'src/unit_test_runner/build_completion/build_completion_analyzer.py',
+  'src/unit_test_runner/build_completion/completion_applier.py',
+  'src/unit_test_runner/build_probe.py',
+  'src/unit_test_runner/c_analyzer/source_digest.py',
+  'src/unit_test_runner/c_analyzer/function_location_writer.py',
+  'src/unit_test_runner/c_analyzer/signature_writer.py',
   'src/unit_test_runner/review_ids.py',
+  'src/unit_test_runner/cli/commands.py',
+  'src/unit_test_runner/cli/main.py',
+  'src/unit_test_runner/cli/parser.py',
+  'src/unit_test_runner/contracts/migrations.py',
+  'src/unit_test_runner/contracts/__init__.py',
+  'src/unit_test_runner/contracts/consumer.py',
+  'src/unit_test_runner/contracts/registry.py',
+  'src/unit_test_runner/contracts/validator.py',
+  'src/unit_test_runner/dossier/__init__.py',
+  'src/unit_test_runner/dossier/artifact_collector.py',
+  'src/unit_test_runner/dossier/dossier_models.py',
+  'src/unit_test_runner/dossier/dossier_writer.py',
+  'src/unit_test_runner/dossier/finalizer.py',
+  'src/unit_test_runner/dossier/readiness.py',
+  'src/unit_test_runner/dossier/review_assessment.py',
+  'src/unit_test_runner/dossier/review_decision_models.py',
+  'src/unit_test_runner/dossier/review_decision_repository.py',
+  'src/unit_test_runner/review_subject_publisher.py',
+  'src/unit_test_runner/dossier/review_workflow.py',
+  'src/unit_test_runner/dossier/workflow.py',
+  'src/unit_test_runner/reanalysis/snapshot_builder.py',
+  'src/unit_test_runner/reanalysis/workflow.py',
+  'src/unit_test_runner/build_completion/completion_report_writer.py',
+  'src/unit_test_runner/execution/report_loader.py',
+  'src/unit_test_runner/execution/evidence_paths.py',
+  'src/unit_test_runner/execution/evidence_manifest.py',
+  'src/unit_test_runner/execution/execution_runner.py',
+  'src/unit_test_runner/execution/run_paths.py',
+  'src/unit_test_runner/execution/test_execution.py',
+  'src/unit_test_runner/execution/test_result_writer.py',
+  'src/unit_test_runner/harness/__init__.py',
+  'src/unit_test_runner/harness/c90_writer.py',
+  'src/unit_test_runner/harness/dependency_dispatcher.py',
+  'src/unit_test_runner/harness/harness_report_writer.py',
+  'src/unit_test_runner/harness/harness_skeleton_generator.py',
+  'src/unit_test_runner/harness/parameter_init_compat.py',
+  'src/unit_test_runner/harness/runner_output_enhancer.py',
+  'src/unit_test_runner/harness/state_setup_reflector.py',
+  'src/unit_test_runner/harness/target_invocation_compat.py',
+  'src/unit_test_runner/schemas/boundary_candidates.schema.json',
+  'src/unit_test_runner/schemas/build_completion_history.schema.json',
+  'src/unit_test_runner/schemas/build_completion_iteration.schema.json',
+  'src/unit_test_runner/schemas/build_completion_plan.schema.json',
+  'src/unit_test_runner/schemas/build_context.schema.json',
+  'src/unit_test_runner/schemas/build_probe_report.schema.json',
+  'src/unit_test_runner/schemas/build_workspace_report.schema.json',
+  'src/unit_test_runner/schemas/call_report.schema.json',
+  'src/unit_test_runner/schemas/change_impact.schema.json',
+  'src/unit_test_runner/schemas/cli_result.schema.json',
+  'src/unit_test_runner/schemas/common.schema.json',
+  'src/unit_test_runner/schemas/common_v1_0.schema.json',
+  'src/unit_test_runner/schemas/coverage_design.schema.json',
+  'src/unit_test_runner/schemas/dependency_policy.schema.json',
+  'src/unit_test_runner/schemas/dossier_manifest.schema.json',
+  'src/unit_test_runner/schemas/dossier_manifest_v1_0.schema.json',
+  'src/unit_test_runner/schemas/dsw_discovery.schema.json',
+  'src/unit_test_runner/schemas/evidence_manifest.schema.json',
+  'src/unit_test_runner/schemas/evidence_source_run.schema.json',
+  'src/unit_test_runner/schemas/function_dossier.schema.json',
+  'src/unit_test_runner/schemas/function_dossier_v1_0.schema.json',
+  'src/unit_test_runner/schemas/function_location.schema.json',
+  'src/unit_test_runner/schemas/function_signature.schema.json',
+  'src/unit_test_runner/schemas/global_access.schema.json',
+  'src/unit_test_runner/schemas/harness_skeleton_report.schema.json',
+  'src/unit_test_runner/schemas/input_request.schema.json',
+  'src/unit_test_runner/schemas/latest_evidence_pointer.schema.json',
+  'src/unit_test_runner/schemas/latest_run_pointer.schema.json',
+  'src/unit_test_runner/schemas/latest_suite_run_pointer.schema.json',
+  'src/unit_test_runner/schemas/project_membership.schema.json',
+  'src/unit_test_runner/schemas/prompt_pack.schema.json',
+  'src/unit_test_runner/schemas/quick_summary.schema.json',
+  'src/unit_test_runner/schemas/reanalysis_snapshot.schema.json',
+  'src/unit_test_runner/schemas/regression_selection.schema.json',
+  'src/unit_test_runner/schemas/review_decisions.schema.json',
+  'src/unit_test_runner/schemas/review_decisions_v1_0.schema.json',
+  'src/unit_test_runner/schemas/source_digest.schema.json',
+  'src/unit_test_runner/schemas/source_membership.schema.json',
+  'src/unit_test_runner/schemas/state_setup_reflection.schema.json',
+  'src/unit_test_runner/schemas/suite_manifest.schema.json',
+  'src/unit_test_runner/schemas/suite_run_report.schema.json',
+  'src/unit_test_runner/schemas/test_case_reconciliation.schema.json',
+  'src/unit_test_runner/schemas/test_execution_report.schema.json',
+  'src/unit_test_runner/schemas/test_result.schema.json',
+  'src/unit_test_runner/schemas/test_spec_v1_0.schema.json',
   'src/unit_test_runner/test_spec/generation.py',
   'src/unit_test_runner/test_spec/identity.py',
+  'src/unit_test_runner/test_spec/exporters.py',
+  'src/unit_test_runner/test_spec/patch.py',
+  'src/unit_test_runner/test_spec/repository.py',
   'src/unit_test_runner/test_spec/models.py',
+  'src/unit_test_runner/suite/manager.py',
+  'tests/test_build_probe.py',
+  'tests/test_build_diagnostics_and_completion.py',
+  'tests/test_build_workspace_generation.py',
+  'tests/test_contract_registry.py',
+  'tests/test_contract_validation.py',
+  'tests/test_contract_migrations.py',
+  'tests/test_public_artifact_schemas.py',
+  'tests/test_wheel_contract.py',
   'tests/test_dossier_review_workflow.py',
+  'tests/test_dependency_policy_explicit_harness.py',
   'tests/test_review_decisions.py',
+  'tests/test_review_decision_staleness.py',
+  'tests/test_dossier_readiness.py',
+  'tests/test_dossier_review_authority.py',
+  'tests/test_review_decision_integration.py',
+  'tests/test_review_decision_cli.py',
+  'tests/test_review_subject_publication.py',
+  'tests/test_review_decision_repository_path_safety.py',
+  'tests/test_build_and_execution_module_boundaries.py',
+  'tests/test_c_source_reading.py',
+  'tests/test_execution_evidence.py',
+  'tests/test_execution_run_history.py',
+  'tests/test_evidence_integrity.py',
+  'tests/test_function_analysis_reports.py',
+  'tests/test_harness_report_localization.py',
+  'tests/test_harness_skeleton_generation.py',
+  'tests/test_prepare_evidence_non_destructive.py',
+  'tests/test_reanalysis_snapshot_builder.py',
+  'tests/test_suite_cli.py',
+  'tests/test_suite_manager.py',
   'tests/test_test_spec_contract.py',
-  'docs/superpowers/plans/2026-07-15-phase1-task6-gate-evidence.md'
+  'tests/test_test_spec_generation.py',
+  'tests/test_test_spec_repository.py',
+  'tests/test_test_spec_formal_review_export_atomicity.py',
+  'tests/test_test_spec_formal_review_provenance.py',
+  'tests/test_test_spec_formal_review_writer_snapshots.py',
+  'tests/test_test_spec_reanalysis.py'
 )
 $carrierPaths = @(
   '.github/bootstrap/finalized-dossier-reanalysis-fix.patch.b64',
@@ -128,6 +244,11 @@ $carrierPaths = @(
 )
 
 if ($gateKind -notin @('candidate', 'merge')) { throw 'invalid gateKind' }
+$uniqueAllowed = @($allowedExact | Sort-Object -CaseSensitive -Unique)
+if ($allowedExact.Count -ne 139) { throw "Task 6 allowlist count is $($allowedExact.Count), expected 139" }
+if ($uniqueAllowed.Count -ne $allowedExact.Count) { throw 'Task 6 allowlist contains a case-sensitive duplicate' }
+$wildcardAllowed = @($allowedExact | Where-Object { $_ -match '[*?\[]' })
+if ($wildcardAllowed.Count -ne 0) { throw ('Task 6 allowlist contains wildcard syntax: ' + ($wildcardAllowed -join ', ')) }
 $candidateHead = if ($gateKind -eq 'merge') {
   $value = ((git rev-parse "$gateHead^2") -join '').Trim()
   if ($LASTEXITCODE -ne 0 -or $value -notmatch '^[0-9a-f]{40}$') { throw 'cannot resolve merge second parent' }
@@ -219,7 +340,183 @@ All commands use the candidate worktree's absolute `src` as `PYTHONPATH`; eviden
 - The product branch was lifted from the earlier amendment merge to exact current-main base `15f519c9b95c40237ad0651b4d8057b3ef09cb92`. That base contains `tests/test_dependency_real_source_inclusion.py` change `597261950d94b04fea2672970cdb41a255c1ed8f`, which postdates the `b19980d` reconciliation anchor and adds one compiler-dependent test with the same exact skip reason.
 - The compiler-absent allowlist in section 0.5 and the executable `ALLOWED_COMPILER_SKIPS` set therefore contain four exact entries. This is a base-drift reconciliation only: it does not change product scope, does not turn any test failure into an allowed skip, and does not permit a compiler skip when `gcc`, `clang`, or `cc` is discoverable.
 - Merge this one-path documentation amendment and verify its exact main SHA at 6/6 before rebasing the Task 6 product commits onto that merge. The rebased candidate must rerun every local gate and obtain two fresh `C0/I0/M0` reviews; no evidence from the pre-amendment candidate is final-candidate evidence.
-- An interrupted supervisor, incomplete module inventory, module timeout, missing structured aggregate, or residual long/short temporary root remains RED. The external interaction limit is handled only by one detached exact invocation plus bounded polling; it does not relax the inner 300-second module timeout, the 129-module dynamic inventory, the zero-orphan rule, or cleanup requirements.
+- An interrupted supervisor, incomplete dynamically enumerated module inventory, unresolved module timeout, missing structured aggregate, or residual long/short temporary root remains RED. The external interaction limit is handled only by one detached exact invocation plus bounded polling; it does not relax the inner 300-second module timeout, the dynamic inventory/exact-once aggregate, the zero-orphan rule, or cleanup requirements. `129` is historical observation data, never a fixed expected module count.
+
+### 0.8 2026-07-23 scope-completeness and retracted-preflight amendment
+
+> **Current normative authority:** Section 0.8 and the amended 139-path array in section 0.4 control every execution after exact main `56616e1127240de62a071901cdcb0dba70ef3c55`. They supersede conflicting scope, base, probe, evidence, sequencing, and completion language in sections 0.1-0.7 and 1-9. The fixed `15f519c...` base in section 0.7 and all older anchors are history only. Nonconflicting semantic requirements later in this plan remain mandatory; this amendment must not be used to weaken them. In particular, historical CLI projections that nest `readiness`/`blocked_reasons` outside the four-axis `data.details` contract, or that suggest `extensions` can replace required decision fields, are fixture history rather than current authority.
+
+#### 0.8.1 Audit identity, checkpoint status, and exact product scope
+
+- The pre-amendment plan-only base is exact main `56616e1127240de62a071901cdcb0dba70ef3c55`, tree `c9d280885f24a5c24ed4c403bf48d66b151dfd87`.
+- The audited product checkpoint is `6ab86446db43828acde2189004342b50013c00f3`, tree `fea49db203444d4e751969f9b3ad0b3fd416d65e`: 16 linear commits, zero merge commits, and 9 changed/history paths. It repairs the closed 28-regression set only. It is not a Task 6 completion candidate and none of its partial gate evidence is final evidence.
+- The checkpoint-to-plan audit found a normative completion gap of **C8/I2/M0**. The old 11-path reconciliation scope made the required Task 6 architecture impossible to implement. Section 0.4 now carries the exact case-sensitive 139-path maximum scope: the historical section 6 union had 136 product/schema/test paths plus two documentation paths; remove this readiness-plan path from the product diff, retain the gate-evidence path, and add `src/unit_test_runner/test_spec/models.py` plus `tests/test_review_decision_repository_path_safety.py`. The resulting product allowlist has exactly 139 unique entries. The readiness-plan path is part of the amendment base, not a product exception.
+- The executable gate must assert count `139`, case-sensitive uniqueness, and absence of wildcard syntax before examining the diff. The allowlist grants no permission to omit any semantic requirement. A newly required out-of-scope path requires a separate one-path plan-only amendment, fresh reviews, exact-head CI, merge verification, and exact-main CI before any product bytes at that path are written.
+
+#### 0.8.2 Normative C8/I2 gap matrix
+
+| ID | Requirement that the checkpoint does not complete | Owned paths/seams | Mandatory closing gate |
+|---|---|---|---|
+| C1 | Replace the impossible 11-path boundary with the exact 139-path maximum scope without broad globs or requirement waiver. | This plan amendment; section 0.4 array and carrier/path gate. | Count=139, duplicate=0, wildcard=0, exact changed/history containment, one-path amendment diff. |
+| C2 | Keep `common_v1_0.schema.json` and every immutable 1.0 reference immutable while packaging and validating the complete 40-schema contract set. | `schemas/common_v1_0.schema.json`, all allowlisted schema files, registry/validator/consumer, wheel packaging. | Source and installed-wheel schema inventory equality; all 40 schemas strict-load/validate; immutable 1.0 byte/hash assertions. |
+| C3 | Make the ledger the sole decision authority and preserve explicit provenance. New records require top-level `authority="current"` and `source_schema_version="1.1.0"`; migrated 1.0 records require `authority="display_only"` and their exact source version. | Review decision models/repository, migrations, decision schemas, assessment, CLI. | Source and installed migration/validation matrix plus repository/assessment/CLI tests; required fields may not be hidden in or substituted by `extensions`. |
+| C4 | Publish one coherent manifest fence and immutable content-addressed review-subject snapshot with exact generation/token/fingerprint/snapshot/index identity, crash truth, and explicit offline recovery. | `review_subject_publisher.py`, dossier manifest schemas/models/writers/finalizer, subject-publication tests and recovery CLI. | Publication crash/race/recovery tables, immutable index/hash revalidation, and `recover-review-subject-publication` parser/CLI tests. |
+| C5 | Re-resolve the current fenced subject and ledger revision while holding the decision lock; preserve Windows sharing-denial retry, path safety, cleanup truth, and manual recovery states. | `atomic_io.py`, review decision repository, path-safety and decision tests. | Two-writer/CAS/race tests, lock-time subject drift tests, WinError 32/33-only retry tests, cleanup/recovery state tests. |
+| C6 | Derive `ready_for_review`, `review_complete`, `test_green`, and `evidence_ready`, their reasons, item bindings, and decision results from one retained assessment snapshot; the CLI may project but never reopen or mix snapshots. | Readiness/assessment/workflow, execution/evidence selectors, `cli/commands.py`, integration and CLI tests. | Same-snapshot race table and CLI smoke asserting all four axes, `items[*].reasons`, and decision `write_status="written"` directly under `data.details`. |
+| C7 | Carry one typed external-source fact through all three core writers and every relevant producer transaction; external source is read-only, canonical, cross-bound, and fenced, and no core/subject writer can publish outside the common publication protocol. | Source digest/location/signature writers, analysis/workflow, harness/build-completion/execution/evidence writers, publisher. | Direct-writer plus full-workflow strict-current tests, external-source mutation/path-policy table, writer dirty-fence/crash projection tests. |
+| C8 | Prove exact three-kind migration behavior for `REVIEW_DECISIONS`, `FUNCTION_DOSSIER`, and `DOSSIER_MANIFEST` from source and from the installed wheel, with input bytes/objects unchanged and strict output validation. | Contracts migrations/registry/validator, three current/versioned schema families, wheel. | Exact kind/version/output-field matrix in both source and repository-external installed probes; no missing or extra kind. |
+| I1 | Keep the narrow four-field aggregate `subject_fingerprint` distinct from the full logical `snapshot_id`; preserve every role/source/function/semantic identity in the full descriptor and reject incomplete, duplicate, or cross-bound identity. | Publisher/snapshot models, `review_ids.py`, manifest/index schemas, publication and integration tests. | Literal fingerprint/snapshot golden vectors, independent-change tests, permutation/duplicate/cross-reference rejection. |
+| I2 | Fail closed for zero/empty subjects and fallback selection: each decisionable item has a nonempty exact subject tuple; a present invalid/legacy/mismatched TestSpec never falls back; core fallback requires verified TestSpec absence plus the strict-current three-core set; empty `all(...)` never authorizes Phase 2. | Dossier collection/finalization/workflow, TestSpec models, decision models/schemas, assessment. | Empty/present-invalid/verified-absent fallback table, nonempty binding assertions, and `ready_for_review=false`/`review_complete=false` assertions. |
+
+#### 0.8.3 Retracted preflight authority
+
+- **Gate A is RED.** The old manifest identified by prefix `9427...` is preserved only as an immutable diagnostic record. The authoritative retraction manifest v2 is SHA-256 `ea14002966f5a110367b70d263ba5aa2e438457f470d97fcebcbd40c17e54c3d` over 114 files. The CLI smoke assertions are normative and are not to be adjusted to the checkpoint: all four readiness axes and `items[*].reasons` belong directly under `data.details`, and a successful decision write requires `data.details.write_status="written"`. The checkpoint failed these assertions, so no Gate A PASS exists.
+- **Gate B is RED.** The old 45-entry apparent-PASS raw manifest SHA-256 `40da4890d584bbab16b4a50ab8ec2e516c00f05f55c7cc144afdfeaff78afff9` is retracted and diagnostic only. The authoritative 50-file retraction manifest is SHA-256 `affdcd139f4e1fe26379477b2fb119cfe731adbeac7837d6e1aed76216d0d499`. The exact current decision body must carry top-level `authority` and `source_schema_version`; an `extensions` value is not an alternative. Both the source probe and repository-external installed-wheel probe must enforce those fields and the exact three-kind migration matrix.
+- **Gate C is `NOT RUN/ABORTED`.** It has no PASS evidence. Gate D likewise has no final-candidate authority until the widened product is implemented and Gates A-C are fresh GREEN.
+- Every manifest, log, aggregate, and partial attempt produced before this amendment is excluded from final Task 6 completion evidence. Diagnostic retention does not convert retracted or aborted work into a passing gate.
+
+#### 0.8.4 Probe normalization and exact-once aggregate
+
+- The executable PowerShell/Python block under Slice 9 is the sole authoritative Gate D runner. Earlier Gate D commands, prose-only loops, recovered manifests, and timeout-immediate-RED runners are historical and must not be executed.
+- Enumerate `tests/test_*.py` dynamically at the exact candidate. Never require a fixed 129-module total or copy a historical inventory. Run each discovered module in a fresh process with the section 0.5 environment, a real distinct 8.3 temporary-path alias, a 300-second timeout, and a fresh Windows Job Object configured with `KILL_ON_JOB_CLOSE`.
+- Under the user's high-load waiver, a timed-out module is resolved only by dynamically enumerating **all** of that module's test IDs and running every ID in its own fresh process. The final structured aggregate includes each discovered ID exactly once and derives the module result from the complete isolated set. The incomplete timed-out process and all earlier partial module/ID attempts are explicitly superseded and contribute zero executed IDs, passes, skips, or failures to the authoritative aggregate. A missing, duplicate, unresolved, or orphaned ID/process remains RED. This cumulative isolated PASS policy is the only replacement for a monolithic full PASS; it does not forgive a failing test.
+- The source-integrity target is exactly tracked `src/unit_test_runner/build/dependency_rewriter.py`; the stale `src/unit_test_runner/harness/dependency_rewriter.py` spelling is invalid.
+- `tests/test_review_subject_publication.py` and the `recover-review-subject-publication` command are Task 6 deliverables. Their absence before implementation means **not yet created**, not that probes may omit them; both are required before final Gate A-D execution.
+- Gate B asserts exact top-level decision `authority` and `source_schema_version` fields, all immutable/current schema behavior, and source/installed parity. It must not relax a probe to match stale checkpoint bytes.
+- A final gate package records dynamic module/test inventories, exact-once counts, superseded attempt IDs, per-process exit/timeout/skip facts, compiler identity/allowed-skip equality, long/short temporary-root cleanup, zero orphans, exact candidate base/head/tree, and hashes of every external log/manifest.
+
+#### 0.8.5 Mandatory integration sequence
+
+1. Merge this one-path plan-only amendment from exact main `56616e1127240de62a071901cdcb0dba70ef3c55`. Freeze its base/head/tree, obtain fresh spec and quality reviews with `C0/I0/M0`, require exact-head hosted CI 6/6, verify exact merge first parent/base, second parent/head, and tree equality, then require exact-main hosted CI 6/6.
+2. Create a new product worktree only from that verified amendment merge. Do not keep `56616e...`, `15f519c...`, or checkpoint `6ab864...` as the reviewed product base.
+3. Execute the exact replay protocol in section 0.8.6. Before adding new product bytes, require 14 replay commits, zero merge commits, and the exact eight-path replay set; old checkpoint/retraction evidence remains outside the final aggregate.
+4. **Slice 0 is fully superseded.** Its old recommit/checkpoint-push flow is not executable. The verified amendment merge is the execution-boundary freeze, the replay audit is the recovered regression baseline, and new product implementation begins at **Slice 1**. Implement Slices 1-9 under TDD and independent slice review, closing every C8/I2 row and the original 28 regressions. An allowlisted maximum is not a reduced delivery checklist.
+5. Freeze one exact product candidate and run fresh Gates A, B, C, and D. Gate D uses the dynamic fresh-process/exact-once isolated aggregate in section 0.8.4. No pre-amendment result is reused.
+6. Write the gate-evidence document only after the tested product bytes are frozen. Avoid self-SHA claims: record the tested product head/tree and external log/manifest hashes, then commit the evidence document. That commit creates a new final candidate identity. At that unchanged final HEAD, rerun from scratch the section 0.8.7 exact-path/carrier gate, full Gate A, full Gate B, full Gate C, full Gate D, and the independent 28/28 exact-ID inventory. Preliminary, pre-evidence-commit, retracted, or other-HEAD logs cannot substitute for any final rerun.
+7. Obtain fresh spec and quality `C0/I0/M0` reviews on those final exact bytes only after every final rerun in step 6 is GREEN. Any finding or byte change invalidates the affected reviews and all final gates; fix, commit, and restart step 6. Push only that reviewed head, create the product PR, require exact-head CI 6/6, verify merge parents/tree, run the exact-merge local subset, and require exact-main CI 6/6.
+8. Only after the verified product merge, perform the obsolete-PR readback and separate exact four-path closeout PR in section 0.6. Progress becomes durable 14/38 only after the closeout merge identities and exact-main CI 6/6 are externally verified.
+
+#### 0.8.6 Exact regression-checkpoint replay
+
+After the amendment merge SHA is verified on `main`, create the product branch/worktree at that exact merge SHA and record it as `$replayBase`. Replay these commits in this exact order; abbreviated or substituted SHAs are forbidden:
+
+```text
+d26855204335e25fb36c3d55864f91941b7a4c3d
+c75f325ab22280f35c838424b18f54cc27923dd4
+f41b1542fd45daced198b04098e463e8e7b8a55b
+3cad3836c87c45e254152ab9200f4310a21296e7
+9680829e3c940f02863d13dc24743f1f91fb4c81
+c54d7e4b5e3a6e461ad1495b4dac5ca17c149a4c
+c68a15528e565346a85fe42735b973637288e2b6
+620e1d56708dfeeef698b0294ad0acfcfd52cca7
+933ce573ad48fa041c76ae0880d4be8dd83998a6
+4ea428fbf226746be5a7eeacc8757a55a09a4c36
+743b396e3cc4c4d4cd5ab10c397317a626eb9208
+b974877be6223fc60d2ecb06ac6c80dacefaf99d
+b3fc9a2eebb87fa50046ddef4c4232160a234675
+6ab86446db43828acde2189004342b50013c00f3
+```
+
+Do not replay the two documentation-only commits `5c4f48727f47afba90c4a54c02c309f550532a3b` and `c2a72df90b35a0773662746fcfcb677a0fce5d25`. The thirteenth commit is mixed and must be split without recreating its stale evidence:
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$replayBase = (git rev-parse HEAD).Trim()
+$ordinaryReplay = @(
+  'd26855204335e25fb36c3d55864f91941b7a4c3d',
+  'c75f325ab22280f35c838424b18f54cc27923dd4',
+  'f41b1542fd45daced198b04098e463e8e7b8a55b',
+  '3cad3836c87c45e254152ab9200f4310a21296e7',
+  '9680829e3c940f02863d13dc24743f1f91fb4c81',
+  'c54d7e4b5e3a6e461ad1495b4dac5ca17c149a4c',
+  'c68a15528e565346a85fe42735b973637288e2b6',
+  '620e1d56708dfeeef698b0294ad0acfcfd52cca7',
+  '933ce573ad48fa041c76ae0880d4be8dd83998a6',
+  '4ea428fbf226746be5a7eeacc8757a55a09a4c36',
+  '743b396e3cc4c4d4cd5ab10c397317a626eb9208',
+  'b974877be6223fc60d2ecb06ac6c80dacefaf99d'
+)
+foreach ($commit in $ordinaryReplay) {
+  git cherry-pick $commit
+  if ($LASTEXITCODE -ne 0) { throw "replay failed at $commit" }
+}
+
+$mixed = 'b3fc9a2eebb87fa50046ddef4c4232160a234675'
+$gateEvidence = 'docs/superpowers/plans/2026-07-15-phase1-task6-gate-evidence.md'
+git cherry-pick --no-commit $mixed
+if ($LASTEXITCODE -ne 0) { throw "mixed replay failed at $mixed" }
+git cat-file -e "HEAD:$gateEvidence" 2>$null
+if ($LASTEXITCODE -eq 0) {
+  git restore --source=HEAD --staged --worktree -- $gateEvidence
+  if ($LASTEXITCODE -ne 0) { throw 'failed to restore mixed evidence path from current HEAD' }
+} else {
+  # The amendment base has no gate-evidence file, so matching current HEAD means
+  # removing the newly added stale path from both index and worktree.
+  git rm --cached --force -- $gateEvidence
+  if ($LASTEXITCODE -ne 0) { throw 'failed to unstage newly added mixed evidence path' }
+  if (Test-Path -LiteralPath $gateEvidence) {
+    Remove-Item -LiteralPath $gateEvidence -Force
+  }
+}
+$expectedMixedPaths = @(
+  'src/unit_test_runner/contracts/validator.py',
+  'src/unit_test_runner/dossier/review_workflow.py',
+  'src/unit_test_runner/test_spec/generation.py',
+  'src/unit_test_runner/test_spec/models.py',
+  'tests/test_test_spec_contract.py'
+)
+$actualMixedPaths = @(git diff --cached --name-only | Sort-Object)
+if ($LASTEXITCODE -ne 0) { throw 'cannot enumerate mixed replay paths' }
+if ((Compare-Object ($expectedMixedPaths | Sort-Object) $actualMixedPaths).Count -ne 0) {
+  throw ('mixed replay staged paths differ: ' + ($actualMixedPaths -join ', '))
+}
+git diff --cached --check
+if ($LASTEXITCODE -ne 0) { throw 'mixed replay staged diff check failed' }
+git commit -C $mixed
+if ($LASTEXITCODE -ne 0) { throw 'mixed replay commit failed' }
+
+git cherry-pick 6ab86446db43828acde2189004342b50013c00f3
+if ($LASTEXITCODE -ne 0) { throw 'final checkpoint replay failed' }
+
+$expectedReplayPaths = @(
+  'src/unit_test_runner/contracts/validator.py',
+  'src/unit_test_runner/dossier/review_workflow.py',
+  'src/unit_test_runner/review_ids.py',
+  'src/unit_test_runner/test_spec/generation.py',
+  'src/unit_test_runner/test_spec/identity.py',
+  'src/unit_test_runner/test_spec/models.py',
+  'tests/test_review_decisions.py',
+  'tests/test_test_spec_contract.py'
+)
+$replayCommits = @(git rev-list --reverse "$replayBase..HEAD")
+$replayMerges = @(git rev-list --merges "$replayBase..HEAD")
+$replayPaths = @(git diff --name-only "$replayBase...HEAD" | Sort-Object)
+if ($LASTEXITCODE -ne 0) { throw 'cannot audit replay paths' }
+if ($replayCommits.Count -ne 14) { throw "replay has $($replayCommits.Count) commits, expected 14" }
+if ($replayMerges.Count -ne 0) { throw "replay contains $($replayMerges.Count) merge commits" }
+if ((Compare-Object ($expectedReplayPaths | Sort-Object) $replayPaths).Count -ne 0) {
+  throw ('replay path set differs: ' + ($replayPaths -join ', '))
+}
+if ($replayPaths -contains $gateEvidence) { throw 'stale gate evidence entered replay diff' }
+git diff --check "$replayBase...HEAD"
+if ($LASTEXITCODE -ne 0) { throw 'replay diff check failed' }
+if ((git status --porcelain).Count -ne 0) { throw 'replay worktree is not clean' }
+```
+
+The replay audit records `$replayBase`, the 14 new replay SHAs and their original source SHAs/messages, zero merges, the exact eight-path set, and the required 28 test IDs present exactly once. It then runs those 28 IDs in isolated fresh processes and requires 28/28 PASS before Slice 1 implementation starts.
+
+#### 0.8.7 Exact Gate A/B/C/D authority
+
+The following mapping is closed and authoritative. A command or result belongs to exactly the named gate; a partial subset is not a gate PASS.
+
+- **Gate A — source/focused/product smoke:** all focused and direct Task 6 regression modules; the independent 28-ID isolated inventory; source integrity for tracked `src/unit_test_runner/build/dependency_rewriter.py`; repository-source tracking; CI contract; fixture CLI smoke and real fixture compile/link under the section 0.5 compiler rule; CLI help plus copied-fixture revision `0 -> 1` smoke with all four axes, `items[*].reasons`, and decision `write_status="written"` under `data.details`; `compileall`; input/Git immutability; diff/status and cleanup checks.
+- **Gate B — contract/package/install:** source contract, migration, registry, validator, and wheel tests; build wheel and inspect filename/hash/METADATA/full `Requires-Dist`; install into a fresh venv; `pip check`; strict-load/validate the complete 40-schema source and installed inventories; from a sanitized repository-external cwd under `python -I`, prove installed import roots and execute the exact three-kind `{REVIEW_DECISIONS, FUNCTION_DOSSIER, DOSSIER_MANIFEST}` migration matrix with canonical input bytes and deep objects unchanged, strict 1.1.0 output validation, and all kind-specific fail-closed assertions; cleanup and Git immutability.
+- **Gate C — VS Code extension:** from `vscode/extension`, run `npm.cmd ci`, compile, unit tests, and Extension Host tests sequentially; require every command zero, no skipped required suite, no surviving Extension Host/process, cleanup, and unchanged tracked bytes.
+- **Gate D — complete Python inventory:** execute only the Slice 9 authoritative runner. It dynamically inventories every `tests/test_*.py` module; applies fresh process/300-second/fresh Job Object/real 8.3 alias to modules, discovery fallback children, and per-ID fallback children; produces the exact-once cumulative aggregate and structured evidence required by section 0.8.4; enforces the exact four-entry compiler-absent skip set (or zero compiler skips when a compiler exists), independent 28/28 exact-once inclusion, zero failures/errors/expected failures/unexpected successes, zero unresolved timeout/orphan, and complete long/short cleanup.
+
+The pre-evidence candidate must pass A, B, C, and D before the evidence document is written. After the evidence-only commit, freeze `final_candidate_head` and `final_candidate_tree`; on those exact unchanged bytes rerun the section 0.4 exact-path/carrier gate, full A, full B, full C, full D, and the separate 28/28 isolated inventory. Preserve fresh external logs/manifests and their SHA-256 values. Only then obtain fresh full-diff spec and quality reviews, each `C0/I0/M0`. No preliminary, retracted, pre-evidence-commit, cached, earlier-review, hosted-other-head, or manually summarized result can replace a final exact-head result. Any byte change after these reruns invalidates all final gate and review authority and restarts this paragraph.
+
+All conflicting later snippets are explicitly superseded by sections 0.8.1-0.8.7. They may be used as historical design detail only when consistent with the current 139-path scope, C8/I2 matrix, retraction record, exact replay protocol, closed gate mapping, normalized probes, and integration sequence.
 
 ---
 
@@ -449,6 +746,8 @@ Historical review records keep the counts they actually received. They remain ev
 ---
 
 ## 6. Planned file map
+
+> **Historical inventory source, not an executable allowlist:** Section 0.8 supersedes this section where scope or execution conflicts. The product/schema/test union below is retained to audit coverage; only the exact 139-entry section 0.4 array authorizes the product diff, and this readiness-plan path is amendment-base history rather than a product path.
 
 ### New product files
 
@@ -1378,7 +1677,9 @@ Do not touch `vscode/extension` in Task 6. An unexpected need to do so is a scop
 
 ### Slice 0 — Freeze the execution boundary
 
-**Purpose:** Preserve a restartable plan before product edits.
+> **Fully superseded; do not execute.** Section 0.8.5 replaces this entire slice. The reviewed and verified plan-only amendment merge is the execution-boundary freeze. After creating the product worktree from that merge and completing the exact section 0.8.6 replay audit, product implementation starts at Slice 1. None of the recommit, checkpoint-push, old-anchor, or old-message commands below is current authority.
+
+**Historical purpose:** Preserve a restartable plan before product edits.
 
 Steps:
 
@@ -2858,14 +3159,24 @@ Record the wheel path/hash, full `Requires-Dist` list, normal install and `pip c
 
 Authoritative isolated full gate (dynamic inventory, forced distinct 8.3 alias, structured results, and no-orphan enforcement):
 
-The following block is the executable replacement for the former text-parser loop. It uses a fresh Windows Job Object per module, assigns the waiting child before releasing it to import tests, and sets KILL_ON_JOB_CLOSE. Timeout, assignment/query failure, or any active descendant after the child finishes is RED. The JSON evidence file is outside the physical alias root; the physical long root and its short alias must both be absent at exit.
+The following block is the executable replacement for every former Gate D loop. It uses a fresh Windows Job Object per module, discovery child, and isolated test-ID child; assigns each waiting child before releasing it to import tests; and sets KILL_ON_JOB_CLOSE. A module timeout is superseded only through the complete discovery/per-ID path encoded below. A discovery timeout, isolated-ID timeout, assignment/query failure, or any active descendant after a child finishes is RED. The JSON evidence file is outside the physical alias root; the physical long root and its short alias must both be absent at exit.
 
 ~~~powershell
 $ErrorActionPreference = 'Stop'
 $task6Repo = (Resolve-Path -LiteralPath .).Path
 $task6SourceRoot = (Resolve-Path -LiteralPath .\src).Path
 $env:PYTHONPATH = $task6SourceRoot
+$task6ReviewedBase = (git merge-base origin/main HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $task6ReviewedBase) {
+  throw 'cannot resolve Task 6 reviewed base for Gate D'
+}
+$task6GateRunId = [Guid]::NewGuid().ToString('N')
+$task6EvidencePath = Join-Path $env:LOCALAPPDATA "Temp\unit-test-runner-task6-full-gate-$task6GateRunId.json"
+$env:TASK6_REVIEWED_BASE_SHA = $task6ReviewedBase
+$env:TASK6_GATE_EVIDENCE_PATH = $task6EvidencePath
 
+$task6GateExit = $null
+try {
 @'
 from __future__ import annotations
 
@@ -2945,7 +3256,9 @@ import unittest
 SENTINEL = "__UNIT_TEST_RUNNER_TASK6_MODULE_RESULT__="
 if sys.stdin.buffer.read(1) != b"R":
     raise SystemExit("parent did not release assigned child")
-module = sys.argv[1]
+kind = sys.argv[1]
+module = sys.argv[2]
+target = sys.argv[3]
 source_root = Path(os.environ["PYTHONPATH"]).resolve()
 import unit_test_runner
 imported_path = Path(unit_test_runner.__file__).resolve()
@@ -2963,11 +3276,18 @@ class RecordingResult(unittest.TestResult):
         self.executed_ids.append(test.id())
         super().startTest(test)
 
-suite = unittest.defaultTestLoader.loadTestsFromName(module)
+if kind == "module":
+    suite = unittest.defaultTestLoader.loadTestsFromName(module)
+elif kind == "test":
+    suite = unittest.defaultTestLoader.loadTestsFromName(target)
+else:
+    raise SystemExit(f"unsupported child kind: {kind}")
 result = RecordingResult()
 suite.run(result)
 payload = {
+    "kind": kind,
     "module": module,
+    "target": target,
     "imported_path": str(imported_path),
     "tests_run": result.testsRun,
     "executed_ids": result.executed_ids,
@@ -2982,6 +3302,44 @@ payload = {
 }
 print(SENTINEL + json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
 raise SystemExit(0 if result.wasSuccessful() else 1)
+"""
+
+DISCOVERY_CHILD = r"""
+import json
+import os
+from pathlib import Path
+import sys
+import unittest
+
+SENTINEL = "__UNIT_TEST_RUNNER_TASK6_MODULE_RESULT__="
+if sys.stdin.buffer.read(1) != b"R":
+    raise SystemExit("parent did not release assigned child")
+module = sys.argv[1]
+source_root = Path(os.environ["PYTHONPATH"]).resolve()
+import unit_test_runner
+imported_path = Path(unit_test_runner.__file__).resolve()
+try:
+    imported_path.relative_to(source_root)
+except ValueError:
+    raise SystemExit(f"wrong candidate import root: {imported_path}")
+
+def flatten(suite):
+    for value in suite:
+        if isinstance(value, unittest.TestSuite):
+            yield from flatten(value)
+        else:
+            yield value
+
+suite = unittest.defaultTestLoader.loadTestsFromName(module)
+discovered_ids = [test.id() for test in flatten(suite)]
+payload = {
+    "kind": "discovery",
+    "module": module,
+    "imported_path": str(imported_path),
+    "discovered_ids": discovered_ids,
+}
+print(SENTINEL + json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
+raise SystemExit(0)
 """
 
 if os.name != "nt":
@@ -3094,7 +3452,16 @@ def terminate_job(job, exit_code):
     if not kernel32.TerminateJobObject(job, exit_code):
         raise winerror("TerminateJobObject failed")
 
-def run_module(module, *, repo, source_root, short_temp):
+def run_child_attempt(
+    *,
+    attempt_id,
+    kind,
+    module,
+    target,
+    repo,
+    source_root,
+    short_temp,
+):
     child_env = os.environ.copy()
     child_env["PYTHONPATH"] = os.fspath(source_root)
     child_env["UNIT_TEST_RUNNER_REQUIRE_8DOT3_ALIAS"] = "1"
@@ -3107,9 +3474,16 @@ def run_module(module, *, repo, source_root, short_temp):
     stderr = ""
     timed_out = False
     orphan_processes = 0
+    started_at = time.monotonic()
     try:
+        if kind == "discovery":
+            command = [sys.executable, "-c", DISCOVERY_CHILD, module]
+        elif kind in {"module", "test"}:
+            command = [sys.executable, "-c", CHILD, kind, module, target]
+        else:
+            raise AssertionError(f"unsupported attempt kind: {kind}")
         process = subprocess.Popen(
-            [sys.executable, "-c", CHILD, module],
+            command,
             cwd=repo,
             env=child_env,
             stdin=subprocess.PIPE,
@@ -3160,9 +3534,13 @@ def run_module(module, *, repo, source_root, short_temp):
         except Exception as error:
             parse_error = f"invalid sentinel JSON: {error}"
     return {
+        "attempt_id": attempt_id,
+        "kind": kind,
         "module": module,
+        "target": target,
         "exit_code": process.returncode,
         "timed_out": timed_out,
+        "duration_seconds": time.monotonic() - started_at,
         "orphan_processes": orphan_processes,
         "parse_error": parse_error,
         "payload": payload,
@@ -3174,6 +3552,26 @@ repo = Path.cwd().resolve()
 source_root = (repo / "src").resolve()
 if not source_root.is_dir():
     raise SystemExit(f"candidate source root missing: {source_root}")
+reviewed_base_sha = os.environ["TASK6_REVIEWED_BASE_SHA"]
+
+def git_value(*arguments):
+    completed = subprocess.run(
+        ["git", *arguments],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    return completed.stdout.strip()
+
+candidate_head_sha = git_value("rev-parse", "HEAD")
+candidate_tree_sha = git_value("rev-parse", "HEAD^{tree}")
+initial_git_status = git_value("status", "--porcelain")
+if initial_git_status:
+    raise SystemExit("Gate D requires a clean exact candidate")
+if git_value("merge-base", reviewed_base_sha, candidate_head_sha) != reviewed_base_sha:
+    raise SystemExit("reviewed base is not an ancestor of candidate HEAD")
 modules = sorted(
     f"tests.{path.stem}" for path in (repo / "tests").glob("test_*.py")
 )
@@ -3186,10 +3584,14 @@ if not local_temp.is_dir():
 long_root = local_temp / (
     WINDOWS_8DOT3_PREFIX + "full gate " + uuid.uuid4().hex
 )
-evidence_path = local_temp / (
-    "unit-test-runner-task6-full-gate-" + uuid.uuid4().hex + ".json"
-)
-rows = []
+evidence_path = Path(os.environ["TASK6_GATE_EVIDENCE_PATH"]).resolve()
+if evidence_path.parent != local_temp or evidence_path.suffix.lower() != ".json":
+    raise SystemExit("Gate D evidence path must be a new JSON file in LOCALAPPDATA Temp")
+if evidence_path.exists():
+    raise SystemExit(f"Gate D evidence path already exists: {evidence_path}")
+attempt_rows = []
+module_results = []
+superseded_attempt_ids = []
 fatal_error = None
 pair = None
 cleanup = {
@@ -3214,19 +3616,171 @@ try:
         raise AssertionError("alias root escaped LOCALAPPDATA Temp")
 
     for index, module in enumerate(modules, start=1):
-        row = run_module(
-            module,
+        module_attempt_id = f"module:{index}:{module}"
+        row = run_child_attempt(
+            attempt_id=module_attempt_id,
+            kind="module",
+            module=module,
+            target=module,
             repo=repo,
             source_root=source_root,
             short_temp=pair.short,
         )
-        rows.append(row)
+        attempt_rows.append(row)
         print(
             f"[{index}/{len(modules)}] {module} "
             f"exit={row['exit_code']} timeout={row['timed_out']} "
             f"orphans={row['orphan_processes']} parsed={row['parse_error'] is None}",
             flush=True,
         )
+        if not row["timed_out"]:
+            payload = row["payload"]
+            structural_errors = []
+            if row["orphan_processes"]:
+                structural_errors.append("module attempt left active descendants")
+            if row["parse_error"] is not None or payload is None:
+                structural_errors.append("module result payload is missing or invalid")
+            elif (
+                payload.get("kind") != "module"
+                or payload.get("module") != module
+                or payload.get("target") != module
+            ):
+                structural_errors.append("module result identity mismatch")
+            if payload is not None:
+                ids = payload.get("executed_ids")
+                tests_run = payload.get("tests_run")
+                if (
+                    not isinstance(ids, list)
+                    or not ids
+                    or not all(isinstance(test_id, str) and test_id for test_id in ids)
+                    or len(ids) != len(set(ids))
+                    or not isinstance(tests_run, int)
+                    or tests_run != len(ids)
+                ):
+                    structural_errors.append("module executed-ID inventory is invalid")
+            else:
+                ids = []
+            module_results.append({
+                "module": module,
+                "mode": "module",
+                "module_attempt_id": module_attempt_id,
+                "discovery_attempt_id": None,
+                "discovered_ids": list(ids),
+                "authoritative_test_attempt_ids": [module_attempt_id],
+                "executed_ids": list(ids) if not structural_errors else [],
+                "structural_errors": structural_errors,
+            })
+            continue
+
+        # A timed-out module attempt is diagnostic only. It contributes zero
+        # test IDs/results to the authoritative aggregate and is replaced by
+        # one isolated discovery child plus one isolated child per exact ID.
+        superseded_attempt_ids.append(module_attempt_id)
+        discovery_attempt_id = f"discovery:{index}:{module}"
+        discovery = run_child_attempt(
+            attempt_id=discovery_attempt_id,
+            kind="discovery",
+            module=module,
+            target=module,
+            repo=repo,
+            source_root=source_root,
+            short_temp=pair.short,
+        )
+        attempt_rows.append(discovery)
+        discovery_payload = discovery["payload"]
+        discovery_errors = []
+        if discovery["timed_out"]:
+            discovery_errors.append("fallback discovery timed out")
+        if discovery["orphan_processes"]:
+            discovery_errors.append("fallback discovery left active descendants")
+        if (
+            discovery["parse_error"] is not None
+            or discovery_payload is None
+            or discovery["exit_code"] != 0
+        ):
+            discovery_errors.append("fallback discovery did not complete successfully")
+        elif (
+            discovery_payload.get("kind") != "discovery"
+            or discovery_payload.get("module") != module
+        ):
+            discovery_errors.append("fallback discovery identity mismatch")
+        discovered_ids = (
+            discovery_payload.get("discovered_ids", [])
+            if discovery_payload is not None
+            else []
+        )
+        if (
+            not isinstance(discovered_ids, list)
+            or not discovered_ids
+            or not all(
+                isinstance(test_id, str) and test_id.startswith(module + ".")
+                for test_id in discovered_ids
+            )
+            or len(discovered_ids) != len(set(discovered_ids))
+        ):
+            discovery_errors.append("fallback discovery returned an invalid ID inventory")
+            discovered_ids = []
+
+        fallback_attempt_ids = []
+        fallback_executed_ids = []
+        fallback_errors = list(discovery_errors)
+        if not discovery_errors:
+            for test_index, test_id in enumerate(discovered_ids, start=1):
+                test_attempt_id = f"test:{index}:{test_index}:{test_id}"
+                test_row = run_child_attempt(
+                    attempt_id=test_attempt_id,
+                    kind="test",
+                    module=module,
+                    target=test_id,
+                    repo=repo,
+                    source_root=source_root,
+                    short_temp=pair.short,
+                )
+                attempt_rows.append(test_row)
+                fallback_attempt_ids.append(test_attempt_id)
+                test_payload = test_row["payload"]
+                if test_row["timed_out"]:
+                    fallback_errors.append(f"{test_id}: isolated test timed out")
+                    continue
+                if test_row["orphan_processes"]:
+                    fallback_errors.append(
+                        f"{test_id}: isolated test left active descendants"
+                    )
+                if test_row["parse_error"] is not None or test_payload is None:
+                    fallback_errors.append(f"{test_id}: result payload is missing or invalid")
+                    continue
+                if (
+                    test_payload.get("kind") != "test"
+                    or test_payload.get("module") != module
+                    or test_payload.get("target") != test_id
+                    or test_payload.get("tests_run") != 1
+                    or test_payload.get("executed_ids") != [test_id]
+                ):
+                    fallback_errors.append(f"{test_id}: isolated result identity mismatch")
+                    continue
+                fallback_executed_ids.append(test_id)
+
+        fallback_counts = collections.Counter(fallback_executed_ids)
+        if (
+            set(fallback_counts) != set(discovered_ids)
+            or any(count != 1 for count in fallback_counts.values())
+            or len(fallback_executed_ids) != len(discovered_ids)
+        ):
+            fallback_errors.append(
+                "fallback discovered IDs do not equal completed executed IDs exactly once"
+            )
+        module_results.append({
+            "module": module,
+            "mode": "isolated_fallback",
+            "module_attempt_id": module_attempt_id,
+            "discovery_attempt_id": discovery_attempt_id,
+            "discovered_ids": list(discovered_ids),
+            "authoritative_test_attempt_ids": fallback_attempt_ids,
+            "executed_ids": (
+                list(fallback_executed_ids) if not fallback_errors else []
+            ),
+            "structural_errors": fallback_errors,
+        })
 except BaseException:
     fatal_error = traceback.format_exc()
 finally:
@@ -3250,6 +3804,7 @@ finally:
     except BaseException:
         cleanup["error"] = traceback.format_exc()
 
+attempts_by_id = {row["attempt_id"]: row for row in attempt_rows}
 executed_ids = []
 actual_skips = []
 module_problems = []
@@ -3257,43 +3812,42 @@ tests_total = 0
 failures_total = 0
 errors_total = 0
 expected_failures_total = 0
-for row in rows:
-    payload = row["payload"]
-    if (
-        row["timed_out"]
-        or row["orphan_processes"]
-        or row["parse_error"] is not None
-        or row["exit_code"] != 0
-        or payload is None
-    ):
-        module_problems.append(row["module"])
-        continue
-    if payload.get("module") != row["module"]:
-        module_problems.append(row["module"])
-        continue
-    tests_run = payload.get("tests_run")
-    ids = payload.get("executed_ids")
-    if not isinstance(tests_run, int) or tests_run <= 0 or not isinstance(ids, list):
-        module_problems.append(row["module"])
-        continue
-    if tests_run != len(ids):
-        module_problems.append(row["module"])
-    tests_total += tests_run
-    executed_ids.extend(ids)
-    failures_total += len(payload.get("failures", ()))
-    errors_total += len(payload.get("errors", ()))
-    expected_failures_total += len(payload.get("expected_failures", ()))
-    if (
-        payload.get("failures")
-        or payload.get("errors")
-        or payload.get("expected_failures")
-        or payload.get("unexpected_successes")
-    ):
-        module_problems.append(row["module"])
-    for skipped in payload.get("skipped", ()):
-        actual_skips.append(f"{skipped['id']}|{skipped['reason']}")
+unexpected_successes_total = 0
+for module_result in module_results:
+    module = module_result["module"]
+    if module_result["structural_errors"]:
+        module_problems.append(module)
+    module_ids = module_result["executed_ids"]
+    tests_total += len(module_ids)
+    executed_ids.extend(module_ids)
+    for attempt_id in module_result["authoritative_test_attempt_ids"]:
+        row = attempts_by_id[attempt_id]
+        payload = row["payload"]
+        if payload is None or row["timed_out"] or row["parse_error"] is not None:
+            module_problems.append(module)
+            continue
+        # Exit 1 is still a completed authoritative result, but its structured
+        # failures/errors below keep Gate D RED. Other exits are harness errors.
+        if row["exit_code"] not in (0, 1):
+            module_problems.append(module)
+        failures_total += len(payload.get("failures", ()))
+        errors_total += len(payload.get("errors", ()))
+        expected_failures_total += len(payload.get("expected_failures", ()))
+        unexpected_successes_total += len(payload.get("unexpected_successes", ()))
+        if (
+            payload.get("failures")
+            or payload.get("errors")
+            or payload.get("expected_failures")
+            or payload.get("unexpected_successes")
+        ):
+            module_problems.append(module)
+        for skipped in payload.get("skipped", ()):
+            actual_skips.append(f"{skipped['id']}|{skipped['reason']}")
 
 executed_counts = collections.Counter(executed_ids)
+duplicate_executed_ids = sorted(
+    test_id for test_id, count in executed_counts.items() if count != 1
+)
 required_id_set = frozenset(REQUIRED_REGRESSION_IDS)
 required_counts = {
     test_id: executed_counts[test_id] for test_id in REQUIRED_REGRESSION_IDS
@@ -3340,34 +3894,87 @@ skip_ok = (
         else not actual_skips
     )
 )
+attempt_id_counts = collections.Counter(row["attempt_id"] for row in attempt_rows)
+duplicate_attempt_ids = sorted(
+    attempt_id for attempt_id, count in attempt_id_counts.items() if count != 1
+)
+orphan_attempt_ids = sorted(
+    row["attempt_id"] for row in attempt_rows if row["orphan_processes"]
+)
+unresolved_timeout_attempt_ids = sorted(
+    row["attempt_id"]
+    for row in attempt_rows
+    if row["timed_out"] and row["attempt_id"] not in superseded_attempt_ids
+)
+invalid_superseded_attempt_ids = sorted(
+    attempt_id
+    for attempt_id in superseded_attempt_ids
+    if (
+        attempt_id not in attempts_by_id
+        or attempts_by_id[attempt_id]["kind"] != "module"
+        or not attempts_by_id[attempt_id]["timed_out"]
+    )
+)
+final_git_status = git_value("status", "--porcelain")
 problems = []
 if fatal_error:
     problems.append("fatal harness error")
-if len(rows) != len(modules):
-    problems.append("not every discovered module ran")
+if len(module_results) != len(modules):
+    problems.append("not every discovered module produced an authoritative result")
+if duplicate_attempt_ids:
+    problems.append("attempt IDs are not unique")
+if invalid_superseded_attempt_ids:
+    problems.append("superseded attempt inventory is invalid")
+if unresolved_timeout_attempt_ids:
+    problems.append("discovery or isolated-test timeout remains unresolved")
+if orphan_attempt_ids:
+    problems.append("one or more Job Objects retained active descendants")
 if module_problems:
     problems.append("module failures: " + ", ".join(sorted(set(module_problems))))
-if failures_total or errors_total or expected_failures_total:
-    problems.append("structured unittest failures/errors/expected-failures are nonzero")
+if duplicate_executed_ids:
+    problems.append("global authoritative test inventory is not exact-once")
+if (
+    failures_total
+    or errors_total
+    or expected_failures_total
+    or unexpected_successes_total
+):
+    problems.append(
+        "structured unittest failures/errors/expected-failures/"
+        "unexpected-successes are nonzero"
+    )
 if not audit_28_ok:
     problems.append("required regression audit is not 28/28 exactly once")
 if not skip_ok:
     problems.append("compiler skip set mismatch")
 if cleanup["error"] or not cleanup["long_absent"] or not cleanup["short_absent"]:
     problems.append("physical long/short temp cleanup failed")
+if final_git_status:
+    problems.append("Gate D changed tracked or untracked repository state")
 
 report = {
+    "reviewed_base_sha": reviewed_base_sha,
+    "candidate_head_sha": candidate_head_sha,
+    "candidate_tree_sha": candidate_tree_sha,
     "repo": str(repo),
     "source_root": str(source_root),
     "long_temp": str(pair.long) if pair is not None else str(long_root),
     "short_temp": str(pair.short) if pair is not None else None,
     "samefile_verified": pair is not None,
     "module_count": len(modules),
+    "module_inventory": modules,
+    "module_result_count": len(module_results),
     "tests_total": tests_total,
+    "authoritative_executed_ids": sorted(executed_ids),
+    "authoritative_executed_id_counts": dict(sorted(executed_counts.items())),
+    "duplicate_authoritative_executed_ids": duplicate_executed_ids,
     "failures_total": failures_total,
     "errors_total": errors_total,
     "expected_failures_total": expected_failures_total,
+    "unexpected_successes_total": unexpected_successes_total,
     "actual_skips": sorted(actual_skips),
+    "allowed_compiler_skips": sorted(ALLOWED_COMPILER_SKIPS),
+    "compiler_skip_policy_satisfied": skip_ok,
     "compiler": {
         "name": compiler_name,
         "path": compiler_path,
@@ -3379,10 +3986,18 @@ report = {
     "duplicate_required_regression_ids": duplicate_required_ids,
     "required_regression_counts": required_counts,
     "required_regression_result": "28/28" if audit_28_ok else "FAILED",
+    "superseded_attempt_ids": sorted(superseded_attempt_ids),
+    "duplicate_attempt_ids": duplicate_attempt_ids,
+    "unresolved_timeout_attempt_ids": unresolved_timeout_attempt_ids,
+    "orphan_attempt_ids": orphan_attempt_ids,
+    "invalid_superseded_attempt_ids": invalid_superseded_attempt_ids,
     "cleanup": cleanup,
+    "initial_git_status": initial_git_status,
+    "final_git_status": final_git_status,
     "fatal_error": fatal_error,
     "problems": problems,
-    "rows": rows,
+    "module_results": module_results,
+    "attempts": attempt_rows,
 }
 evidence_path.write_text(
     json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True),
@@ -3396,6 +4011,8 @@ print(json.dumps({
     "failures": failures_total,
     "errors": errors_total,
     "expected_failures": expected_failures_total,
+    "unexpected_successes": unexpected_successes_total,
+    "superseded_attempts": len(superseded_attempt_ids),
     "required_regressions": report["required_regression_result"],
     "cleanup": cleanup,
     "problems": problems,
@@ -3403,17 +4020,27 @@ print(json.dumps({
 if problems:
     raise SystemExit("Task 6 isolated full gate failed; inspect " + str(evidence_path))
 '@ | py -
-if ($LASTEXITCODE -ne 0) { throw "Task 6 isolated full gate failed: $LASTEXITCODE" }
+  $task6GateExit = $LASTEXITCODE
+  if (Test-Path -LiteralPath $task6EvidencePath) {
+    $task6EvidenceHash = (Get-FileHash -LiteralPath $task6EvidencePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Write-Output "Task 6 Gate D evidence: $task6EvidencePath"
+    Write-Output "Task 6 Gate D SHA-256: $task6EvidenceHash"
+  }
+} finally {
+  Remove-Item Env:TASK6_REVIEWED_BASE_SHA -ErrorAction SilentlyContinue
+  Remove-Item Env:TASK6_GATE_EVIDENCE_PATH -ErrorAction SilentlyContinue
+}
+if ($task6GateExit -ne 0) { throw "Task 6 isolated full gate failed: $task6GateExit" }
 ~~~
 
-The runner must preserve the emitted evidence JSON and record its SHA-256. A missing/duplicate sentinel, wrong import root, nonzero child, timeout, test failure/error/expected failure/unexpected success, Job Object error, surviving descendant, 28-ID count other than exactly one each, skip-set mismatch, or incomplete long/short cleanup is a gate failure.
+The runner must preserve the emitted evidence JSON and recorded SHA-256. A timed-out module is not itself RED only when its attempt ID appears exactly once in `superseded_attempt_ids`, contributes zero authoritative IDs/results, and its discovery plus per-ID replacement is complete and exact-once. A missing/duplicate sentinel, wrong import root, discovery/per-ID timeout, test failure/error/expected failure/unexpected success, Job Object error, surviving descendant, mismatch between discovered and fallback-executed IDs, duplicate global authoritative ID, 28-ID count other than exactly one each, skip-set mismatch, repository mutation, or incomplete long/short cleanup is a gate failure.
 Record actual module/test/skip/failure/error/nonzero totals. Do not hardcode recovered carrier totals (`117/563`) or current baseline totals (`112/543`) as expected Task 6 totals.
 
 Local compiler-dependent skips must match the documented allowed local skip set exactly. Hosted CI must use the real compiler and have no unexpected skip.
 
 Historical carrier-free mechanical gate (superseded; do not execute after `b19980d`):
 
-The following block is retained only as the original protocol record. Section 0.4 replaces it with the executable `b19980d..candidate` and `b19980d..merge` gate and the exact three reconciled carrier paths.
+The following block, including its 138-entry `$allowedExact`, is retained only as the original protocol record. Sections 0.4 and 0.8 replace it with the executable current-base candidate/merge gate, the exact 139-entry product allowlist, and the exact three reconciled carrier paths. Do not copy or execute this historical list.
 
 ```powershell
 $startAnchor = '969ce9462a688e94c887d6e77359e40296d8927b'
@@ -3609,11 +4236,11 @@ if ($unexpected.Count -ne 0) {
 
 If a legitimate implementation needs another path, add that exact path to this reviewed plan/allowlist before it is changed or committed. Never weaken the gate to a broad `.github/**`, `src/**`, or `tests/**` allowance.
 
-After preliminary gates, write `docs/superpowers/plans/2026-07-15-phase1-task6-gate-evidence.md` with slice RED/GREEN facts and the **tested product tree SHA**, then commit it as `docs: record Phase 1 Task 6 pre-final gate evidence`. That tracked file never claims its own commit SHA, the later final rerun, final reviewer verdict, hosted checks, or merge facts. Those later facts live in the exact-head PR/check evidence and the post-merge closeout document, preventing evidence self-reference.
+After the pre-evidence full Gate A/B/C/D run is GREEN, write `docs/superpowers/plans/2026-07-15-phase1-task6-gate-evidence.md` with slice RED/GREEN facts and the **tested product tree SHA**, then commit it as `docs: record Phase 1 Task 6 pre-final gate evidence`. That tracked file never claims its own commit SHA, the later final rerun, final reviewer verdict, hosted checks, or merge facts. Its commit creates a new final HEAD; section 0.8.7 then requires fresh exact-path/carrier plus full A/B/C/D plus independent 28/28 and both fresh reviews on that unchanged final HEAD. Those later facts live in the exact-head PR/check evidence and the post-merge closeout document, preventing evidence self-reference.
 
 ### Slice 10 — Formal review, product PR, merge, and post-merge accounting
 
-This numbered sequence is the historical pre-reconciliation protocol. For current execution, section 0.2 replaces its base/merge rules and section 0.6 replaces its obsolete-PR and closeout actions; the remaining semantic verification requirements apply only where they do not conflict with section 0.
+This numbered sequence is the historical pre-reconciliation protocol. For current execution, sections 0.8.5-0.8.7 replace its complete pre-final/final gate order, base/merge rules, and evidence authority, while section 0.6 replaces its obsolete-PR and closeout actions. The remaining semantic verification requirements apply only where they do not conflict with section 0.8.
 
 1. Fetch `origin/main`. Require start anchor `969ce9462a688e94c887d6e77359e40296d8927b` to be its ancestor and require `git merge-base origin/main HEAD` to equal `origin/main`. If main advanced and is not already contained, rebase the Task 6 commits onto the new `origin/main`, refresh the pre-final evidence commit without self-SHA claims, then restart Slice 9 and this slice.
 2. With the pre-final evidence already committed and a clean worktree, run the focused, related, isolated full, package/schema/installed-wheel-migration, fixture, source-integrity, VS Code, CLI smoke, compile, diff, and carrier-free gates **again at the unchanged candidate HEAD**. The installed-wheel gate must again execute and validate every exact Task 6 migration from its sanitized repository-external working directory under `python -I`; source-tree migration results cannot stand in for it. Store raw logs/CSV outside the checkout; do not edit tracked evidence afterward.
