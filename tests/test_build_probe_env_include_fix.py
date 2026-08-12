@@ -8,7 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
-from unit_test_runner.build.build_workspace_generator import generate_build_workspace
+from tests.spec_support import generate_public_build_workspace as generate_build_workspace
 from unit_test_runner.c_analyzer.source_digest import build_source_digest
 from unit_test_runner.harness.harness_skeleton_generator import generate_harness_skeleton
 from unit_test_runner.vc6.dsp_options import parse_build_settings, tokenize_compiler_options
@@ -167,9 +167,10 @@ class BuildProbeEnvIncludeFixTests(unittest.TestCase):
             self.assertIn("DWORD Target_Invoke_Shared3(void);", target_header)
             self.assertIn("DWORD Shared3(void);", target_source)
             self.assertNotIn('#include "shared.h"', target_source)
-            self.assertIn("DWORD actual_return;", test_source)
+            self.assertIn("UTR_REVIEW_REQUIRED", test_source)
+            self.assertNotIn("DWORD actual_return;", test_source)
 
-    def test_generated_tests_initialize_typedef_struct_value_parameters_as_aggregates(self):
+    def test_unreviewed_typedef_struct_value_parameter_remains_review_only(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             source = Path(temp_dir) / "shared" / "shared.c"
             source.parent.mkdir(parents=True)
@@ -204,7 +205,8 @@ class BuildProbeEnvIncludeFixTests(unittest.TestCase):
             generate_harness_skeleton(signature, {"global_accesses": [], "file_scope_declarations": []}, {"stub_candidates": []}, design, Path(temp_dir))
 
             test_source = (Path(temp_dir) / "generated" / "tests" / "test_Shared3.c").read_text(encoding="cp932")
-            self.assertIn("gbl_input prm = {0};", test_source)
+            self.assertIn("UTR_REVIEW_REQUIRED", test_source)
+            self.assertNotIn("gbl_input prm = {0};", test_source)
             self.assertNotIn("prm = TBD_VALID_INT_VALUE;", test_source)
 
 

@@ -1,24 +1,40 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://unit-test-runner.local/schemas/function_dossier.schema.json",
-  "title": "Function Dossier",
-  "allOf": [
-    {
-      "$ref": "common.schema.json"
-    },
-    {
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_kind", "subject", "data"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "artifact_kind": {"const": "function_dossier"},
+    "subject": {"$ref": "common.schema.json#/$defs/subject"},
+    "data": {
       "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target", "project_membership", "build_context", "function",
+        "test_design", "diagnostics", "workspace_root", "created_at",
+        "artifact_index", "summaries", "traceability", "review_items",
+        "unresolved_items", "next_actions", "readiness", "warnings"
+      ],
       "properties": {
-        "artifact_kind": {
-          "const": "function_dossier"
-        },
-        "schema_version": {
-          "const": "1.1.0"
-        },
-        "data": {
-          "$ref": "common.schema.json#/$defs/functionDossierDataV1_1"
-        }
+        "target": {"type": "object"},
+        "project_membership": {"type": "array", "items": {"type": "object"}},
+        "build_context": {"type": "object"},
+        "function": {"type": "object"},
+        "test_design": {"type": "object"},
+        "diagnostics": {"type": "array"},
+        "workspace_root": {"const": "."},
+        "created_at": {"type": "string", "minLength": 1},
+        "artifact_index": {"type": "array", "items": {"type": "object"}},
+        "summaries": {"type": "object"},
+        "traceability": {"type": "array", "items": {"type": "object"}},
+        "review_items": {"type": "array", "items": {"type": "object"}},
+        "unresolved_items": {"type": "array", "items": {"type": "object"}},
+        "next_actions": {"type": "array", "items": {"type": "object"}},
+        "readiness": {"type": "object"},
+        "warnings": {"type": "array", "items": {"type": "object"}}
       }
     }
-  ]
+  }
 }

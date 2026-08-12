@@ -8,6 +8,7 @@ from typing import Any, Iterable
 from unit_test_runner.encoding import decode_bytes_auto
 from unit_test_runner.c_analyzer.analysis_common import split_top_level
 from unit_test_runner.c_analyzer.masker import mask_source_text
+from unit_test_runner.c_analyzer.type_classifier import classify_c_type
 
 from .models import ResolvedParameter, ResolvedSignature
 
@@ -58,12 +59,23 @@ def resolve_dependency_signature(
     reachable = _unique_paths(reachable_headers)
     project_candidates = _unique_paths(project_headers)
     headers = [*reachable, *[path for path in project_candidates if path not in reachable]]
-    sources = _unique_paths([target_source, *project_sources])
+    target_sources = _unique_paths([target_source])
+    sources = _unique_paths([*target_sources, *project_sources])
     typedefs = _collect_typedefs([*headers, *sources])
     declaration_candidates: list[_SignatureCandidate] = []
     definition_candidates: list[_SignatureCandidate] = []
     for path in headers:
         declaration_candidates.extend(_find_signature_candidates(path, callee, want_definition=False, typedefs=typedefs))
+    for path in target_sources:
+        declaration_candidates.extend(
+            _find_signature_candidates(
+                path,
+                callee,
+                want_definition=False,
+                typedefs=typedefs,
+                file_scope_only=True,
+            )
+        )
     for path in sources:
         definition_candidates.extend(_find_signature_candidates(path, callee, want_definition=True, typedefs=typedefs))
 
@@ -111,9 +123,6 @@ def resolve_dependency_signature(
             confidence="high" if resolution == "exact" else "low",
         )
 
-    inferred = _infer_simple_signature(callee, calls)
-    if inferred is not None:
-        return inferred
     return ResolvedSignature(
         resolution="review_required",
         conflicts=["No compatible prototype or definition was found, and the call expression is not safe to infer."],
@@ -131,14 +140,24 @@ def reachable_header_paths(source_digest: dict[str, Any]) -> list[Path]:
     return result
 
 
-def _find_signature_candidates(path: Path, callee: str, *, want_definition: bool, typedefs: dict[str, str]) -> list[_SignatureCandidate]:
+def _find_signature_candidates(
+    path: Path,
+    callee: str,
+    *,
+    want_definition: bool,
+    typedefs: dict[str, str],
+    file_scope_only: bool = False,
+) -> list[_SignatureCandidate]:
     try:
         text = decode_bytes_auto(path.read_bytes())
     except OSError:
         return []
+    masked_text = mask_source_text(text, path).masked_text
     result: list[_SignatureCandidate] = []
     for match in re.finditer(rf"\b{re.escape(callee)}\s*\(", text):
         name_start = match.start()
+        if file_scope_only and _brace_depth_at(masked_text, name_start) != 0:
+            continue
         if name_start > 0 and text[name_start - 1] == "*":
             continue
         open_paren = text.find("(", match.start())
@@ -168,6 +187,16 @@ def _find_signature_candidates(path: Path, callee: str, *, want_definition: bool
         prototype = _render_prototype(return_type, convention, callee, parameters)
         result.append(_SignatureCandidate(path.resolve(), is_definition, return_type, return_canonical, return_category, convention, parameters, prototype))
     return result
+
+
+def _brace_depth_at(text: str, offset: int) -> int:
+    depth = 0
+    for character in text[:offset]:
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth = max(0, depth - 1)
+    return depth
 
 
 def _matching_paren(text: str, open_index: int) -> int:
@@ -304,32 +333,6 @@ def _render_prototype(return_type: str, convention: str | None, callee: str, par
     return f"{prefix} {callee}({', '.join(values) if values else 'void'})"
 
 
-def _infer_simple_signature(callee: str, calls: list[dict[str, Any]]) -> ResolvedSignature | None:
-    if not calls:
-        return None
-    counts = {len(call.get("arguments", [])) for call in calls}
-    if len(counts) != 1:
-        return None
-    count = counts.pop()
-    for call in calls:
-        for argument in call.get("arguments", []):
-            if argument.get("passing_mode_hint") != "by_value":
-                return None
-            if argument.get("argument_kind") not in {"literal", "parameter", "global", "local", "constant_or_macro"}:
-                return None
-    parameters = [ResolvedParameter(index, f"arg{index}", "int", canonical_type="int", type_category="scalar") for index in range(count)]
-    return ResolvedSignature(
-        resolution="compatible_inferred",
-        return_type_raw="int",
-        return_type_canonical="int",
-        return_type_category="scalar",
-        parameters=parameters,
-        prototype=_render_prototype("int", None, callee, parameters),
-        confidence="medium",
-    )
-
-
-
 def _collect_typedefs(paths: Iterable[Path]) -> dict[str, str]:
     typedefs: dict[str, str] = {}
     for path in paths:
@@ -370,21 +373,14 @@ def _canonical_type(type_raw: str, typedefs: dict[str, str]) -> tuple[str, str]:
             return _FUNCTION_POINTER_TYPE, "function_pointer"
         current = re.sub(rf"\b{re.escape(alias)}\b", underlying, current, count=1)
         current = _normalize_type(current)
-    compact = current.replace(" ", "")
     if current == "void":
         return current, "void"
-    if _FUNCTION_POINTER_TYPE in current or "(*" in compact:
+    if _FUNCTION_POINTER_TYPE in current or "(*" in current.replace(" ", ""):
         return current, "function_pointer"
-    if "*" in current:
-        return current, "pointer"
-    words = [word for word in re.findall(r"[A-Za-z_]\w*", current) if word not in _QUALIFIERS]
-    if words and words[0] in {"struct", "union"}:
+    if current.startswith(("struct ", "union ")) and "*" not in current:
         return current, "aggregate"
-    if words and words[0] == "enum":
-        return current, "scalar"
-    if words and all(word in _BASIC_TYPE_WORDS for word in words):
-        return current, "scalar"
-    return current, "unknown"
+    kind = classify_c_type(current).kind
+    return current, "unknown" if kind == "unresolved" else kind
 
 def _unique_paths(values: Iterable[Path | str]) -> list[Path]:
     result: list[Path] = []

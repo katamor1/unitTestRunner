@@ -138,9 +138,11 @@ class PracticalVc6FixtureTests(unittest.TestCase):
                 str(projects_json),
             )
             projects = json.loads(projects_json.read_text(encoding="utf-8"))
-            self.assertEqual("Product", projects["workspace_name"])
+            self.assertEqual(1, len(projects["workspaces"]))
+            self.assertTrue(projects["workspaces"][0]["dsw_path"].endswith("Product.dsw"))
 
-            mapped = run_cli(
+            mapping_json = temp / "mapping.json"
+            run_cli(
                 "map-source",
                 "--workspace",
                 str(FIXTURE_ROOT),
@@ -148,8 +150,18 @@ class PracticalVc6FixtureTests(unittest.TestCase):
                 str(FIXTURE_ROOT / "Product.dsw"),
                 "--source",
                 "src/device_control.c",
+                "--project",
+                "DeviceControl",
+                "--out",
+                str(mapping_json),
             )
-            self.assertGreaterEqual(len(json.loads(mapped.stdout)["matches"]), 2)
+            self.assertEqual(
+                ["DeviceControl"],
+                [
+                    item["project_name"]
+                    for item in json.loads(mapping_json.read_text(encoding="utf-8"))["matches"]
+                ],
+            )
 
             out_dir = temp / "DeviceControl_Update"
             run_cli(
@@ -166,6 +178,8 @@ class PracticalVc6FixtureTests(unittest.TestCase):
                 "DeviceControl - Win32 Debug",
                 "--project",
                 "DeviceControl",
+                "--phase",
+                "harness",
                 "--out",
                 str(out_dir),
             )
@@ -173,17 +187,17 @@ class PracticalVc6FixtureTests(unittest.TestCase):
             dossier_path = out_dir / "reports" / "function_dossier.json"
             self.assertTrue(dossier_path.exists())
             dossier = json.loads(dossier_path.read_text(encoding="utf-8"))
-            self.assertEqual("DeviceControl_Update", dossier["target"]["function"])
-            self.assertEqual("DeviceControl - Win32 Debug", dossier["target"]["configuration"])
+            self.assertEqual("DeviceControl_Update", dossier["subject"]["function"])
+            self.assertEqual("DeviceControl - Win32 Debug", dossier["subject"]["configuration"])
             self.assertTrue((out_dir / "reports" / "function_dossier.md").exists())
             self.assertTrue((out_dir / "reports" / "call_report.md").exists())
             self.assertTrue((out_dir / "reports" / "global_access_report.md").exists())
 
-            probe = run_cli("build-probe", "--dossier", str(dossier_path), "--dry-run")
+            probe = run_cli("--json", "build-probe", "--workspace", str(out_dir), "--dry-run")
             probe_result = json.loads(probe.stdout)
-            self.assertTrue(probe_result["dry_run"])
-            self.assertTrue((out_dir / "generated" / "build" / "Makefile").exists())
-            self.assertTrue((out_dir / "reports" / "build_probe.log").exists())
+            self.assertEqual("passed", probe_result["outcome"])
+            self.assertTrue((out_dir / "build" / "Makefile").exists())
+            self.assertTrue((out_dir / "reports" / "build_probe_report.json").exists())
 
 
 if __name__ == "__main__":

@@ -7,56 +7,38 @@ export interface AdapterSettings {
   outputRoot: string;
   suiteManifestPath: string;
   defaultConfiguration: string;
-  defaultProject?: string;
-  vcvarsPath?: string;
+  defaultProject: string;
+  vcvarsPath: string;
   autoOpenDossier: boolean;
-  finalizeDossierAfterAnalyze: boolean;
-  useJsonOutput: boolean;
-  showOutputChannel: boolean;
   runBuildProbeRequiresConfirmation: boolean;
   runTestsRequiresConfirmation: boolean;
   commandTimeoutSeconds: number;
-  quickProfile: string;
-  quickOutputRoot: string;
-  quickReusePreviousWorkspace: boolean;
-  quickAutoOpenSummary: boolean;
-  quickAllowExecution: boolean;
 }
 
 export type RawSettings = Record<string, unknown>;
 
 export interface WorkspaceFolderLike {
-  uri: {
-    fsPath: string;
-  };
+  uri: { fsPath: string };
 }
 
-export function defaultSourceRootFromWorkspaceFolders(workspaceFolders: readonly WorkspaceFolderLike[] | undefined): string {
-  return workspaceFolders?.[0]?.uri.fsPath ?? '';
+export function defaultSourceRootFromWorkspaceFolder(workspaceFolder: WorkspaceFolderLike | undefined): string {
+  return workspaceFolder?.uri.fsPath ?? '';
 }
 
 export function readAdapterSettingsFromObject(raw: RawSettings, defaultSourceRoot: string): AdapterSettings {
   return {
     cliPath: stringValue(raw.cliPath, DEFAULT_CLI_PATH),
-    sourceRoot: stringValue(nonEmptyString(raw.sourceRoot) ?? nonEmptyString(raw.workspaceRoot), defaultSourceRoot),
+    sourceRoot: stringValue(nonEmptyString(raw.sourceRoot), defaultSourceRoot),
     dswPath: stringValue(raw.dswPath, ''),
     outputRoot: stringValue(raw.outputRoot, ''),
     suiteManifestPath: stringValue(nonEmptyString(raw.suiteManifestPath), ''),
     defaultConfiguration: stringValue(nonEmptyString(raw.defaultConfiguration), 'Win32 Debug'),
-    defaultProject: stringValue(nonEmptyString(raw.defaultProject) ?? nonEmptyString(raw.projectName), ''),
+    defaultProject: stringValue(nonEmptyString(raw.defaultProject), ''),
     vcvarsPath: stringValue(nonEmptyString(raw.vcvarsPath), ''),
     autoOpenDossier: booleanValue(raw.autoOpenDossier, true),
-    finalizeDossierAfterAnalyze: booleanValue(raw.finalizeDossierAfterAnalyze, true),
-    useJsonOutput: booleanValue(raw.useJsonOutput, true),
-    showOutputChannel: booleanValue(raw.showOutputChannel, true),
     runBuildProbeRequiresConfirmation: booleanValue(raw.runBuildProbeRequiresConfirmation, true),
     runTestsRequiresConfirmation: booleanValue(raw.runTestsRequiresConfirmation, true),
     commandTimeoutSeconds: numberValue(raw.commandTimeoutSeconds, 300),
-    quickProfile: stringValue(nonEmptyString(raw.quickProfile), 'design'),
-    quickOutputRoot: stringValue(nonEmptyString(raw.quickOutputRoot), ''),
-    quickReusePreviousWorkspace: booleanValue(raw.quickReusePreviousWorkspace, true),
-    quickAutoOpenSummary: booleanValue(raw.quickAutoOpenSummary, true),
-    quickAllowExecution: booleanValue(raw.quickAllowExecution, false),
   };
 }
 

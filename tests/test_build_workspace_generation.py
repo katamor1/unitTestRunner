@@ -1,6 +1,6 @@
+import copy
 import json
-import os
-import subprocess
+import shutil
 import sys
 import tempfile
 import unittest
@@ -14,28 +14,123 @@ VC6_FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "vc6_project"
 
 sys.path.insert(0, str(SRC_ROOT))
 
-from unit_test_runner.build.build_workspace_generator import generate_build_workspace
+from tests.spec_support import generate_public_build_workspace as generate_build_workspace
 from unit_test_runner.build.log_parser import parse_build_log
 from unit_test_runner.c_analyzer.source_digest import build_source_digest
-from unit_test_runner.dossier import analyze_function_workflow
+from unit_test_runner.dossier import OutputBoundaryError, analyze_function_workflow
 from unit_test_runner.process_control import ProcessTreeRunResult
 
-
-def run_module(*args):
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(SRC_ROOT)
-    return subprocess.run(
-        [sys.executable, "-m", "unit_test_runner", *args],
-        cwd=REPO_ROOT,
-        env=env,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-
-
 class BuildWorkspaceGenerationTests(unittest.TestCase):
+    def test_real_probe_stops_before_process_spawn_for_review_only_harness(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project = root / "project"
+            project.mkdir()
+            source = project / "control.c"
+            source.write_text("int Control_Update(void) { return 0; }\n", encoding="ascii")
+            output = root / "output"
+            build_context = {
+                "workspace_root": str(project),
+                "include_dirs": [],
+                "defines": [],
+                "compiler_options": [],
+            }
+            source_digest = build_source_digest(source, build_context).to_dict()
+            harness_report = {
+                "function": {"name": "Control_Update", "status": "partial"},
+                "source": {"path": str(source)},
+                "output_root": str(output),
+                "generated_files": [],
+                "test_skeletons": [
+                    {"test_case_id": "TC_001", "review_required": True}
+                ],
+                "unresolved_placeholders": [
+                    {"name": "review_required", "reason": "expected value unresolved"}
+                ],
+            }
+
+            with mock.patch("unit_test_runner.build.build_workspace_generator.run_process_tree") as run:
+                with mock.patch("unit_test_runner.build.build_workspace_generator.write_build_reports"):
+                    report, probe = generate_build_workspace(
+                        build_context,
+                        source_digest,
+                        harness_report,
+                        output,
+                        run_probe=True,
+                        dry_run=False,
+                    )
+
+        self.assertEqual("blocked", report.status)
+        self.assertEqual("blocked", probe.status)
+        self.assertFalse(probe.executed)
+        self.assertEqual(0, run.call_count)
+        self.assertTrue(any(item.code == "harness_review_required" for item in probe.diagnostics))
+
+    def test_generator_rejects_source_containment_and_reparse_output_before_writing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project = root / "project"
+            project.mkdir()
+            source = project / "target.c"
+            source.write_text("int Target(void) { return 0; }\n", encoding="ascii")
+            build_context = {
+                "workspace_root": str(project),
+                "include_dirs": [],
+                "defines": [],
+                "compiler_options": [],
+            }
+            source_digest = build_source_digest(source, build_context).to_dict()
+            harness_report = {
+                "function": {"name": "Target", "status": "generated"},
+                "source": {"path": str(source)},
+                "generated_files": [],
+            }
+            contained = project / "generated-workspace"
+
+            with self.assertRaisesRegex(ValueError, "outside the source root"):
+                generate_build_workspace(
+                    build_context,
+                    source_digest,
+                    harness_report,
+                    contained,
+                )
+
+            self.assertFalse(contained.exists())
+
+            real_external = root / "real-external"
+            real_external.mkdir()
+            linked_external = root / "linked-external"
+            try:
+                linked_external.symlink_to(real_external, target_is_directory=True)
+            except OSError:
+                return
+            with self.assertRaisesRegex(ValueError, "symlink or reparse"):
+                generate_build_workspace(
+                    build_context,
+                    source_digest,
+                    harness_report,
+                    linked_external / "workspace",
+                )
+
+    def test_analysis_rejects_source_contained_output_before_creating_its_layout(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_root = Path(temp_dir) / "source-root"
+            shutil.copytree(VC6_FIXTURE_ROOT, source_root)
+            output = source_root / "generated-workspace"
+
+            with self.assertRaisesRegex(OutputBoundaryError, "outside the source root"):
+                analyze_function_workflow(
+                    source_root,
+                    source_root / "Product.dsw",
+                    "src/control.c",
+                    "Control_Update",
+                    "Win32 Debug",
+                    output,
+                    "Control",
+                )
+
+            self.assertFalse(output.exists())
+
     def prepare_analysis(self, temp_dir):
         out_dir = Path(temp_dir) / "Control_Update"
         analyze_function_workflow(
@@ -46,6 +141,7 @@ class BuildWorkspaceGenerationTests(unittest.TestCase):
             "Win32 Debug",
             out_dir,
             "Control",
+            phase="harness",
         )
         reports = out_dir / "reports"
         return out_dir, {
@@ -224,10 +320,14 @@ class BuildWorkspaceGenerationTests(unittest.TestCase):
 
             with mock.patch("unit_test_runner.build.build_workspace_generator.shutil.which", return_value="tool.exe"):
                 with mock.patch("unit_test_runner.build.build_workspace_generator.run_process_tree", side_effect=fake_run):
+                    reviewed_harness = copy.deepcopy(reports["harness_report"])
+                    reviewed_harness["unresolved_placeholders"] = []
+                    for test in reviewed_harness.get("test_skeletons", []):
+                        test["review_required"] = False
                     _report, probe = generate_build_workspace(
                         reports["build_context"],
                         reports["source_digest"],
-                        reports["harness_report"],
+                        reviewed_harness,
                         out_dir,
                         run_probe=True,
                         dry_run=False,
@@ -250,10 +350,14 @@ class BuildWorkspaceGenerationTests(unittest.TestCase):
 
             with mock.patch("unit_test_runner.build.build_workspace_generator.shutil.which", return_value=None):
                 with mock.patch("unit_test_runner.build.build_workspace_generator.run_process_tree", side_effect=fake_run) as run:
+                    reviewed_harness = copy.deepcopy(reports["harness_report"])
+                    reviewed_harness["unresolved_placeholders"] = []
+                    for test in reviewed_harness.get("test_skeletons", []):
+                        test["review_required"] = False
                     _report, probe = generate_build_workspace(
                         reports["build_context"],
                         reports["source_digest"],
-                        reports["harness_report"],
+                        reviewed_harness,
                         out_dir,
                         run_probe=True,
                         dry_run=False,
@@ -281,60 +385,6 @@ generated\tests\test.c(7) : fatal error C1083: Cannot open include file: 'stdint
         self.assertEqual(["ReadSensor", "WriteOutput"], [item.symbol_name for item in parsed.unresolved_symbols])
         self.assertTrue(parsed.pch_issues)
         self.assertTrue(parsed.vc6_compatibility_issues)
-
-    def test_build_probe_cli_and_analyze_function_connect_build_workspace(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            out_dir = Path(temp_dir) / "Control_Update"
-            analyze = run_module(
-                "--json",
-                "analyze-function",
-                "--workspace",
-                str(VC6_FIXTURE_ROOT),
-                "--dsw",
-                str(VC6_FIXTURE_ROOT / "Product.dsw"),
-                "--source",
-                "src/control.c",
-                "--function",
-                "Control_Update",
-                "--configuration",
-                "Win32 Debug",
-                "--project",
-                "Control",
-                "--phase",
-                "execution",
-                "--out",
-                str(out_dir),
-            )
-            self.assertEqual(0, analyze.returncode, analyze.stderr)
-            envelope = json.loads(analyze.stdout)
-            self.assertEqual("passed", envelope["data"]["outcome"])
-            self.assertIn("dossier review", envelope["data"]["message"])
-            payload = envelope["data"]["details"]
-            self.assertIn("build_workspace", payload)
-            self.assertIn("build_probe", payload)
-
-            probe = run_module("--json", "build-probe", "--workspace", str(out_dir), "--dry-run")
-            self.assertEqual(0, probe.returncode, probe.stderr)
-            probe_payload = json.loads(probe.stdout)
-            self.assertEqual("passed", probe_payload["data"]["outcome"])
-            self.assertTrue((out_dir / "build" / "Makefile").exists())
-
-            explicit = run_module(
-                "--json",
-                "build-probe",
-                "--build-context",
-                str(out_dir / "reports" / "build_context.json"),
-                "--source-digest",
-                str(out_dir / "reports" / "source_digest.json"),
-                "--harness-report",
-                str(out_dir / "reports" / "harness_skeleton_report.json"),
-                "--out",
-                str(Path(temp_dir) / "explicit_build"),
-                "--dry-run",
-            )
-            self.assertEqual(0, explicit.returncode, explicit.stderr)
-            self.assertEqual("passed", json.loads(explicit.stdout)["data"]["outcome"])
-
 
 if __name__ == "__main__":
     unittest.main()

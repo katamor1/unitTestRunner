@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 from ..dsw_parser import parse_dsw
-from ..path_utils import normalize_relative
 from .dsp_models import DspConfiguration, DspFileEntry, DspParseWarning
 from .dsp_parser import parse_dsp
 
@@ -103,24 +102,6 @@ def map_source_membership(
                 )
             )
     return result
-
-
-def membership_to_legacy_matches(membership: SourceMembership, workspace_root: Path | str) -> list[dict[str, Any]]:
-    root = Path(workspace_root).resolve()
-    matches: list[dict[str, Any]] = []
-    for match in membership.matches:
-        for configuration in match.configurations:
-            matches.append(
-                {
-                    "dsw": normalize_relative(match.dsw_path.resolve(), root) if match.dsw_path else None,
-                    "dsp": normalize_relative(match.dsp_path.resolve(), root),
-                    "project_name": match.project_name,
-                    "configuration": _short_configuration(configuration),
-                    "configuration_full_name": configuration.full_name,
-                    "source": normalize_relative(match.source_entry.source_path_absolute.resolve(), root),
-                }
-            )
-    return matches
 
 
 def _source_absolute(root_dir: Path, source: str | Path) -> Path:

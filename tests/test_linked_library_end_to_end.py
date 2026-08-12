@@ -83,16 +83,15 @@ def _write_workspace(root: Path) -> tuple[Path, Path]:
 
 
 class LinkedLibraryEndToEndTests(unittest.TestCase):
-    def test_quick_check_build_flow_uses_real_libraries_without_generating_stubs(self):
+    def test_harness_and_build_probe_use_real_libraries_without_generating_stubs(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir) / "workspace"
             workspace.mkdir()
             dsw, source = _write_workspace(workspace)
             out_dir = Path(temp_dir) / "result"
 
-            completed = run_module(
-                "--json",
-                "quick-check",
+            analyzed = run_module(
+                "--json", "analyze-function",
                 "--workspace",
                 str(workspace),
                 "--dsw",
@@ -105,10 +104,14 @@ class LinkedLibraryEndToEndTests(unittest.TestCase):
                 "Win32 Debug",
                 "--project",
                 "App",
-                "--profile",
-                "build",
+                "--phase",
+                "harness",
                 "--out",
                 str(out_dir),
+            )
+            self.assertEqual(0, analyzed.returncode, analyzed.stderr)
+            completed = run_module(
+                "--json", "build-probe", "--workspace", str(out_dir), "--dry-run"
             )
 
             self.assertEqual(0, completed.returncode, completed.stderr)
@@ -116,7 +119,6 @@ class LinkedLibraryEndToEndTests(unittest.TestCase):
             harness = json.loads((out_dir / "reports" / "harness_skeleton_report.json").read_text(encoding="utf-8"))
             build_context = json.loads((out_dir / "reports" / "build_context.json").read_text(encoding="utf-8"))
             build_workspace = json.loads((out_dir / "reports" / "build_workspace_report.json").read_text(encoding="utf-8"))
-            quick_summary = json.loads((out_dir / "reports" / "quick_summary.json").read_text(encoding="utf-8"))
             makefile = (out_dir / "build" / "Makefile").read_text(encoding="cp932")
             debug_dsp = next((out_dir / "build").glob("UTR_*.dsp")).read_text(encoding="cp932")
 
@@ -129,8 +131,7 @@ class LinkedLibraryEndToEndTests(unittest.TestCase):
             self.assertIn("ProductLib.lib", makefile)
             self.assertIn("Explicit.lib", debug_dsp)
             self.assertIn("ProductLib.lib", debug_dsp)
-            self.assertEqual(2, quick_summary["link_resolution"]["library_count"])
-            self.assertEqual(2, quick_summary["link_resolution"]["linked_function_count"])
+            self.assertEqual("passed", json.loads(completed.stdout)["outcome"])
 
 
 if __name__ == "__main__":

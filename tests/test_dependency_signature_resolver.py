@@ -123,7 +123,43 @@ class DependencySignatureResolverTests(unittest.TestCase):
         self.assertEqual("unsigned long", signature.return_type_raw)
         self.assertEqual(Path("include/helper.h"), signature.declaration_source)
 
-    def test_simple_call_without_declaration_is_compatible_inferred(self):
+    def test_target_source_file_scope_prototype_is_exact_without_type_inference(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "target.c"
+            target.write_text(
+                "int ProductCalc(int value);\n"
+                "int Consumer(int value) { return ProductCalc(value); }\n",
+                encoding="utf-8",
+            )
+
+            signature = resolve_dependency_signature(
+                "ProductCalc",
+                workspace_root=root,
+                target_source=target,
+                reachable_headers=[],
+                project_sources=[],
+                calls=[
+                    {
+                        "arguments": [
+                            {
+                                "raw": "value",
+                                "argument_kind": "parameter",
+                                "passing_mode_hint": "by_value",
+                            }
+                        ],
+                        "return_usage": {"usage_kind": "returned"},
+                    }
+                ],
+            )
+
+        self.assertEqual("exact", signature.resolution)
+        self.assertEqual("int", signature.return_type_raw)
+        self.assertEqual(["int"], [item.type_raw for item in signature.parameters])
+        self.assertEqual(Path("target.c"), signature.declaration_source)
+        self.assertIsNone(signature.definition_source)
+
+    def test_simple_call_without_declaration_requires_review_instead_of_inventing_int_types(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             target = root / "target.c"
@@ -143,9 +179,10 @@ class DependencySignatureResolverTests(unittest.TestCase):
                 ],
             )
 
-        self.assertEqual("compatible_inferred", signature.resolution)
-        self.assertEqual("int", signature.return_type_raw)
-        self.assertEqual("int", signature.parameters[0].type_raw)
+        self.assertEqual("review_required", signature.resolution)
+        self.assertIsNone(signature.return_type_raw)
+        self.assertEqual([], signature.parameters)
+        self.assertTrue(any("prototype" in item.lower() for item in signature.conflicts))
 
 
     def test_extern_macro_storage_prefix_does_not_conflict_with_definition(self):

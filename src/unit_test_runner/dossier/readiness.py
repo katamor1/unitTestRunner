@@ -5,7 +5,6 @@ from collections.abc import Iterable
 from unit_test_runner.contracts import RunOutcome
 
 from .dossier_models import DossierArtifact, DossierReadiness, DossierUnresolvedItem
-from .review_assessment import ReviewAssessment
 
 
 _CORE_REVIEW_KINDS = {
@@ -20,22 +19,16 @@ def assess_readiness(
     blocked_reasons: list[str],
     unresolved_items: list[DossierUnresolvedItem],
     *,
-    review_assessment: ReviewAssessment | None = None,
     execution_outcome: RunOutcome | str | None = None,
-    evidence_integrity: bool | None = None,
 ) -> DossierReadiness:
     authoritative = {
         artifact.artifact_kind
         for artifact in artifacts
-        if artifact.contract_status == "valid" and not artifact.compatible_migrated
+        if artifact.contract_status == "valid"
     }
     semantic_blockers = list(blocked_reasons)
     for artifact in artifacts:
-        if artifact.compatible_migrated and artifact.required_level != "optional":
-            semantic_blockers.append(
-                f"{artifact.artifact_kind} is compatible-migrated display-only"
-            )
-        elif (
+        if (
             artifact.artifact_kind in _CORE_REVIEW_KINDS
             and artifact.required_level != "optional"
             and artifact.contract_status != "valid"
@@ -48,18 +41,10 @@ def assess_readiness(
     ready_for_review = _CORE_REVIEW_KINDS.issubset(authoritative) and not any(
         reason for reason in blocked_reasons
     )
-    review_complete = (
-        review_assessment.review_complete if review_assessment is not None else False
-    )
+    review_complete = False
     outcome = _coerce_outcome(execution_outcome)
     test_green = outcome is RunOutcome.PASSED
-    if evidence_integrity is None:
-        evidence_ready = {
-            "test_execution_report",
-            "evidence_manifest",
-        }.issubset(authoritative)
-    else:
-        evidence_ready = bool(evidence_integrity)
+    evidence_ready = test_green
 
     blocked = bool(semantic_blockers)
     mvp_level = _mvp_level(authoritative) if not blocked else "unknown"
@@ -109,13 +94,10 @@ def _coerce_outcome(value: RunOutcome | str | None) -> RunOutcome | None:
 
 
 def _mvp_level(authoritative: set[str]) -> str:
-    if {"test_execution_report", "evidence_manifest"}.issubset(authoritative):
-        return "mvp4_execution_evidence"
     if {
         "harness_skeleton_report",
         "build_workspace_report",
         "build_probe_report",
-        "build_completion_plan",
     }.issubset(authoritative):
         return "mvp3_build_probe"
     if {

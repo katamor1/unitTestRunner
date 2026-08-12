@@ -12,19 +12,12 @@ PACKAGE_ROOT = SRC_ROOT / "unit_test_runner"
 
 
 class RepositorySourceTrackingTests(unittest.TestCase):
-    def test_all_python_package_sources_are_tracked_and_not_ignored(self):
-        completed = subprocess.run(
-            ["git", "ls-files", "src/unit_test_runner"],
-            cwd=REPO_ROOT,
-            text=True,
-            stdout=subprocess.PIPE,
-            check=True,
-        )
-        tracked = {line.strip() for line in completed.stdout.splitlines() if line.strip()}
+    def test_all_python_package_sources_are_version_control_candidates_and_not_ignored(self):
+        candidates = _version_control_candidates()
 
         for source in PACKAGE_ROOT.rglob("*.py"):
             relative = source.relative_to(REPO_ROOT).as_posix()
-            self.assertIn(relative, tracked, relative)
+            self.assertIn(relative, candidates, relative)
             ignored = subprocess.run(
                 ["git", "check-ignore", "--no-index", "-q", relative],
                 cwd=REPO_ROOT,
@@ -32,16 +25,8 @@ class RepositorySourceTrackingTests(unittest.TestCase):
             )
             self.assertNotEqual(0, ignored.returncode, relative)
 
-    def test_static_local_import_targets_exist_and_are_tracked(self):
-        tracked = set(
-            subprocess.run(
-                ["git", "ls-files", "src/unit_test_runner"],
-                cwd=REPO_ROOT,
-                text=True,
-                stdout=subprocess.PIPE,
-                check=True,
-            ).stdout.splitlines()
-        )
+    def test_static_local_import_targets_exist_and_are_version_control_candidates(self):
+        candidates = _version_control_candidates()
         failures = []
         for source in PACKAGE_ROOT.rglob("*.py"):
             module_name = _module_name(source)
@@ -53,9 +38,30 @@ class RepositorySourceTrackingTests(unittest.TestCase):
                     failures.append(f"{source.relative_to(REPO_ROOT)} imports missing {imported}")
                     continue
                 relative = target.relative_to(REPO_ROOT).as_posix()
-                if relative not in tracked:
-                    failures.append(f"{source.relative_to(REPO_ROOT)} imports untracked {relative}")
+                if relative not in candidates:
+                    failures.append(
+                        f"{source.relative_to(REPO_ROOT)} imports a file outside version-control candidates: {relative}"
+                    )
         self.assertEqual([], failures)
+
+
+def _version_control_candidates() -> set[str]:
+    completed = subprocess.run(
+        [
+            "git",
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            "src/unit_test_runner",
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        check=True,
+    )
+    return {line.strip() for line in completed.stdout.splitlines() if line.strip()}
 
 
 def _module_name(source: Path) -> str:

@@ -17,8 +17,5 @@ class ContractViolation:
 @dataclass(frozen=True)
 class LoadedArtifact:
     kind: ArtifactKind
-    source_version: str
-    current_version: str
     payload: dict[str, Any]
-    migrated: bool
     violations: tuple[ContractViolation, ...]

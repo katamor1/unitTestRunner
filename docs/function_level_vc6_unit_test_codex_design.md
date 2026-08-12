@@ -1,5 +1,7 @@
 # 関数単位 VC6/C90 単体テスト支援ツール 企画・設計書
 
+> **Historical / superseded:** この文書は初期設計の記録です。記載された旧CLI・成果物名は現行契約ではありません。実装と完了判定には [v0.1 redesign roadmap](v01-redesign-roadmap.md) だけを使用してください。
+
 作成日: 2026-07-04  
 対象リポジトリ: `katamor1/unitTestRunner`  
 製造担当想定: CODEX  

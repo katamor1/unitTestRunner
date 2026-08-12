@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import unittest
 
-from unit_test_runner.contracts import ArtifactKind
-from unit_test_runner.contracts.registry import get_contract, iter_contract_versions
 from unit_test_runner.test_spec import (
     ArtifactReference,
     CurrentArtifactContext,
@@ -15,17 +13,6 @@ from tests.spec_support import copied_payload, current_context
 
 
 class TestSpecContractTests(unittest.TestCase):
-    def test_only_test_spec_advances_to_v1_1(self):
-        self.assertEqual("1.1.0", get_contract(ArtifactKind.TEST_SPEC).current_version)
-        self.assertEqual("1.0.0", get_contract(ArtifactKind.CLI_RESULT).current_version)
-        self.assertEqual("1.0.0", get_contract(ArtifactKind.TEST_SPEC, "1.0.0").current_version)
-        versions = {
-            item.current_version
-            for item in iter_contract_versions()
-            if item.kind is ArtifactKind.TEST_SPEC
-        }
-        self.assertEqual({"1.0.0", "1.1.0"}, versions)
-
     def assert_violation(self, payload: dict, code: str) -> None:
         spec = TestSpec.from_payload(payload, validate=False)
         violations = validate_test_spec(spec, current_context=current_context())

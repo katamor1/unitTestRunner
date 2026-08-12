@@ -34,10 +34,19 @@ class DependencyPolicyWorkflowTests(unittest.TestCase):
             ]
         }
         boundary = {"candidates": [], "boundary_candidates": [], "equivalence_class_candidates": []}
+        baseline = generate_test_case_design(
+            signature,
+            global_access,
+            call_report,
+            coverage,
+            boundary,
+            dependency_policy={"dependencies": [{"callee": "Helper"}]},
+        )
+        stable_case_id = baseline.to_dict()["test_cases"][0]["test_case_id"]
         existing = {
             "test_cases": [
                 {
-                    "test_case_id": "TC_Target_001",
+                    "test_case_id": stable_case_id,
                     "dependency_overrides": [
                         {"callee": "Helper", "mode": "stub", "rationale": "force error", "review_required": False}
                     ],
@@ -104,7 +113,18 @@ class DependencyPolicyWorkflowTests(unittest.TestCase):
 
             self.assertTrue(policy_path.exists())
             self.assertTrue(markdown_path.exists())
-            self.assertIn("dependency_policy", dossier)
+            self.assertEqual(
+                {"schema_version", "artifact_kind", "subject", "data"},
+                set(dossier),
+            )
+            dependency = next(
+                item
+                for item in dossier["data"]["artifact_index"]
+                if item["artifact_kind"] == "dependency_policy"
+            )
+            self.assertTrue(dependency["exists"])
+            self.assertEqual("reports/dependency_policy.json", dependency["path"])
+            self.assertNotIn("dependency_policy", dossier)
             cases = (
                 design["data"]["test_cases"]
                 + design["data"]["additional_case_candidates"]

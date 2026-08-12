@@ -1,24 +1,163 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://unit-test-runner.local/schemas/suite_run_report.schema.json",
-  "title": "Suite Run Report",
-  "allOf": [
-    {
-      "$ref": "common.schema.json"
-    },
-    {
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_kind", "subject", "data"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "artifact_kind": {"const": "suite_run_report"},
+    "subject": {"$ref": "common.schema.json#/$defs/subject"},
+    "data": {
       "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome", "suite_id", "manifest_revision", "selector", "policy",
+        "summary", "results"
+      ],
       "properties": {
-        "artifact_kind": {
-          "const": "suite_run_report"
-        },
-        "schema_version": {
-          "const": "1.0.0"
-        },
-        "data": {
-          "$ref": "common.schema.json#/$defs/suiteRunReportData"
+        "outcome": {"$ref": "#/$defs/outcome"},
+        "suite_id": {"type": "string", "minLength": 1},
+        "manifest_revision": {"type": "integer", "minimum": 1},
+        "selector": {"$ref": "#/$defs/selector"},
+        "policy": {"$ref": "#/$defs/policy"},
+        "summary": {"$ref": "#/$defs/summary"},
+        "results": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/result"}
         }
       }
     }
-  ]
+  },
+  "$defs": {
+    "outcome": {
+      "enum": ["planned", "passed", "failed", "blocked", "timed_out", "cancelled", "error"]
+    },
+    "selector": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {"kind": {"const": "all"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "tag"],
+          "properties": {
+            "kind": {"const": "tag"},
+            "tag": {"type": "string", "minLength": 1}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "entry_ids"],
+          "properties": {
+            "kind": {"const": "entry_id"},
+            "entry_ids": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "string", "minLength": 1},
+              "uniqueItems": true
+            }
+          }
+        }
+      ]
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_tests", "dry_run", "timeout_seconds"],
+      "properties": {
+        "run_tests": {"type": "boolean"},
+        "dry_run": {"type": "boolean"},
+        "timeout_seconds": {"type": "integer", "minimum": 1}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total", "green", "not_green", "executed", "planned", "passed",
+        "failed", "blocked", "timed_out", "cancelled", "error"
+      ],
+      "properties": {
+        "total": {"type": "integer", "minimum": 1},
+        "green": {"type": "integer", "minimum": 0},
+        "not_green": {"type": "integer", "minimum": 0},
+        "executed": {"type": "integer", "minimum": 0},
+        "planned": {"type": "integer", "minimum": 0},
+        "passed": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0},
+        "blocked": {"type": "integer", "minimum": 0},
+        "timed_out": {"type": "integer", "minimum": 0},
+        "cancelled": {"type": "integer", "minimum": 0},
+        "error": {"type": "integer", "minimum": 0}
+      }
+    },
+    "fingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected", "actual"],
+      "properties": {
+        "expected": {"$ref": "common.schema.json#/$defs/sha256"},
+        "actual": {
+          "oneOf": [
+            {"$ref": "common.schema.json#/$defs/sha256"},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry_id", "function", "subject", "workspace", "outcome",
+        "green_status", "executed", "total_tests", "passed_tests",
+        "failed_tests", "inconclusive_tests", "unresolved_review_count",
+        "changed_fields", "fingerprints"
+      ],
+      "properties": {
+        "entry_id": {"type": "string", "minLength": 1},
+        "function": {"type": "string", "minLength": 1},
+        "subject": {"$ref": "common.schema.json#/$defs/subject"},
+        "workspace": {
+          "type": "string",
+          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*\\\\).+$"
+        },
+        "outcome": {"$ref": "#/$defs/outcome"},
+        "green_status": {"enum": ["green", "not_green"]},
+        "executed": {"type": "boolean"},
+        "total_tests": {"type": "integer", "minimum": 0},
+        "passed_tests": {"type": "integer", "minimum": 0},
+        "failed_tests": {"type": "integer", "minimum": 0},
+        "inconclusive_tests": {"type": "integer", "minimum": 0},
+        "unresolved_review_count": {"type": "integer", "minimum": 0},
+        "changed_fields": {
+          "type": "array",
+          "items": {"enum": ["source_sha256", "test_spec_sha256", "harness_sha256"]},
+          "uniqueItems": true
+        },
+        "fingerprints": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source_sha256", "test_spec_sha256", "harness_sha256"],
+          "properties": {
+            "source_sha256": {"$ref": "#/$defs/fingerprint"},
+            "test_spec_sha256": {"$ref": "#/$defs/fingerprint"},
+            "harness_sha256": {"$ref": "#/$defs/fingerprint"}
+          }
+        },
+        "report_path": {
+          "type": "string",
+          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*\\\\).+$"
+        },
+        "error": {"type": "string", "minLength": 1}
+      }
+    }
+  }
 }

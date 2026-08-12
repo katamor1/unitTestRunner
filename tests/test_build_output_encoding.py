@@ -1,6 +1,5 @@
 import json
 import os
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -14,8 +13,7 @@ VC6_FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "vc6_project"
 
 sys.path.insert(0, str(SRC_ROOT))
 
-from unit_test_runner.build.build_workspace_generator import generate_build_workspace
-from unit_test_runner.build_probe import build_probe
+from tests.spec_support import generate_public_build_workspace as generate_build_workspace
 from unit_test_runner.dossier import analyze_function_workflow
 from unit_test_runner.encoding import decode_bytes_auto
 from unit_test_runner.process_control import ProcessTreeRunResult
@@ -32,6 +30,7 @@ class BuildOutputEncodingTests(unittest.TestCase):
             "Win32 Debug",
             out_dir,
             "Control",
+            phase="harness",
         )
         reports = out_dir / "reports"
         return out_dir, {
@@ -53,6 +52,10 @@ class BuildOutputEncodingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             out_dir, reports = self.prepare_analysis(temp_dir)
             diagnostic_log = "control.c(4) : fatal error C1083: Cannot open include file: '設定.h': No such file or directory\n"
+            harness_report = reports["harness_report"]
+            harness_report["unresolved_placeholders"] = []
+            for test_case in harness_report["test_skeletons"]:
+                test_case["review_required"] = False
 
             def fake_run(*args, **kwargs):
                 build_dir = Path(kwargs["cwd"])
@@ -64,7 +67,7 @@ class BuildOutputEncodingTests(unittest.TestCase):
                     _report, probe = generate_build_workspace(
                         reports["build_context"],
                         reports["source_digest"],
-                        reports["harness_report"],
+                        harness_report,
                         out_dir,
                         run_probe=True,
                         dry_run=False,
@@ -73,32 +76,8 @@ class BuildOutputEncodingTests(unittest.TestCase):
             self.assertEqual("failed", probe.status)
             self.assertEqual(["設定.h"], [item.include_name for item in probe.missing_includes])
             report_payload = json.loads((out_dir / "reports" / "build_probe_report.json").read_text(encoding="utf-8"))
-            self.assertIn("設定.h", report_payload["diagnostics"][0]["message"])
+            self.assertIn("設定.h", report_payload["data"]["diagnostics"][0]["message"])
             self.assertNotIn("\ufffd", json.dumps(report_payload, ensure_ascii=False))
-
-    def test_legacy_dossier_build_probe_decodes_cp932_stdout(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            workspace = Path(temp_dir) / "workspace"
-            reports = workspace / "reports"
-            source = workspace / "extracted" / "src" / "control.c"
-            reports.mkdir(parents=True)
-            source.parent.mkdir(parents=True)
-            source.write_text("int Control_Update(void) { return 0; }\n", encoding="utf-8")
-            dossier = {
-                "target": {"source": "src/control.c", "function": "Control_Update"},
-                "build_context": {"include_dirs": [], "defines": []},
-            }
-            dossier_path = reports / "function_dossier.json"
-            dossier_path.write_text(json.dumps(dossier), encoding="utf-8")
-            diagnostic_log = "control.c(4) : fatal error C1083: Cannot open include file: '設定.h': No such file or directory\n"
-
-            with mock.patch("unit_test_runner.build_probe.subprocess.run") as run:
-                run.return_value = subprocess.CompletedProcess(["build"], 2, stdout=diagnostic_log.encode("cp932"))
-                payload = build_probe(dossier_path, vcvars="vcvars32.bat")
-
-            self.assertEqual(2, payload["returncode"])
-            self.assertEqual(["設定.h"], payload["diagnostics"]["missing_includes"])
-            self.assertIn("設定.h", (reports / "build_probe.log").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

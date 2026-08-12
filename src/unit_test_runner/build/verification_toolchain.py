@@ -243,8 +243,16 @@ def _run_command(command: list[str], cwd: Path, timeout_seconds: int, env_setup:
     if env_setup:
         if os.name != "nt":
             return 127, "Environment setup batch files are supported only on Windows.\n"
-        command_line = f'call "{env_setup}" && {subprocess.list2cmdline(command)}'
-        managed_command = ["cmd.exe", "/c", command_line]
+        managed_command = [
+            "cmd.exe",
+            "/d",
+            "/s",
+            "/c",
+            "call",
+            str(env_setup),
+            "&&",
+            *command,
+        ]
     else:
         managed_command = command
 

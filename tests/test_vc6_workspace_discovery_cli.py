@@ -43,23 +43,22 @@ class Vc6WorkspaceDiscoveryCliTests(unittest.TestCase):
             self.assertEqual("", completed.stderr)
             stdout_payload = json.loads(completed.stdout)
             file_payload = json.loads(out.read_text(encoding="utf-8"))
-            self.assertEqual("cli_result", stdout_payload["artifact_kind"])
-            self.assertEqual("1.0.0", stdout_payload["schema_version"])
-            data = stdout_payload["data"]
-            details = data["details"]
-            self.assertEqual(details, file_payload)
-            self.assertEqual("passed", data["outcome"])
-            self.assertEqual("discover-projects", data["command"])
-            self.assertEqual("ok", details["status"])
+            self.assertEqual("passed", stdout_payload["outcome"])
+            self.assertEqual("discover-projects", stdout_payload["command"])
+            self.assertEqual("ok", file_payload["status"])
             self.assertEqual(1, len(file_payload["workspaces"]))
             self.assertEqual("Control", file_payload["workspaces"][0]["projects"][0]["name"])
 
     def test_discover_projects_workspace_directory_single_dsw(self):
-        completed = run_module("--json", "discover-projects", "--workspace", str(FIXTURE_ROOT / "minimal"))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            out = Path(temp_dir) / "projects.json"
+            completed = run_module(
+                "--json", "discover-projects", "--workspace", str(FIXTURE_ROOT / "minimal"),
+                "--out", str(out),
+            )
 
-        self.assertEqual(0, completed.returncode, completed.stderr)
-        payload = json.loads(completed.stdout)
-        self.assertEqual(1, len(payload["data"]["details"]["workspaces"]))
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            self.assertEqual(1, len(json.loads(out.read_text(encoding="utf-8"))["workspaces"]))
 
     def test_discover_projects_workspace_directory_multiple_dsw(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -74,11 +73,13 @@ class Vc6WorkspaceDiscoveryCliTests(unittest.TestCase):
                     encoding="utf-8",
                 )
 
-            completed = run_module("--json", "discover-projects", "--workspace", str(root))
+            out = root / "projects.json"
+            completed = run_module(
+                "--json", "discover-projects", "--workspace", str(root), "--out", str(out)
+            )
 
-        self.assertEqual(0, completed.returncode, completed.stderr)
-        payload = json.loads(completed.stdout)
-        self.assertEqual(2, len(payload["data"]["details"]["workspaces"]))
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            self.assertEqual(2, len(json.loads(out.read_text(encoding="utf-8"))["workspaces"]))
 
     def test_discover_projects_workspace_directory_without_dsw_exits_two(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -87,13 +88,9 @@ class Vc6WorkspaceDiscoveryCliTests(unittest.TestCase):
         self.assertEqual(2, completed.returncode)
         self.assertEqual("", completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertEqual("cli_result", payload["artifact_kind"])
-        self.assertEqual("1.0.0", payload["schema_version"])
-        data = payload["data"]
-        self.assertEqual("error", data["outcome"])
-        self.assertEqual(2, data["exit_code"])
-        self.assertEqual("error", data["errors"][0]["code"])
-        self.assertIn(".dsw", data["errors"][0]["message"])
+        self.assertEqual("error", payload["outcome"])
+        self.assertEqual("error", payload["diagnostics"][0]["level"])
+        self.assertIn(".dsw", payload["diagnostics"][0]["message"])
 
     def test_discover_projects_out_markdown_writes_markdown_report(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -123,25 +120,21 @@ class Vc6WorkspaceDiscoveryCliTests(unittest.TestCase):
         self.assertIn("Warnings: 0", completed.stdout)
         self.assertNotIn('"workspaces"', completed.stdout)
 
-    def test_map_source_without_workspace_keeps_candidate_projects_when_not_found(self):
-        completed = run_module(
-            "--json",
-            "map-source",
-            "--dsw",
-            str(FIXTURE_ROOT / "dependencies" / "Product.dsw"),
-            "--source",
-            "src/control.c",
-        )
+    def test_map_source_without_workspace_blocks_with_candidate_projects_when_not_found(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            out = Path(temp_dir) / "mapping.json"
+            completed = run_module(
+                "--json", "map-source",
+                "--dsw", str(FIXTURE_ROOT / "dependencies" / "Product.dsw"),
+                "--source", "src/control.c", "--out", str(out),
+            )
 
-        self.assertEqual(0, completed.returncode, completed.stderr)
-        self.assertEqual("", completed.stderr)
-        payload = json.loads(completed.stdout)
-        data = payload["data"]
-        details = data["details"]
-        self.assertEqual("passed", data["outcome"])
-        self.assertEqual("not_found", details["status"])
-        self.assertEqual("src/control.c", details["source"]["input"])
-        self.assertEqual(["Control", "Common"], [item["name"] for item in details["candidate_projects"]])
+            self.assertNotEqual(0, completed.returncode)
+            envelope = json.loads(completed.stdout)
+            self.assertEqual("blocked", envelope["outcome"])
+            self.assertIn("Control", envelope["diagnostics"][0]["message"])
+            self.assertIn("Common", envelope["diagnostics"][0]["message"])
+            self.assertFalse(out.exists())
 
     def test_json_discover_projects_stdout_is_json_only(self):
         completed = run_module("--json", "discover-projects", "--workspace", str(FIXTURE_ROOT / "minimal"))

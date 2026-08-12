@@ -1,18 +1,20 @@
-import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
-from unit_test_runner.build.build_workspace_generator import generate_build_workspace
-from unit_test_runner.suite.manager import register_workspace
-from unit_test_runner.vc6.debug_workspace_response import vc6_cpp_options_path
-from unit_test_runner.vc6.debug_workspace_writer import write_vc6_debug_project
+from tests.spec_support import generate_public_build_workspace as generate_build_workspace
+from unit_test_runner.vc6.debug_workspace_writer import (
+    vc6_cpp_options_path,
+    write_vc6_debug_project,
+    write_vc6_debug_suite,
+)
 
 
 class Vc6DebugWorkspaceWriterTests(unittest.TestCase):
@@ -27,6 +29,13 @@ class Vc6DebugWorkspaceWriterTests(unittest.TestCase):
             "include_dirs": [],
             "defines": ["WIN32", "_DEBUG"],
             "compiler_options": ["/nologo", "/W3", "/Od", "/ZI"],
+            "public_subject": {
+                "source_path": "src/shared.c",
+                "source_sha256": "a" * 64,
+                "function": "Shared",
+                "project": "Shared",
+                "configuration": "Shared - Win32 Debug",
+            },
         }
         source_digest = {
             "source": {"path": str(source)},
@@ -117,20 +126,23 @@ class Vc6DebugWorkspaceWriterTests(unittest.TestCase):
             self.assertFalse(any('/I "' in line for line in cpp_lines))
             self.assertLess(max(len(line) for line in dsp_text.splitlines()), 512)
 
-    def test_suite_register_generates_dsw_referencing_entry_dsp(self):
+    def test_debug_suite_generates_dsw_referencing_entry_dsp(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             out_dir, build_context, source_digest, harness_report = self._workspace_reports(temp_dir)
             generate_build_workspace(build_context, source_digest, harness_report, out_dir, run_probe=False, dry_run=True)
-            reports = out_dir / "reports"
-            dossier = {
-                "schema_version": "0.1",
-                "target": {"function": "Shared", "source": "src/shared.c", "project": "Shared", "configuration": "Win32 Debug"},
-                "function": {"name": "Shared", "source_path": "src/shared.c"},
-            }
-            (reports / "function_dossier.json").write_text(json.dumps(dossier, indent=2) + "\n", encoding="utf-8")
             suite_path = Path(temp_dir) / "suites" / "default" / "suite_manifest.json"
+            manifest = SimpleNamespace(
+                entries=[
+                    SimpleNamespace(
+                        entry_id="entry-shared",
+                        enabled=True,
+                        function={"name": "Shared"},
+                        workspace=out_dir,
+                    )
+                ]
+            )
 
-            register_workspace(suite_path, out_dir, tags=["debug"])
+            write_vc6_debug_suite(suite_path, manifest)
 
             dsw_path = suite_path.parent / "vc6_debug_suite.dsw"
             dsw_text = dsw_path.read_text(encoding="cp932")

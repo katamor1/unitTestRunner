@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unit-test-runner.local/schemas/cli_envelope.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["command", "outcome", "message", "artifacts", "diagnostics"],
+  "properties": {
+    "command": {"type": "string", "minLength": 1},
+    "outcome": {
+      "enum": [
+        "planned",
+        "passed",
+        "failed",
+        "blocked",
+        "timed_out",
+        "cancelled",
+        "error"
+      ]
+    },
+    "message": {"type": "string", "minLength": 1},
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "path", "sha256"],
+        "properties": {
+          "kind": {
+            "enum": [
+              "function_dossier",
+              "test_spec",
+              "review_record",
+              "build_probe_report",
+              "test_run_report",
+              "reanalysis_report",
+              "suite_manifest",
+              "suite_run_report"
+            ]
+          },
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"$ref": "common.schema.json#/$defs/sha256"}
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "level", "message"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "level": {"enum": ["info", "warning", "error"]},
+          "message": {"type": "string"}
+        }
+      }
+    }
+  }
+}

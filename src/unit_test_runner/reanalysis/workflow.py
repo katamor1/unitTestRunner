@@ -3,23 +3,25 @@ from __future__ import annotations
 import json
 import hashlib
 import copy
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
-from unit_test_runner.contracts import (
-    ArtifactKind,
-    ContractMode,
-    normalize_consumer_data,
+from unit_test_runner.contracts import ArtifactKind
+from unit_test_runner.workspace_artifacts import (
+    WorkspaceRegenerationRequired,
+    load_public_artifact,
 )
 from unit_test_runner.test_spec import (
     artifact_reference,
     build_current_artifact_context,
     create_test_spec_from_design,
+    canonical_json_bytes,
     export_test_spec_snapshot_views,
     load_test_spec,
     load_test_spec_snapshot,
-    load_legacy_test_case_design_view,
     save_test_spec_snapshot,
     TestSpecContractError,
     test_spec_consumer_payload,
@@ -44,13 +46,6 @@ from .regression_selector import select_regression_tests
 from .signature_diff import compare_signatures
 from .snapshot_builder import build_analysis_snapshot
 from .test_case_reconciler import PROTECTED_FIELDS, reconcile_test_cases
-
-
-_CORE_CONSUMER_KINDS = {
-    "source_digest": ArtifactKind.SOURCE_DIGEST,
-    "function_location": ArtifactKind.FUNCTION_LOCATION,
-    "function_signature": ArtifactKind.FUNCTION_SIGNATURE,
-}
 
 
 @dataclass(frozen=True)
@@ -78,7 +73,6 @@ def reanalyze_function_workflow(
     project_name: str | None = None,
     previous_dossier_path: Path | str | None = None,
     previous_test_case_design_path: Path | str | None = None,
-    previous_legacy_alias: bool = False,
     policy: ReanalysisPolicy | None = None,
 ) -> dict[str, Any]:
     out_dir = Path(out_dir).resolve()
@@ -88,19 +82,11 @@ def reanalyze_function_workflow(
     if previous_test_case_design_path is None:
         previous_test_case_design_path = dossier_artifact_paths.get("test_spec") or out_dir / "reports" / "test_spec.json"
     previous_test_case_design_path = Path(previous_test_case_design_path).resolve()
-    previous_spec = None
-    if previous_legacy_alias:
-        previous_design = load_legacy_test_case_design_view(
-            previous_test_case_design_path,
-            function_signature_path=previous_test_case_design_path.parent
-            / "function_signature.json",
-        )
-    else:
-        previous_spec = _previous_test_spec(
-            previous_test_case_design_path,
-            dossier_artifact_paths,
-        )
-        previous_design = test_spec_consumer_payload(previous_spec)
+    previous_spec = _previous_test_spec(
+        previous_test_case_design_path,
+        dossier_artifact_paths,
+    )
+    previous_design = test_spec_consumer_payload(previous_spec)
     current_payloads = build_current_reanalysis(workspace_root, dsw_path, source, function_name, configuration, out_dir, project_name)
     current_spec = _current_test_spec(
         workspace_root,
@@ -134,6 +120,9 @@ def reanalyze_function_workflow(
         function_name,
         report_subdir=Path("reports") / "reanalysis" / "current",
     )
+    # Source-digest internals retain the physical source path.  Public
+    # reanalysis identity is the canonical workspace-relative TestSpec path.
+    current_snapshot.source_path = Path(current_spec.source.path)
     if "test_case_design" not in current_snapshot_payloads:
         current_snapshot_payloads["test_case_design"] = current_design
     test_case_ids = _test_case_ids(previous_design)
@@ -153,6 +142,16 @@ def reanalyze_function_workflow(
         include_low_confidence_matches=policy.include_low_confidence_matches,
     )
     source_changes = _source_changes(previous_snapshot.source_sha256, current_snapshot.source_sha256)
+    mapped_case_ids = {
+        case_id
+        for case_ids in coverage_to_cases.values()
+        for case_id in case_ids
+    }
+    mapping_unknown = (
+        bool(source_changes)
+        and bool(test_case_ids)
+        and not set(test_case_ids).issubset(mapped_case_ids)
+    )
     reconciliation, updated_design = reconcile_test_cases(
         previous_design,
         current_design,
@@ -163,6 +162,16 @@ def reanalyze_function_workflow(
         generate_updated_test_case_design=policy.generate_updated_test_case_design,
     )
     selection = select_regression_tests(function_name, reconciliation)
+    if mapping_unknown:
+        # A partial mapping is not sound enough to choose a subset. Keep the
+        # recommendation explicit, but leave execution selection to the user.
+        selection.selected_test_cases = []
+        selection.selection_reason_summary = (
+            "selected=0 (mapping unavailable), "
+            f"skipped={len(selection.skipped_test_cases)}, "
+            f"new_required={len(selection.new_required_test_cases)}, "
+            f"blocked={len(selection.blocked_test_cases)}"
+        )
     change_status = "no_change_detected"
     if source_changes or interface_changes or dependency_changes or coverage_result.changes:
         change_status = "changed"
@@ -178,8 +187,16 @@ def reanalyze_function_workflow(
         dependency_changes=dependency_changes,
         coverage_changes=coverage_result.changes,
         regression_recommendation=RegressionRecommendation(
-            recommendation_kind=_recommendation(selection, reconciliation),
-            reason=selection.selection_reason_summary,
+            recommendation_kind=_recommendation(
+                selection,
+                reconciliation,
+                mapping_unknown=mapping_unknown,
+            ),
+            reason=_recommendation_reason(
+                selection,
+                mapping_unknown=mapping_unknown,
+                existing_case_count=len(test_case_ids),
+            ),
             selected_count=len(selection.selected_test_cases),
             blocked_count=len(selection.blocked_test_cases),
             new_required_count=len(selection.new_required_test_cases),
@@ -188,45 +205,50 @@ def reanalyze_function_workflow(
         warnings=previous_warnings + current_warnings,
     )
     canonical_path = out_dir / "reports" / "test_spec.json"
-    persisted_spec = load_test_spec(canonical_path, mode=ContractMode.STRICT) if canonical_path.exists() else previous_spec
-    saved_result_snapshot = None
-    saved_view_export = None
+    persisted_spec = load_test_spec(canonical_path) if canonical_path.exists() else previous_spec
     if policy.overwrite_test_case_design:
-        if not policy.generate_updated_test_case_design or updated_design is None:
-            raise ValueError("--overwrite-test-case-design requires --generate-updated-test-case-design")
-        if persisted_spec is None:
-            raise ValueError(
-                "--previous-test-case-design is a read-only compatibility alias; "
-                "a canonical test_spec.json is required for overwrite"
-            )
-        candidate = _merge_reanalysis_candidate(
-            current_spec,
-            persisted_spec,
-            updated_design,
-            reconciliation=reconciliation,
+        raise ValueError(
+            "Reanalysis never overwrites canonical test_spec; use apply-reanalysis."
         )
-        candidate.revision = persisted_spec.revision
-        context = build_current_artifact_context(out_dir, candidate)
-        violations = validate_test_spec(candidate, current_context=context)
-        if violations:
-            raise TestSpecContractError(violations)
-        saved_snapshot, _test_spec_artifact = save_test_spec_snapshot(
-            canonical_path,
-            candidate,
-            expected_revision=(persisted_spec.revision if canonical_path.exists() else None),
-            current_context=context,
+    if persisted_spec is None or not canonical_path.is_file():
+        raise ValueError(
+            "Reanalysis requires a canonical reports/test_spec.json; regenerate the workspace."
         )
-        saved_result_snapshot = saved_snapshot
-        persisted_spec = saved_snapshot.spec
-        saved_view_export = export_test_spec_snapshot_views(
-            saved_snapshot,
-            canonical_path.parent,
-            canonical_path=canonical_path,
-        )
-    paths = write_reanalysis_reports(
-        out_dir, change_impact, reconciliation, selection, None
+    if updated_design is None:
+        raise ValueError("Reanalysis could not produce a candidate TestSpec.")
+    candidate = _merge_reanalysis_candidate(
+        current_spec,
+        persisted_spec,
+        updated_design,
+        reconciliation=reconciliation,
     )
-    result_spec = persisted_spec or current_spec
+    candidate.revision = persisted_spec.revision
+    candidate_project = current_payloads["build_context"]["build_context"]["project"]
+    candidate_configuration = current_payloads["build_context"]["build_context"]["configuration"]
+    candidate = candidate.with_subject_context(
+        project=str(candidate_project),
+        configuration=str(candidate_configuration),
+    )
+    violations = validate_test_spec(candidate)
+    if violations:
+        raise TestSpecContractError(violations)
+    candidate_path = out_dir / "reports" / "reanalysis_candidate_test_spec.json"
+    candidate_sha256 = _write_candidate_test_spec(candidate_path, candidate)
+    candidate_metadata = {
+        "path": candidate_path.relative_to(out_dir).as_posix(),
+        "sha256": candidate_sha256,
+        "base_revision": persisted_spec.revision,
+        "conflict_count": len(reconciliation.manual_merge_items),
+    }
+    paths = write_reanalysis_reports(
+        out_dir,
+        change_impact,
+        reconciliation,
+        selection,
+        None,
+        candidate=candidate_metadata,
+    )
+    paths["candidate_test_spec_json"] = candidate_path
     return {
         "status": "reanalysis_completed",
         "change_impact": change_impact,
@@ -236,18 +258,25 @@ def reanalyze_function_workflow(
         "previous_dossier": previous_dossier_path,
         "previous_test_case_design": previous_test_case_design_path,
         "test_spec_path": canonical_path,
-        "test_spec_revision": result_spec.revision,
-        "test_spec_sha256": (
-            saved_result_snapshot.sha256
-            if saved_result_snapshot is not None
-            else None
-        ),
-        "test_spec_views_written_by_operation": (
-            saved_view_export.written
-            if saved_view_export is not None
-            else False
-        ),
+        "test_spec_revision": candidate.revision,
+        "test_spec_sha256": candidate_sha256,
+        "test_spec_views_written_by_operation": False,
     }
+
+
+def _write_candidate_test_spec(path: Path, candidate) -> str:
+    final_bytes = canonical_json_bytes(candidate)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        with temporary.open("xb") as handle:
+            handle.write(final_bytes)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return hashlib.sha256(final_bytes).hexdigest()
 
 
 def _merge_reanalysis_candidate(
@@ -557,13 +586,22 @@ def _current_test_spec(
         )
         for artifact_kind, filename in reference_kinds
     ]
-    return create_test_spec_from_design(
+    spec = create_test_spec_from_design(
         payloads["test_case_design"],
         payloads["function_signature"],
         source_path=source_relative,
         generated_from=references,
         revision=revision,
     )
+    build_context = payloads.get("build_context", {}).get("build_context", {})
+    project = build_context.get("project")
+    configuration = build_context.get("configuration")
+    if isinstance(project, str) and project and isinstance(configuration, str) and configuration:
+        return spec.with_subject_context(
+            project=project,
+            configuration=configuration,
+        )
+    return spec
 
 
 def reconcile_test_case_reports(
@@ -574,18 +612,10 @@ def reconcile_test_case_reports(
     current_boundary_candidates: Path | str,
     out: Path | str,
     policy: ReanalysisPolicy | None = None,
-    previous_legacy_alias: bool = False,
-    current_legacy_alias: bool = False,
 ) -> dict[str, Any]:
     policy = policy or ReanalysisPolicy()
-    previous_design = _load_reconcile_design(
-        Path(previous_test_case_design),
-        legacy_alias=previous_legacy_alias,
-    )
-    current_design = _load_reconcile_design(
-        Path(current_test_case_design),
-        legacy_alias=current_legacy_alias,
-    )
+    previous_design = _load_reconcile_design(Path(previous_test_case_design))
+    current_design = _load_reconcile_design(Path(current_test_case_design))
     previous_coverage = _read_json(Path(previous_coverage_design))
     current_coverage = _read_json(Path(current_coverage_design))
     _read_json(Path(current_boundary_candidates))
@@ -597,15 +627,8 @@ def reconcile_test_case_reports(
     return {"reconciliation": report, "updated_test_case_design": updated, "updated_test_case_design_path": None, "out": out}
 
 
-def _load_reconcile_design(path: Path, *, legacy_alias: bool) -> dict[str, Any]:
-    if legacy_alias:
-        return load_legacy_test_case_design_view(
-            path,
-            function_signature_path=path.parent / "function_signature.json",
-        )
-    return test_spec_consumer_payload(
-        load_test_spec(path, mode=ContractMode.STRICT)
-    )
+def _load_reconcile_design(path: Path) -> dict[str, Any]:
+    return test_spec_consumer_payload(load_test_spec(path))
 
 
 def select_regression_from_reports(change_impact: Path | str, reconciliation: Path | str, out: Path | str) -> dict[str, Any]:
@@ -667,14 +690,15 @@ def _previous_test_spec(
         and "test_spec" in artifact_paths.test_specs
     ):
         return artifact_paths.test_specs["test_spec"]
-    return load_test_spec_snapshot(
-        path,
-        mode=ContractMode.COMPATIBLE,
-    ).spec
+    return load_test_spec_snapshot(path).spec
 
 
 def _payloads_from_previous_dossier(dossier_path: Path) -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[str, Path]]:
-    dossier = _previous_dossier_consumer_payload(_read_json(dossier_path))
+    dossier_document = load_public_artifact(
+        dossier_path,
+        ArtifactKind.FUNCTION_DOSSIER,
+    )
+    dossier = _previous_dossier_consumer_payload(dossier_document)
     payloads: dict[str, dict[str, Any]] = {}
     paths = _ArtifactPaths()
     for key in (
@@ -692,10 +716,7 @@ def _payloads_from_previous_dossier(dossier_path: Path) -> tuple[dict[str, Any],
             continue
         paths[key] = path
         if key == "test_spec":
-            snapshot = load_test_spec_snapshot(
-                path,
-                mode=ContractMode.COMPATIBLE,
-            )
+            snapshot = load_test_spec_snapshot(path)
             decoded = json.loads(snapshot.raw_bytes.decode("utf-8-sig"))
             version = decoded.get("schema_version")
             generation = _ArtifactGeneration(
@@ -711,30 +732,22 @@ def _payloads_from_previous_dossier(dossier_path: Path) -> tuple[dict[str, Any],
             continue
         generation = _read_artifact_generation(path)
         paths.generations[key] = generation
-        if key in _CORE_CONSUMER_KINDS:
-            payloads[key] = normalize_consumer_data(
-                generation.decoded,
-                expected_kind=_CORE_CONSUMER_KINDS[key],
-                allow_legacy_v01=True,
-            )
-        else:
-            payloads[key] = generation.decoded
+        payloads[key] = generation.decoded
     if "build_context" in dossier:
         payloads["build_context"] = {"schema_version": "0.1", "build_context": dossier["build_context"]}
     return dossier, payloads, paths
 
 
 def _previous_dossier_consumer_payload(document: dict[str, Any]) -> dict[str, Any]:
-    current_envelope_shape = any(
-        key in document for key in ("producer", "subject", "data", "extensions")
-    )
-    if not current_envelope_shape:
-        return copy.deepcopy(document)
-    return normalize_consumer_data(
-        document,
-        expected_kind=ArtifactKind.FUNCTION_DOSSIER,
-        allow_legacy_v01=True,
-    )
+    if (
+        document.get("schema_version") != "1.0.0"
+        or document.get("artifact_kind") != ArtifactKind.FUNCTION_DOSSIER.value
+        or not isinstance(document.get("data"), dict)
+    ):
+        raise WorkspaceRegenerationRequired(
+            "Previous function_dossier must be regenerated for v0.1."
+        )
+    return copy.deepcopy(document["data"])
 
 
 def _artifact_json_path(dossier: dict[str, Any], key: str, dossier_path: Path) -> Path | None:
@@ -860,12 +873,29 @@ def _coverage_to_cases(design: dict[str, Any]) -> dict[str, list[str]]:
     return result
 
 
-def _recommendation(selection, reconciliation) -> str:
+def _recommendation(selection, reconciliation, *, mapping_unknown: bool = False) -> str:
     if reconciliation.blocked_test_cases:
         return "blocked"
+    if mapping_unknown:
+        return "run_all_existing_tests"
     if reconciliation.updated_test_cases or reconciliation.new_test_case_candidates:
         return "run_impacted_tests"
     return "no_regression_needed"
+
+
+def _recommendation_reason(
+    selection,
+    *,
+    mapping_unknown: bool,
+    existing_case_count: int,
+) -> str:
+    if not mapping_unknown:
+        return selection.selection_reason_summary
+    return (
+        "Change mapping is unavailable; explicitly run all "
+        f"{existing_case_count} existing test cases. "
+        f"{selection.selection_reason_summary}"
+    )
 
 
 def _reconciliation_from_payload(payload: dict[str, Any]):

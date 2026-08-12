@@ -112,6 +112,7 @@ class DspConfiguration:
     name: str | None
     compiler_base_options: list[str] = field(default_factory=list)
     compiler_options: list[str] = field(default_factory=list)
+    compiler_subtract_options: list[str] = field(default_factory=list)
     build_settings: DspBuildSettings = field(default_factory=DspBuildSettings)
     linker_base_options: list[str] = field(default_factory=list)
     linker_options: list[str] = field(default_factory=list)
@@ -143,6 +144,8 @@ class DspFileEntry:
     group: str | None
     exists: bool
     line_number: int
+    compiler_add_options: dict[str, list[str]] = field(default_factory=dict, repr=False)
+    compiler_subtract_options: dict[str, list[str]] = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {

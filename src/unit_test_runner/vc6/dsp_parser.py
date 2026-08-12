@@ -7,7 +7,7 @@ from ..encoding import read_text_with_encoding
 from ..path_utils import resolve_vc6_path
 from .dsp_link_options import merge_link_settings, parse_link_settings, path_like_value, tokenize_linker_options
 from .dsp_models import DspConfiguration, DspFileEntry, DspParseWarning, DspProject
-from .dsp_options import merge_build_settings, parse_build_settings, tokenize_compiler_options
+from .dsp_options import effective_build_settings, merge_build_settings, parse_build_settings, tokenize_compiler_options
 
 
 PROJECT_NAME_RE = re.compile(r'Project File - Name="(?P<name>[^"]+)"')
@@ -35,6 +35,8 @@ def parse_dsp(path: Path | str, workspace_root: Path | str | None = None) -> Dsp
     files: list[DspFileEntry] = []
     current_config: DspConfiguration | None = None
     current_group: str | None = None
+    current_source: DspFileEntry | None = None
+    in_source_block = False
 
     for line_number, line in enumerate(text.splitlines(), start=1):
         cfg_match = CFG_RE.search(line)
@@ -56,6 +58,16 @@ def parse_dsp(path: Path | str, workspace_root: Path | str | None = None) -> Dsp
         if group_match:
             current_group = group_match.group("group")
             continue
+
+        if line.startswith("# Begin Source File"):
+            in_source_block = True
+            current_source = None
+            continue
+        if line.startswith("# End Source File"):
+            in_source_block = False
+            current_source = None
+            current_config = None
+            continue
         if line.startswith("# End Group"):
             current_group = None
             continue
@@ -71,7 +83,7 @@ def parse_dsp(path: Path | str, workspace_root: Path | str | None = None) -> Dsp
             _merge_path_macros(current_config, current_config.link_settings.intermediate_dir)
             continue
 
-        if line.startswith("# ADD") and " CPP " in line:
+        if (line.startswith("# ADD") or line.startswith("# SUBTRACT")) and " CPP " in line:
             if current_config is None:
                 warnings.append(
                     DspParseWarning(
@@ -85,12 +97,22 @@ def parse_dsp(path: Path | str, workspace_root: Path | str | None = None) -> Dsp
             is_base = line.startswith("# ADD BASE CPP")
             options_text = line.split(" CPP ", 1)[1]
             tokens = tokenize_compiler_options(options_text)
-            if is_base:
+            if in_source_block and current_source is not None:
+                target = (
+                    current_source.compiler_subtract_options
+                    if line.startswith("# SUBTRACT")
+                    else current_source.compiler_add_options
+                )
+                target.setdefault(current_config.full_name, []).extend(tokens)
+            elif line.startswith("# SUBTRACT"):
+                current_config.compiler_subtract_options.extend(tokens)
+            elif is_base:
                 current_config.compiler_base_options.extend(tokens)
             else:
                 current_config.compiler_options.extend(tokens)
             settings = parse_build_settings(tokens, dsp_path.parent, workspace)
-            merge_build_settings(current_config.build_settings, settings)
+            if not in_source_block and not line.startswith("# SUBTRACT"):
+                merge_build_settings(current_config.build_settings, settings)
             for macro in settings.unresolved_macros:
                 warnings.append(DspParseWarning("unresolved_macro", f"Unresolved macro in compiler option: {macro}", line_number, line))
             continue
@@ -133,6 +155,7 @@ def parse_dsp(path: Path | str, workspace_root: Path | str | None = None) -> Dsp
                 line_number=line_number,
             )
             files.append(entry)
+            current_source = entry
             if not entry.exists:
                 warnings.append(DspParseWarning("missing_source_file", f"SOURCE file does not exist: {absolute}", line_number, line))
             continue
@@ -150,6 +173,33 @@ def parse_dsp(path: Path | str, workspace_root: Path | str | None = None) -> Dsp
         files=files,
         warnings=warnings,
         encoding=encoding,
+    )
+
+
+def effective_source_build_settings(
+    project: DspProject,
+    configuration: DspConfiguration,
+    source_entry: DspFileEntry | None = None,
+):
+    source_add = []
+    source_subtract = []
+    if source_entry is not None:
+        source_add = [
+            *source_entry.compiler_add_options.get("*", []),
+            *source_entry.compiler_add_options.get(configuration.full_name, []),
+        ]
+        source_subtract = [
+            *source_entry.compiler_subtract_options.get("*", []),
+            *source_entry.compiler_subtract_options.get(configuration.full_name, []),
+        ]
+    return effective_build_settings(
+        configuration.compiler_base_options,
+        configuration.compiler_options,
+        configuration.compiler_subtract_options,
+        source_add,
+        source_subtract,
+        dsp_dir=project.root_dir,
+        workspace_root=project.root_dir,
     )
 
 

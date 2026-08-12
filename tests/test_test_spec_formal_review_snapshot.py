@@ -3,15 +3,12 @@ from __future__ import annotations
 import hashlib
 import tempfile
 import unittest
-from argparse import Namespace
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch as mock_patch
 
-import unit_test_runner.cli.commands as commands_module
 import unit_test_runner.test_spec.patch as patch_module
 import unit_test_runner.test_spec.repository as repository_module
-from unit_test_runner.contracts import ContractMode
 from unit_test_runner.test_spec import (
     InvalidTestSpecPatchError,
     TestSpec,
@@ -124,7 +121,7 @@ class TestSpecFormalReviewSnapshotTests(unittest.TestCase):
                 expected_revision=None,
                 current_context=context,
             )
-            writer_a = load_test_spec(path, mode=ContractMode.STRICT)
+            writer_a = load_test_spec(path)
             writer_a.test_cases[0]["title"] = "writer-a"
             writer_a_bytes = repository_module.canonical_json_bytes(
                 writer_a.with_revision(2)
@@ -139,7 +136,7 @@ class TestSpecFormalReviewSnapshotTests(unittest.TestCase):
                     yield
                 if not interleaved:
                     interleaved = True
-                    writer_b = load_test_spec(path, mode=ContractMode.STRICT)
+                    writer_b = load_test_spec(path)
                     self.assertEqual(2, writer_b.revision)
                     writer_b.test_cases[0]["title"] = "writer-b"
                     save_test_spec(
@@ -159,7 +156,7 @@ class TestSpecFormalReviewSnapshotTests(unittest.TestCase):
                     current_context=context,
                 )
 
-            persisted = load_test_spec(path, mode=ContractMode.STRICT)
+            persisted = load_test_spec(path)
             self.assertEqual(3, persisted.revision)
             self.assertEqual("writer-b", persisted.test_cases[0]["title"])
             self.assertEqual(hashlib.sha256(writer_a_bytes).hexdigest(), artifact.sha256)
@@ -188,7 +185,7 @@ class TestSpecFormalReviewSnapshotTests(unittest.TestCase):
                 saved = original_save(*args, **kwargs)
                 if not interleaved:
                     interleaved = True
-                    writer_b = load_test_spec(path, mode=ContractMode.STRICT)
+                    writer_b = load_test_spec(path)
                     self.assertEqual(2, writer_b.revision)
                     writer_b.test_cases[0]["title"] = "writer-b"
                     repository_module.save_test_spec(
@@ -211,7 +208,7 @@ class TestSpecFormalReviewSnapshotTests(unittest.TestCase):
             self.assertEqual(2, updated.revision)
             self.assertEqual("writer-a", updated.test_cases[0]["title"])
             self.assertEqual(hashlib.sha256(expected_bytes).hexdigest(), artifact.sha256)
-            self.assertEqual(3, load_test_spec(path, mode=ContractMode.STRICT).revision)
+            self.assertEqual(3, load_test_spec(path).revision)
 
     def test_export_rejects_stale_caller_without_writing_mixed_views(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -224,8 +221,8 @@ class TestSpecFormalReviewSnapshotTests(unittest.TestCase):
                 expected_revision=None,
                 current_context=context,
             )
-            stale = load_test_spec(canonical, mode=ContractMode.STRICT)
-            current = load_test_spec(canonical, mode=ContractMode.STRICT)
+            stale = load_test_spec(canonical)
+            current = load_test_spec(canonical)
             current.test_cases[0]["title"] = "revision-two"
             save_test_spec(
                 canonical,
@@ -241,53 +238,6 @@ class TestSpecFormalReviewSnapshotTests(unittest.TestCase):
 
             self.assertFalse((canonical.parent / "test_spec.md").exists())
             self.assertFalse((canonical.parent / "test_spec.csv").exists())
-
-    def test_cli_get_response_uses_one_snapshot_during_interleaved_update(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            workspace = Path(temp_dir)
-            path = create_workspace(workspace)
-            initial = load_test_spec(path, mode=ContractMode.STRICT)
-            context = commands_module.build_current_artifact_context(
-                workspace, initial
-            )
-            loader_name = (
-                "load_test_spec_snapshot"
-                if hasattr(commands_module, "load_test_spec_snapshot")
-                else "load_test_spec"
-            )
-            original_loader = getattr(commands_module, loader_name)
-            interleaved = False
-
-            def load_then_interleave(*args, **kwargs):
-                nonlocal interleaved
-                loaded = original_loader(*args, **kwargs)
-                if not interleaved:
-                    interleaved = True
-                    writer_b = load_test_spec(path, mode=ContractMode.STRICT)
-                    writer_b.test_cases[0]["title"] = "writer-b"
-                    repository_module.save_test_spec(
-                        path,
-                        writer_b,
-                        expected_revision=1,
-                        current_context=context,
-                    )
-                return loaded
-
-            with mock_patch.object(
-                commands_module, loader_name, load_then_interleave
-            ):
-                result = commands_module.handle_get_test_spec(
-                    Namespace(workspace=str(workspace), command="get-test-spec")
-                )
-
-            response_spec = TestSpec.from_payload(result.data["test_spec"])
-            response_bytes = repository_module.canonical_json_bytes(response_spec)
-            self.assertEqual(1, result.data["revision"])
-            self.assertEqual(
-                hashlib.sha256(response_bytes).hexdigest(), result.data["sha256"]
-            )
-            self.assertEqual(2, load_test_spec(path, mode=ContractMode.STRICT).revision)
-
 
 if __name__ == "__main__":
     unittest.main()

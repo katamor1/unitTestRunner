@@ -40,7 +40,7 @@ def build_current_reanalysis(
         "precompiled_header": config["precompiled_header"],
         "unresolved_macros": config["unresolved_macros"],
         "project": project["project_name"],
-        "configuration": configuration,
+        "configuration": config["full_name"],
     }
     digest = build_source_digest(source_path, build_context)
     location = locate_function(digest, function_name)
@@ -49,7 +49,14 @@ def build_current_reanalysis(
     call_report = analyze_calls(digest, location, signature, global_access)
     coverage_design = analyze_coverage_design(digest, location, signature, global_access, call_report)
     boundary_candidates = generate_boundary_equivalence_candidates(signature, global_access, call_report, coverage_design)
-    test_case_design = generate_test_case_design(signature, global_access, call_report, coverage_design, boundary_candidates)
+    test_case_design = generate_test_case_design(
+        signature,
+        global_access,
+        call_report,
+        coverage_design,
+        boundary_candidates,
+        source_relative_path=source_relative,
+    )
     payloads = {
         "source_digest": digest.to_dict(include_tokens=True),
         "function_location": location.to_dict(),

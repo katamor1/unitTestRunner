@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from unit_test_runner.cli.artifacts import ProducedArtifact, build_produced_artifact
-from unit_test_runner.contracts import ContractMode
+from unit_test_runner.cli.artifacts import ProducedArtifact
+from unit_test_runner.contracts import ArtifactKind
 from unit_test_runner.test_spec import (
     CurrentArtifactContext,
     TestSpec,
@@ -21,6 +21,7 @@ from unit_test_runner.test_spec import (
     save_test_spec_snapshot,
     validate_test_spec,
 )
+from unit_test_runner.workspace_artifacts import canonical_artifact_path
 
 from .field_catalog import (
     FIELD_RULES,
@@ -125,7 +126,7 @@ def load_current_form_snapshot(workspace: Path | str) -> CurrentFormSnapshot:
             f"Canonical TestSpec was not found: {path}",
         )
     try:
-        snapshot = load_test_spec_snapshot(path, mode=ContractMode.STRICT)
+        snapshot = load_test_spec_snapshot(path)
     except TestSpecContractError as error:
         raise TestInputFormError(_contract_error_code(error), str(error)) from error
     try:
@@ -550,23 +551,31 @@ def _reclassify_cases(
     return promoted_ids, demoted_ids
 
 
-def _mark_promoted_unresolved_history_nonblocking(
+def _remove_promoted_unresolved_items(
     spec: TestSpec,
     promoted_case_ids: tuple[str, ...],
 ) -> None:
     if not promoted_case_ids:
         return
     promoted = set(promoted_case_ids)
+    retained: list[dict[str, Any]] = []
     for item in spec.unresolved_items:
         if not isinstance(item, dict):
+            retained.append(item)
             continue
-        related = {
+        related = [
             str(case_id)
             for case_id in item.get("related_test_case_ids") or []
             if str(case_id).strip()
-        }
-        if related & promoted:
-            item["blocking"] = False
+        ]
+        if not related or not (set(related) & promoted):
+            retained.append(item)
+            continue
+        remaining = [case_id for case_id in related if case_id not in promoted]
+        if remaining:
+            item["related_test_case_ids"] = remaining
+            retained.append(item)
+    spec.unresolved_items = retained
 
 
 def _validate_candidate(spec: TestSpec, current: CurrentFormSnapshot) -> None:
@@ -576,6 +585,14 @@ def _validate_candidate(spec: TestSpec, current: CurrentFormSnapshot) -> None:
             "test_input_validation",
             str(TestSpecContractError(violations)),
         )
+
+
+def _invalidate_downstream_artifacts(workspace: Path) -> None:
+    for kind in (
+        ArtifactKind.REVIEW_RECORD,
+        ArtifactKind.BUILD_PROBE_REPORT,
+    ):
+        canonical_artifact_path(workspace, kind).unlink(missing_ok=True)
 
 
 def apply_test_input_form(
@@ -632,7 +649,7 @@ def apply_test_input_form(
             touched_executable_execution_ids
         ),
     )
-    _mark_promoted_unresolved_history_nonblocking(candidate, promoted_ids)
+    _remove_promoted_unresolved_items(candidate, promoted_ids)
     _validate_candidate(candidate, current)
     try:
         saved, canonical_artifact = save_test_spec_snapshot(
@@ -646,6 +663,8 @@ def apply_test_input_form(
     except TestSpecContractError as error:
         raise TestInputFormError("test_input_validation", str(error)) from error
 
+    _invalidate_downstream_artifacts(current.workspace)
+
     warnings: list[dict[str, str]] = []
     artifacts: list[ProducedArtifact] = [canonical_artifact]
     views_written = False
@@ -656,22 +675,7 @@ def apply_test_input_form(
             canonical_path=current.path,
         )
         views_written = view_export.written
-        if view_export.written:
-            artifacts.extend(
-                (
-                    build_produced_artifact(
-                        current.workspace,
-                        view_export.markdown,
-                        kind="test_spec_markdown",
-                    ),
-                    build_produced_artifact(
-                        current.workspace,
-                        view_export.csv,
-                        kind="test_spec_csv",
-                    ),
-                )
-            )
-        else:
+        if not view_export.written:
             warnings.append(
                 _warning(
                     "test_spec_view_export_failed",

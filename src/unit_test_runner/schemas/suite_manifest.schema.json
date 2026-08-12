@@ -1,24 +1,51 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://unit-test-runner.local/schemas/suite_manifest.schema.json",
-  "title": "Suite Manifest",
-  "allOf": [
-    {
-      "$ref": "common.schema.json"
-    },
-    {
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_kind", "subject", "data"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "artifact_kind": {"const": "suite_manifest"},
+    "subject": {"$ref": "common.schema.json#/$defs/subject"},
+    "data": {
       "type": "object",
+      "additionalProperties": false,
+      "required": ["suite_id", "revision", "entries"],
       "properties": {
-        "artifact_kind": {
-          "const": "suite_manifest"
-        },
-        "schema_version": {
-          "const": "1.0.0"
-        },
-        "data": {
-          "$ref": "common.schema.json#/$defs/suiteManifestData"
+        "suite_id": {"type": "string", "minLength": 1},
+        "revision": {"type": "integer", "minimum": 1},
+        "entries": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/entry"}
         }
       }
     }
-  ]
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry_id", "enabled", "tags", "subject", "workspace",
+        "test_spec_sha256", "harness_sha256"
+      ],
+      "properties": {
+        "entry_id": {"type": "string", "pattern": "^.+-[0-9a-f]{12}$"},
+        "enabled": {"type": "boolean"},
+        "tags": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "subject": {"$ref": "common.schema.json#/$defs/subject"},
+        "workspace": {
+          "type": "string",
+          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*\\\\).+$"
+        },
+        "test_spec_sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "harness_sha256": {"$ref": "common.schema.json#/$defs/sha256"}
+      }
+    }
+  }
 }

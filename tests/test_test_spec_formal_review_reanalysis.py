@@ -7,20 +7,16 @@ from pathlib import Path
 from unittest import mock
 
 import unit_test_runner.reanalysis.workflow as workflow_module
-from unit_test_runner.dossier import analyze_function_workflow
+from unit_test_runner.dossier import analyze_function_workflow, finalize_function_dossier
 from unit_test_runner.reanalysis.reanalysis_models import (
     ReanalysisPolicy,
     TestCaseReconciliationReport,
 )
 from unit_test_runner.reanalysis.test_case_reconciler import reconcile_test_cases
 from unit_test_runner.reanalysis.workflow import _merge_reanalysis_candidate
-from unit_test_runner.contracts import ContractMode
 from unit_test_runner.test_spec import (
-    StaleRevisionError,
     TestSpec,
     TestSpecContractError,
-    build_current_artifact_context,
-    load_test_spec,
     validate_test_spec,
 )
 from tests.spec_support import copied_payload, current_context
@@ -283,6 +279,7 @@ class TestSpecFormalReviewReanalysisTests(unittest.TestCase):
                 "Control",
                 phase="design",
             )
+            finalize_function_dossier(out, "Control_Update")
             original_merge = workflow_module._merge_reanalysis_candidate
 
             def invalid_merge(*args, **kwargs):
@@ -296,9 +293,9 @@ class TestSpecFormalReviewReanalysisTests(unittest.TestCase):
                 side_effect=invalid_merge,
             ), mock.patch.object(
                 workflow_module,
-                "save_test_spec_snapshot",
-                side_effect=AssertionError("invalid candidate reached save"),
-            ) as save:
+                "_write_candidate_test_spec",
+                side_effect=AssertionError("invalid candidate reached writer"),
+            ) as write_candidate:
                 with self.assertRaises(TestSpecContractError):
                     workflow_module.reanalyze_function_workflow(
                         FIXTURE,
@@ -310,74 +307,10 @@ class TestSpecFormalReviewReanalysisTests(unittest.TestCase):
                         project_name="Control",
                         policy=ReanalysisPolicy(
                             generate_updated_test_case_design=True,
-                            overwrite_test_case_design=True,
                         ),
                     )
 
-            save.assert_not_called()
-
-    def test_revision_conflict_preserves_concurrent_canonical_without_alternate_editable_json(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            out = Path(temp_dir) / "Control_Update"
-            analyze_function_workflow(
-                FIXTURE,
-                FIXTURE / "Product.dsw",
-                "src/control.c",
-                "Control_Update",
-                "Win32 Debug",
-                out,
-                "Control",
-                phase="design",
-            )
-            canonical = out / "reports" / "test_spec.json"
-            original_save = workflow_module.save_test_spec_snapshot
-            concurrent_bytes = None
-
-            def interleaved_save(path, candidate, *, expected_revision, current_context):
-                nonlocal concurrent_bytes
-                concurrent = load_test_spec(path, mode=ContractMode.STRICT)
-                concurrent.generation_policy["concurrent_marker"] = "writer-b"
-                concurrent_context = build_current_artifact_context(out, concurrent)
-                original_save(
-                    path,
-                    concurrent,
-                    expected_revision=concurrent.revision,
-                    current_context=concurrent_context,
-                )
-                concurrent_bytes = canonical.read_bytes()
-                return original_save(
-                    path,
-                    candidate,
-                    expected_revision=expected_revision,
-                    current_context=current_context,
-                )
-
-            with mock.patch.object(
-                workflow_module,
-                "save_test_spec_snapshot",
-                side_effect=interleaved_save,
-            ):
-                with self.assertRaises(StaleRevisionError):
-                    workflow_module.reanalyze_function_workflow(
-                        FIXTURE,
-                        FIXTURE / "Product.dsw",
-                        "src/control.c",
-                        "Control_Update",
-                        "Win32 Debug",
-                        out,
-                        project_name="Control",
-                        policy=ReanalysisPolicy(
-                            generate_updated_test_case_design=True,
-                            overwrite_test_case_design=True,
-                        ),
-                    )
-
-            self.assertIsNotNone(concurrent_bytes)
-            self.assertEqual(concurrent_bytes, canonical.read_bytes())
-            self.assertFalse(
-                (out / "reports" / "updated_test_case_design.json").exists()
-            )
-            self.assertFalse((out / "reports" / "test_case_design.json").exists())
+            write_candidate.assert_not_called()
 
 
 if __name__ == "__main__":

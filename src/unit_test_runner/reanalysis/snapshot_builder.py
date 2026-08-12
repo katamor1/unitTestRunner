@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..contracts import ArtifactKind, ConsumerContractError, normalize_consumer_data
 from .reanalysis_models import AnalysisSnapshot, ReanalysisWarning, SnapshotArtifact
 
 
@@ -22,13 +21,6 @@ STANDARD_ARTIFACTS = {
     "test_spec": "test_spec.json",
     "build_context": "build_context.json",
 }
-
-CORE_CONSUMER_KINDS = {
-    "source_digest": ArtifactKind.SOURCE_DIGEST,
-    "function_location": ArtifactKind.FUNCTION_LOCATION,
-    "function_signature": ArtifactKind.FUNCTION_SIGNATURE,
-}
-
 
 def build_analysis_snapshot(
     snapshot_id: str,
@@ -58,19 +50,9 @@ def build_analysis_snapshot(
                 sha256 = hashlib.sha256(raw_bytes).hexdigest()
                 decoded = json.loads(raw_bytes.decode("utf-8"))
                 if not isinstance(decoded, dict):
-                    raise ConsumerContractError("Artifact root must be an object.")
+                    raise ValueError("Artifact root must be an object.")
                 schema_version = decoded.get("schema_version")
-                expected_kind = CORE_CONSUMER_KINDS.get(kind)
-                payload = (
-                    normalize_consumer_data(
-                        decoded,
-                        expected_kind=expected_kind,
-                        allow_legacy_v01=True,
-                    )
-                    if expected_kind is not None
-                    else decoded
-                )
-                payloads[kind] = payload
+                payloads[kind] = decoded
             except (OSError, UnicodeError, json.JSONDecodeError) as exc:
                 warnings.append(
                     ReanalysisWarning(
@@ -79,7 +61,7 @@ def build_analysis_snapshot(
                         related_artifact=kind,
                     )
                 )
-            except ConsumerContractError as exc:
+            except ValueError as exc:
                 warnings.append(
                     ReanalysisWarning(
                         "artifact_contract_invalid",

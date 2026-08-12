@@ -8,10 +8,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
-from unit_test_runner.harness.target_invocation_compat import _write_target_invocation
+from unit_test_runner.harness.harness_skeleton_generator import _write_target_invocation
 
 
-class TargetInvocationCompatTests(unittest.TestCase):
+class TargetInvocationTests(unittest.TestCase):
     def test_target_invocation_header_uses_opaque_pointer_without_product_includes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
@@ -30,10 +30,14 @@ class TargetInvocationCompatTests(unittest.TestCase):
                         "return_type": {"raw": "int"},
                         "parameters": [
                             {
+                                "index": 0,
                                 "name": "prm",
-                                "type_raw": "gbl_input *",
-                                "base_type": "gbl_input",
-                                "pointer_level": 1,
+                                "type": {
+                                    "raw": "gbl_input *",
+                                    "base_type": "gbl_input",
+                                    "pointer_level": 1,
+                                    "is_array": False,
+                                },
                             }
                         ],
                     },

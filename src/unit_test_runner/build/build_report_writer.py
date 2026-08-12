@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from typing import Any
 
+from unit_test_runner.contracts import ArtifactKind
 from unit_test_runner.harness.c90_writer import sha256_file, write_c_file
 from unit_test_runner.path_utils import resolved_relative_to
 from unit_test_runner.reports.japanese import ja_label, md_cell, md_label_cell
-from unit_test_runner.vc6.debug_workspace_response import vc6_cpp_options_path
-from unit_test_runner.vc6.debug_workspace_writer import write_vc6_debug_project
+from unit_test_runner.vc6.debug_workspace_writer import (
+    vc6_cpp_options_path,
+    write_vc6_debug_project,
+)
+from unit_test_runner.workspace_artifacts import load_public_artifact, write_canonical_artifact
 
 from .build_models import BuildDiagnostic, BuildProbeReport, BuildWorkspaceReport, WorkspaceFile
 
@@ -22,7 +27,12 @@ def write_build_reports(output_root: Path, workspace: BuildWorkspaceReport, prob
     _write_debug_dsp(output_root, workspace)
     workspace_json.write_text(json.dumps(workspace.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     workspace_md.write_text(render_workspace_markdown(workspace), encoding="utf-8")
-    probe_json.write_text(json.dumps(probe.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    probe_json = write_canonical_artifact(
+        output_root,
+        ArtifactKind.BUILD_PROBE_REPORT,
+        _probe_subject(output_root, probe),
+        probe.to_public_data(),
+    )
     probe_md.write_text(render_probe_markdown(probe), encoding="utf-8")
     for path, kind in [(workspace_json, "report"), (workspace_md, "report"), (probe_json, "report"), (probe_md, "report")]:
         _record_build_file(
@@ -34,6 +44,59 @@ def write_build_reports(output_root: Path, workspace: BuildWorkspaceReport, prob
         )
     workspace_json.write_text(json.dumps(workspace.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return {"workspace_json": workspace_json, "workspace_markdown": workspace_md, "probe_json": probe_json, "probe_markdown": probe_md}
+
+
+def _probe_subject(output_root: Path, probe: BuildProbeReport) -> dict[str, str]:
+    if probe.public_subject is not None:
+        subject = dict(probe.public_subject)
+    else:
+        subject = _subject_from_workspace(output_root)
+    if subject.get("function") != probe.function_name:
+        raise ValueError(
+            "build_probe_report subject function does not match the probe: "
+            f"{subject.get('function')!r} != {probe.function_name!r}"
+        )
+    if not _source_identity_matches(subject.get("source_path"), probe.source_path):
+        raise ValueError(
+            "build_probe_report subject source_path does not match the probe: "
+            f"{subject.get('source_path')!r} != {probe.source_path.as_posix()!r}"
+        )
+    return subject
+
+
+def _source_identity_matches(subject_path: object, probe_path: Path) -> bool:
+    if not isinstance(subject_path, str) or not subject_path:
+        return False
+    subject_parts = PurePosixPath(subject_path).parts
+    if not subject_parts or any(part in {"", ".", ".."} for part in subject_parts):
+        return False
+    probe_parts = probe_path.parts
+    if probe_path.is_absolute():
+        if len(subject_parts) > len(probe_parts):
+            return False
+        return tuple(part.casefold() for part in probe_parts[-len(subject_parts):]) == tuple(
+            part.casefold() for part in subject_parts
+        )
+    return probe_path.as_posix() == subject_path
+
+
+def _subject_from_workspace(workspace: Path) -> dict[str, str]:
+    reports = workspace / "reports"
+    for name, kind in (
+        ("function_dossier.json", ArtifactKind.FUNCTION_DOSSIER),
+        ("test_spec.json", ArtifactKind.TEST_SPEC),
+    ):
+        path = reports / name
+        if not path.is_file():
+            continue
+        payload = load_public_artifact(path, kind)
+        subject = payload.get("subject")
+        if isinstance(subject, dict):
+            return {str(key): str(value) for key, value in subject.items()}
+    raise ValueError(
+        "build_probe_report requires a public_subject or a canonical "
+        "function_dossier/test_spec subject in the workspace."
+    )
 
 
 def write_build_text(path: Path, text: str) -> None:

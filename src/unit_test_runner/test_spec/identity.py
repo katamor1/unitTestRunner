@@ -1,19 +1,10 @@
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import re
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
-
-from unit_test_runner.contracts import (
-    ArtifactKind,
-    migrate_payload,
-    validate_payload,
-    validate_payload_schema,
-)
-from unit_test_runner.contracts.registry import get_contract
 
 from .models import ArtifactReference, CurrentArtifactContext, TestSpec
 from .path_safety import assert_no_reparse_components, lexical_absolute
@@ -917,43 +908,15 @@ def _validated_provenance_payload(
         _validate_legacy_provenance_shape(artifact_kind, payload)
         normalized = payload
     else:
+        # Analysis reports are internal inputs in v0.1, not public artifact
+        # contracts. Bind their declared label and concrete bytes without
+        # resurrecting the removed private schema registry.
         if declared_kind != artifact_kind:
             raise ValueError(
                 f"Provenance kind mismatch: expected {artifact_kind}, "
                 f"received {declared_kind!r}."
             )
-        try:
-            kind = ArtifactKind(artifact_kind)
-        except ValueError as error:
-            raise ValueError(f"Unknown provenance artifact kind: {artifact_kind}") from error
-        contract = get_contract(kind)
-        version = str(payload.get("schema_version") or "")
-        if version == contract.current_version:
-            normalized = payload
-        elif version in contract.compatible_source_versions:
-            try:
-                normalized = migrate_payload(
-                    kind,
-                    payload,
-                    target_version=contract.current_version,
-                )
-            except (TypeError, ValueError) as error:
-                raise ValueError(
-                    f"Invalid compatible {artifact_kind} provenance: {error}"
-                ) from error
-        else:
-            raise ValueError(
-                f"Unsupported {artifact_kind} provenance version: {version or '<missing>'}"
-            )
-        violations = validate_payload(kind, normalized)
-        if violations:
-            detail = "; ".join(
-                f"{item.code} at {item.json_path}: {item.message}"
-                for item in violations
-            )
-            raise ValueError(
-                f"Invalid {artifact_kind} provenance contract: {detail}"
-            )
+        normalized = payload
     _validate_provenance_identity(
         artifact_kind,
         normalized,
@@ -962,14 +925,6 @@ def _validated_provenance_payload(
         source_file=source_file,
         function_name=function_name,
     )
-    if is_legacy:
-        _validate_legacy_provenance_contract(
-            artifact_kind,
-            payload,
-            source_path=source_path,
-            source_sha256=source_sha256,
-            function_name=function_name,
-        )
     return normalized
 
 
@@ -1124,52 +1079,6 @@ def _validate_json_shape(
         expected = shape.__name__ if isinstance(shape, type) else "valid JSON"
         raise ValueError(
             f"Legacy {artifact_kind} provenance field {path} must be {expected}."
-        )
-
-
-def _validate_legacy_provenance_contract(
-    artifact_kind: str,
-    payload: Mapping[str, Any],
-    *,
-    source_path: str,
-    source_sha256: str,
-    function_name: str,
-) -> None:
-    kind = ArtifactKind(artifact_kind)
-    data = copy.deepcopy(
-        {
-            key: value
-            for key, value in payload.items()
-            if key not in {"artifact_kind", "schema_version"}
-        }
-    )
-    source = data.get("source")
-    if isinstance(source, dict):
-        source["path"] = source_path
-    projection = {
-        "artifact_kind": artifact_kind,
-        "schema_version": get_contract(kind).current_version,
-        "producer": {
-            "name": "unit-test-runner-validation",
-            "version": "validation-only",
-            "commit": "validation-only",
-        },
-        "subject": {
-            "function_id": stable_function_id(source_path, function_name),
-            "source_path": source_path,
-            "source_sha256": source_sha256,
-        },
-        "data": data,
-        "extensions": {},
-    }
-    violations = validate_payload_schema(kind, projection)
-    if violations:
-        detail = "; ".join(
-            f"{item.code} at {item.json_path}: {item.message}"
-            for item in violations
-        )
-        raise ValueError(
-            f"Invalid raw v0.1 {artifact_kind} provenance structure: {detail}"
         )
 
 

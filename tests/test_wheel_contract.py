@@ -166,12 +166,7 @@ import unit_test_runner
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 from unit_test_runner.contracts import ArtifactKind
-from unit_test_runner.contracts.registry import (
-    get_contract,
-    iter_contracts,
-    iter_contract_versions,
-)
-from unit_test_runner.contracts.validator import validate_payload_schema
+from unit_test_runner.contracts import validate_artifact
 
 expected_resources = json.loads(sys.argv[1])
 prefix = Path(sys.prefix).resolve()
@@ -217,42 +212,23 @@ for resource_name, document in documents.items():
     for reference in iter_refs(document):
         resolver.lookup(reference)
 
-current_contracts = tuple(iter_contracts())
-versioned_contracts = tuple(iter_contract_versions())
-assert {contract.kind for contract in current_contracts} == set(ArtifactKind)
-version_keys = {
-    (contract.kind, contract.current_version)
-    for contract in versioned_contracts
+expected_public_schemas = {
+    f"{kind.value}.schema.json" for kind in ArtifactKind
 }
-assert len(version_keys) == len(versioned_contracts)
-assert set(current_contracts).issubset(versioned_contracts)
-test_spec_versions = sorted(
-    contract.current_version
-    for contract in versioned_contracts
-    if contract.kind is ArtifactKind.TEST_SPEC
-)
-assert test_spec_versions == ["1.0.0", "1.1.0"]
-assert any(
-    contract.schema_resource == "test_spec_v1_0.schema.json"
-    for contract in versioned_contracts
-)
-future_common = "common_v1_0.schema.json"
-if future_common in expected_resources:
-    assert future_common in documents
-
-for contract in versioned_contracts:
-    document = documents[contract.schema_resource]
+assert expected_public_schemas.issubset(documents)
+assert set(documents) == expected_public_schemas | {
+    "common.schema.json",
+    "cli_envelope.schema.json",
+}
+for kind in ArtifactKind:
+    document = documents[f"{kind.value}.schema.json"]
     validator = Draft202012Validator(document, registry=registry)
     tuple(validator.iter_errors({}))
-for kind in ArtifactKind:
-    assert get_contract(kind) in current_contracts
-    assert validate_payload_schema(kind, {})
+    assert validate_artifact(kind, {})
 
 print(json.dumps({
     "schema_resources": installed_resources,
-    "current_contracts": len(current_contracts),
-    "versioned_contracts": len(versioned_contracts),
-    "test_spec_versions": test_spec_versions,
+    "artifact_kinds": sorted(kind.value for kind in ArtifactKind),
     "module_origins": module_origins,
 }, sort_keys=True))
 """
@@ -275,12 +251,10 @@ print(json.dumps({
         self.assertEqual(0, loaded.returncode, loaded.stdout)
         report = json.loads(loaded.stdout)
         self.assertEqual(expected_resources, report["schema_resources"])
-        self.assertEqual(len(ArtifactKind), report["current_contracts"])
-        self.assertGreaterEqual(
-            report["versioned_contracts"],
-            report["current_contracts"],
+        self.assertEqual(
+            sorted(kind.value for kind in ArtifactKind),
+            report["artifact_kinds"],
         )
-        self.assertEqual(["1.0.0", "1.1.0"], report["test_spec_versions"])
         self.assertEqual(
             {"unit_test_runner", "jsonschema", "referencing"},
             set(report["module_origins"]),

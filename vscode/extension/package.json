@@ -1,7 +1,7 @@
 {
   "name": "unit-test-runner-vscode",
   "displayName": "Unit Test Runner",
-  "description": "UnitTestRunner CLIをVS Codeから操作するための拡張機能です。",
+  "description": "UnitTestRunner v0.1 CLIをVS Codeから操作する薄いアダプターです。",
   "version": "0.1.0",
   "publisher": "local",
   "license": "UNLICENSED",
@@ -12,352 +12,120 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": [
-    "Other"
-  ],
+  "categories": ["Other"],
   "activationEvents": [
-    "onCommand:unitTestRunner.quickCheckCurrentFunction",
-    "onCommand:unitTestRunner.quickCheckSelectedFunction",
-    "onCommand:unitTestRunner.openGeneratedTestSource",
-    "onCommand:unitTestRunner.openQuickSummary",
-    "onCommand:unitTestRunner.runFullGateForCurrentFunction",
+    "onView:unitTestRunner.workflow",
+    "onView:unitTestRunner.suite",
     "onCommand:unitTestRunner.analyzeCurrentFunction",
     "onCommand:unitTestRunner.analyzeSelectedFunction",
     "onCommand:unitTestRunner.reanalyzeCurrentFunction",
     "onCommand:unitTestRunner.finalizeDossier",
     "onCommand:unitTestRunner.openFunctionDossier",
     "onCommand:unitTestRunner.openReviewChecklist",
-    "onCommand:unitTestRunner.openNextActions",
-    "onCommand:unitTestRunner.openChangeImpactReport",
-    "onCommand:unitTestRunner.openRegressionSelection",
-    "onCommand:unitTestRunner.generateTestDesign",
     "onCommand:unitTestRunner.openTestInputEditor",
-    "onCommand:unitTestRunner.generateHarnessSkeleton",
+    "onCommand:unitTestRunner.prepareHarness",
     "onCommand:unitTestRunner.buildProbeDryRun",
     "onCommand:unitTestRunner.runBuildProbe",
     "onCommand:unitTestRunner.runTests",
-    "onCommand:unitTestRunner.prepareEvidence",
     "onCommand:unitTestRunner.registerCurrentFunctionInSuite",
-    "onCommand:unitTestRunner.openSuite",
-    "onCommand:unitTestRunner.openSuiteDashboard",
-    "onCommand:unitTestRunner.openSuiteManifest",
     "onCommand:unitTestRunner.runSelectedSuiteTests",
-    "onCommand:unitTestRunner.runSuiteByTag",
-    "onCommand:unitTestRunner.runAllSuiteTestsRequireGreen",
     "onCommand:unitTestRunner.openSuiteRunReport",
     "onCommand:unitTestRunner.openOutputWorkspace",
-    "onCommand:unitTestRunner.copyLastCommand",
-    "onCommand:unitTestRunner.openLastFunctionDossier",
-    "onView:unitTestRunner.workflow",
-    "onStartupFinished"
+    "onCommand:unitTestRunner.copyLastCommand"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
-      {
-        "command": "unitTestRunner.quickCheckCurrentFunction",
-        "title": "UnitTestRunner: 現在の関数をクイックチェック"
-      },
-      {
-        "command": "unitTestRunner.quickCheckSelectedFunction",
-        "title": "UnitTestRunner: 選択した関数をクイックチェック"
-      },
-      {
-        "command": "unitTestRunner.openGeneratedTestSource",
-        "title": "UnitTestRunner: 生成したテストソースを開く"
-      },
-      {
-        "command": "unitTestRunner.openQuickSummary",
-        "title": "UnitTestRunner: クイックチェックの概要を開く"
-      },
-      {
-        "command": "unitTestRunner.runFullGateForCurrentFunction",
-        "title": "UnitTestRunner: 現在の関数でフルゲートを実行"
-      },
-      {
-        "command": "unitTestRunner.analyzeCurrentFunction",
-        "title": "UnitTestRunner: 現在の関数を解析"
-      },
-      {
-        "command": "unitTestRunner.analyzeSelectedFunction",
-        "title": "UnitTestRunner: 選択した関数を解析"
-      },
-      {
-        "command": "unitTestRunner.reanalyzeCurrentFunction",
-        "title": "UnitTestRunner: 現在の関数を再解析"
-      },
-      {
-        "command": "unitTestRunner.finalizeDossier",
-        "title": "UnitTestRunner: 関数分析レポートを確定"
-      },
-      {
-        "command": "unitTestRunner.openFunctionDossier",
-        "title": "UnitTestRunner: 関数分析レポートを開く"
-      },
-      {
-        "command": "unitTestRunner.openReviewChecklist",
-        "title": "UnitTestRunner: レビュー確認リストを開く"
-      },
-      {
-        "command": "unitTestRunner.openNextActions",
-        "title": "UnitTestRunner: 次に行う操作を開く"
-      },
-      {
-        "command": "unitTestRunner.openChangeImpactReport",
-        "title": "UnitTestRunner: 変更影響レポートを開く"
-      },
-      {
-        "command": "unitTestRunner.openRegressionSelection",
-        "title": "UnitTestRunner: 回帰テストの選定結果を開く"
-      },
-      {
-        "command": "unitTestRunner.generateTestDesign",
-        "title": "UnitTestRunner: テスト設計を生成"
-      },
-      {
-        "command": "unitTestRunner.openTestInputEditor",
-        "title": "UnitTestRunner: 未確定テスト項目を入力"
-      },
-      {
-        "command": "unitTestRunner.generateHarnessSkeleton",
-        "title": "UnitTestRunner: テストハーネスを生成"
-      },
-      {
-        "command": "unitTestRunner.buildProbeDryRun",
-        "title": "UnitTestRunner: ビルドの事前確認を実行"
-      },
-      {
-        "command": "unitTestRunner.runBuildProbe",
-        "title": "UnitTestRunner: ビルドを実行"
-      },
-      {
-        "command": "unitTestRunner.runTests",
-        "title": "UnitTestRunner: テストを実行"
-      },
-      {
-        "command": "unitTestRunner.prepareEvidence",
-        "title": "UnitTestRunner: 検証資料を作成"
-      },
-      {
-        "command": "unitTestRunner.registerCurrentFunctionInSuite",
-        "title": "UnitTestRunner: 現在の関数をテストスイートに登録"
-      },
-      {
-        "command": "unitTestRunner.openSuite",
-        "title": "UnitTestRunner: テストスイートを開く"
-      },
-      {
-        "command": "unitTestRunner.openSuiteDashboard",
-        "title": "UnitTestRunner: テストスイート一覧を開く"
-      },
-      {
-        "command": "unitTestRunner.openSuiteManifest",
-        "title": "UnitTestRunner: スイート定義ファイルを開く"
-      },
-      {
-        "command": "unitTestRunner.runSelectedSuiteTests",
-        "title": "UnitTestRunner: 選択したテストを実行"
-      },
-      {
-        "command": "unitTestRunner.runSuiteByTag",
-        "title": "UnitTestRunner: タグを指定してテストを実行"
-      },
-      {
-        "command": "unitTestRunner.runAllSuiteTestsRequireGreen",
-        "title": "UnitTestRunner: 全件テストを実行して合否を確認"
-      },
-      {
-        "command": "unitTestRunner.openSuiteRunReport",
-        "title": "UnitTestRunner: テストスイートの実行レポートを開く"
-      },
-      {
-        "command": "unitTestRunner.openOutputWorkspace",
-        "title": "UnitTestRunner: 出力ワークスペースを開く"
-      },
-      {
-        "command": "unitTestRunner.copyLastCommand",
-        "title": "UnitTestRunner: 最後に実行したCLIコマンドをコピー"
-      },
-      {
-        "command": "unitTestRunner.openLastFunctionDossier",
-        "title": "UnitTestRunner: 最後の関数分析レポートを開く"
-      }
+      { "command": "unitTestRunner.analyzeCurrentFunction", "title": "UnitTestRunner: 現在の関数を解析" },
+      { "command": "unitTestRunner.analyzeSelectedFunction", "title": "UnitTestRunner: 選択した関数を解析" },
+      { "command": "unitTestRunner.reanalyzeCurrentFunction", "title": "UnitTestRunner: 現在の関数を再解析" },
+      { "command": "unitTestRunner.finalizeDossier", "title": "UnitTestRunner: dossierを確定" },
+      { "command": "unitTestRunner.openFunctionDossier", "title": "UnitTestRunner: function dossierを開く" },
+      { "command": "unitTestRunner.openReviewChecklist", "title": "UnitTestRunner: レビュー確認リストを開く" },
+      { "command": "unitTestRunner.openTestInputEditor", "title": "UnitTestRunner: TestSpecをレビュー" },
+      { "command": "unitTestRunner.prepareHarness", "title": "UnitTestRunner: ハーネスを準備" },
+      { "command": "unitTestRunner.buildProbeDryRun", "title": "UnitTestRunner: ビルドの事前確認" },
+      { "command": "unitTestRunner.runBuildProbe", "title": "UnitTestRunner: ビルドを実行" },
+      { "command": "unitTestRunner.runTests", "title": "UnitTestRunner: テストを実行" },
+      { "command": "unitTestRunner.registerCurrentFunctionInSuite", "title": "UnitTestRunner: 現在の関数をスイートに登録" },
+      { "command": "unitTestRunner.runSelectedSuiteTests", "title": "UnitTestRunner: 選択したスイート項目を実行" },
+      { "command": "unitTestRunner.openSuiteRunReport", "title": "UnitTestRunner: スイート実行レポートを開く" },
+      { "command": "unitTestRunner.openOutputWorkspace", "title": "UnitTestRunner: 出力ワークスペースを開く" },
+      { "command": "unitTestRunner.copyLastCommand", "title": "UnitTestRunner: 最後のCLIコマンドをコピー" }
     ],
     "menus": {
       "editor/context": [
-        {
-          "command": "unitTestRunner.quickCheckCurrentFunction",
-          "when": "editorLangId == c",
-          "group": "navigation@8"
-        },
-        {
-          "command": "unitTestRunner.quickCheckSelectedFunction",
-          "when": "editorHasSelection && editorLangId == c",
-          "group": "navigation@9"
-        },
-        {
-          "command": "unitTestRunner.analyzeCurrentFunction",
-          "when": "editorLangId == c",
-          "group": "navigation@10"
-        },
-        {
-          "command": "unitTestRunner.analyzeSelectedFunction",
-          "when": "editorHasSelection && editorLangId == c",
-          "group": "navigation@11"
-        }
+        { "command": "unitTestRunner.analyzeCurrentFunction", "when": "editorLangId == c", "group": "navigation@10" },
+        { "command": "unitTestRunner.analyzeSelectedFunction", "when": "editorHasSelection && editorLangId == c", "group": "navigation@11" }
       ]
     },
     "viewsContainers": {
       "activitybar": [
-        {
-          "id": "unitTestRunner",
-          "title": "Unit Test Runner",
-          "icon": "media/unit-test-runner.svg"
-        }
+        { "id": "unitTestRunner", "title": "Unit Test Runner", "icon": "media/unit-test-runner.svg" }
       ]
     },
     "views": {
       "unitTestRunner": [
-        {
-          "id": "unitTestRunner.workflow",
-          "name": "関数テスト",
-          "type": "webview"
-        },
-        {
-          "id": "unitTestRunner.suite",
-          "name": "テストスイート",
-          "type": "webview"
-        }
+        { "id": "unitTestRunner.workflow", "name": "関数テスト", "type": "webview" },
+        { "id": "unitTestRunner.suite", "name": "テストスイート", "type": "webview" }
       ]
     },
     "configuration": {
       "title": "Unit Test Runner",
       "properties": {
         "unitTestRunner.cliPath": {
-          "type": "string",
-          "default": "unit-test-runner",
-          "description": "UnitTestRunnerのCLIまたは実行ファイルのパスです。空欄または既定値の場合は、同梱のWindows x64実行ファイルを優先します。"
+          "type": "string", "default": "unit-test-runner", "scope": "resource",
+          "description": "UnitTestRunner CLIまたは実行ファイルのパスです。既定値では同梱Windows x64 CLIを優先します。"
         },
         "unitTestRunner.sourceRoot": {
-          "type": "string",
-          "default": "",
-          "description": "テスト対象のソースコードがあるルートフォルダーです。未設定の場合は、VS Codeで最初に開いたフォルダーを使用します。"
-        },
-        "unitTestRunner.workspaceRoot": {
-          "type": "string",
-          "default": "",
-          "description": "unitTestRunner.sourceRootの旧設定名です。新規設定ではsourceRootを使用してください。"
+          "type": "string", "default": "", "scope": "resource",
+          "description": "対象sourceのルートです。未設定時はactive documentを含むworkspace folderを使用します。"
         },
         "unitTestRunner.dswPath": {
-          "type": "string",
-          "default": "",
-          "description": "テスト対象のVisual C++ 6.0ワークスペースファイル（.dsw）のパスです。"
+          "type": "string", "default": "", "scope": "resource",
+          "description": "対象Visual C++ 6.0 workspace（.dsw）のパスです。"
         },
         "unitTestRunner.outputRoot": {
-          "type": "string",
-          "default": "",
-          "description": "関数分析レポートやテスト設計などの生成物を保存する出力先フォルダーです。"
+          "type": "string", "default": "", "scope": "resource",
+          "description": "source root外の成果物出力先です。"
         },
         "unitTestRunner.suiteManifestPath": {
-          "type": "string",
-          "default": "",
-          "description": "複数の関数をまとめて実行するスイート定義ファイルです。未設定の場合は、出力先フォルダー配下のsuites/default/suite_manifest.jsonを使用します。"
+          "type": "string", "default": "", "scope": "resource",
+          "description": "portable suite manifestのパスです。未設定時はoutputRoot/suites/default/suite_manifest.jsonを使用します。"
         },
         "unitTestRunner.defaultConfiguration": {
-          "type": "string",
-          "default": "Win32 Debug",
-          "description": "関数解析とビルドで既定として使用するVisual C++ 6.0のビルド構成名です。"
+          "type": "string", "default": "Win32 Debug", "scope": "resource",
+          "description": "既定のVC6 configurationです。"
         },
         "unitTestRunner.defaultProject": {
-          "type": "string",
-          "default": "",
-          "description": "ソースファイルが複数のVisual C++ 6.0プロジェクトに含まれる場合に使用する既定のプロジェクト名です。"
+          "type": "string", "default": "", "scope": "resource",
+          "description": "source membershipが複数候補の場合に使う明示projectです。"
         },
         "unitTestRunner.vcvarsPath": {
-          "type": "string",
-          "default": "",
-          "description": "ビルド前に実行するVisual C++ 6.0の環境設定バッチファイルです。nmakeまたはclがPATHにない場合に指定します。"
-        },
-        "unitTestRunner.projectName": {
-          "type": "string",
-          "default": "",
-          "description": "unitTestRunner.defaultProjectの旧設定名です。新規設定ではdefaultProjectを使用してください。"
+          "type": "string", "default": "", "scope": "resource",
+          "description": "VC6 build環境を設定するbat/cmdのパスです。"
         },
         "unitTestRunner.autoOpenDossier": {
-          "type": "boolean",
-          "default": true,
-          "description": "解析成功後に関数分析レポート（function_dossier.md）を自動で開きます。"
-        },
-        "unitTestRunner.finalizeDossierAfterAnalyze": {
-          "type": "boolean",
-          "default": true,
-          "description": "関数解析時に関数分析レポートを確定するオプション（--finalize-dossier）を使用します。"
-        },
-        "unitTestRunner.quickProfile": {
-          "type": "string",
-          "enum": [
-            "design",
-            "harness",
-            "build-dry-run"
-          ],
-          "default": "design",
-          "description": "クイックチェックで実行する範囲です。通常はテスト設計まで、必要に応じてテストハーネス生成またはビルドの事前確認まで実行できます。",
-          "enumDescriptions": [
-            "関数解析とテスト設計まで実行します。",
-            "テストハーネスの生成まで実行します。",
-            "ビルドの事前確認まで実行します。"
-          ]
-        },
-        "unitTestRunner.quickOutputRoot": {
-          "type": "string",
-          "default": "",
-          "description": "クイックチェック専用の出力先フォルダーです。未設定の場合は、出力先フォルダー配下の_quickを使用します。"
-        },
-        "unitTestRunner.quickReusePreviousWorkspace": {
-          "type": "boolean",
-          "default": true,
-          "description": "クイックチェックで同じ関数の出力ワークスペース名を固定し、繰り返し実行しやすくします。"
-        },
-        "unitTestRunner.quickAutoOpenSummary": {
-          "type": "boolean",
-          "default": true,
-          "description": "クイックチェック成功後に概要レポート（quick_summary.md）を自動で開きます。"
-        },
-        "unitTestRunner.quickAllowExecution": {
-          "type": "boolean",
-          "default": false,
-          "description": "将来、クイックチェックから実行を伴うプロファイルを許可するための安全設定です。現在の既定プロファイルでは、ビルドやテストを実行しません。"
-        },
-        "unitTestRunner.useJsonOutput": {
-          "type": "boolean",
-          "default": true,
-          "description": "CLIコマンドに--jsonを渡し、生成されたレポートのパスを機械可読形式で受け取ります。"
-        },
-        "unitTestRunner.showOutputChannel": {
-          "type": "boolean",
-          "default": true,
-          "description": "コマンド実行時に［Unit Test Runner］出力チャンネルを表示します。"
+          "type": "boolean", "default": true, "scope": "resource",
+          "description": "dossier確定成功後にfunction_dossier.mdを開きます。"
         },
         "unitTestRunner.runBuildProbeRequiresConfirmation": {
-          "type": "boolean",
-          "default": true,
-          "description": "ビルドを実行する前に確認ダイアログを表示します。"
+          "type": "boolean", "default": true, "scope": "resource",
+          "description": "実ビルド前に確認ダイアログを表示します。"
         },
         "unitTestRunner.runTestsRequiresConfirmation": {
-          "type": "boolean",
-          "default": true,
-          "description": "生成したテストを実行する前に確認ダイアログを表示します。"
+          "type": "boolean", "default": true, "scope": "resource",
+          "description": "実テスト前に確認ダイアログを表示します。"
         },
         "unitTestRunner.commandTimeoutSeconds": {
-          "type": "number",
-          "default": 300,
-          "description": "CLIコマンドがタイムアウトするまでの秒数です。"
+          "type": "number", "default": 300, "minimum": 1, "scope": "resource",
+          "description": "CLI process treeを終了するまでのtimeout秒数です。"
         }
       }
     }
   },
   "scripts": {
-    "compile": "tsc -p ./",
+    "compile": "node ./scripts/clean-dist.cjs && tsc -p ./",
     "test": "npm run compile && node ./scripts/run-unit-tests.cjs",
     "test:extension-host": "npm run compile && node ./dist/test/runTest.js",
     "vscode:prepublish": "npm run compile"

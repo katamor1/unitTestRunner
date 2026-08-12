@@ -63,8 +63,8 @@ class Vc6ParseSmokeEnvironmentTests(unittest.TestCase):
             self.assertEqual(["FactoryTest"], [dependency["from_project"] for dependency in workspace["dependencies"]])
 
             all_membership = json.loads(membership_all_json.read_text(encoding="utf-8"))
-            self.assertEqual("multiple_matches", all_membership["status"])
-            self.assertEqual(["DeviceControl", "FactoryTest"], [match["project_name"] for match in all_membership["matches"]])
+            self.assertEqual("ok", all_membership["status"])
+            self.assertEqual(["DeviceControl"], [match["project_name"] for match in all_membership["matches"]])
 
             filtered_membership = json.loads(membership_filtered_json.read_text(encoding="utf-8"))
             self.assertEqual("ok", filtered_membership["status"])

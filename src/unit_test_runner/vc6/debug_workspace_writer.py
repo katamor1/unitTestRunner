@@ -10,6 +10,13 @@ from typing import Any
 from unit_test_runner.harness.c90_writer import sanitize_identifier
 
 
+_INCLUDE_OPTION_RE = re.compile(
+    r'(?<!\S)/I(?=\s|")\s*(?:"[^"]*"|\S+)',
+    re.IGNORECASE,
+)
+_ENV_REFERENCE_RE = re.compile(r"%[^%]+%")
+
+
 @dataclass
 class Vc6DebugProject:
     entry_id: str | None
@@ -50,6 +57,7 @@ def write_vc6_debug_project(workspace: Path | str, build_workspace_report: Any |
     dsp_path = workspace / "build" / f"{safe_project}.dsp"
     dsp_text = _render_dsp(workspace, dsp_path, report, safe_project, function_name)
     _write_vc6_text(dsp_path, dsp_text)
+    _rewrite_dsp_with_response_file(workspace, dsp_path, report)
     return dsp_path
 
 
@@ -104,6 +112,8 @@ def _render_dsp(workspace: Path, dsp_path: Path, report: dict[str, Any], project
     compiler_options = " ".join(_dsp_compiler_options(report.get("compiler_options", [])))
     source_files = _source_files(report)
     header_files = _header_files(workspace, report)
+    link_inputs = [*_dsp_library_path_args(report), *_dsp_link_library_args(report)]
+    link_suffix = " " + " ".join(link_inputs) if link_inputs else ""
     lines = [
         "# Microsoft Developer Studio Project File - Name=\"" + project_name + "\" - Package Owner=<4>",
         "# Microsoft Developer Studio Generated Build File, Format Version 6.00",
@@ -152,7 +162,7 @@ def _render_dsp(workspace: Path, dsp_path: Path, report: dict[str, Any], project
         "# ADD BSC32 /nologo",
         "LINK32=link.exe",
         "# ADD BASE LINK32 /nologo /subsystem:console /debug /machine:I386",
-        "# ADD LINK32 /nologo /subsystem:console /debug /machine:I386 /out:\"..\\bin\\utr_probe.exe\" /pdb:\"..\\bin\\utr_probe.pdb\"",
+        "# ADD LINK32 /nologo /subsystem:console /debug /machine:I386 /out:\"..\\bin\\utr_probe.exe\" /pdb:\"..\\bin\\utr_probe.pdb\"" + link_suffix,
         "",
         "!ENDIF ",
         "",
@@ -166,6 +176,119 @@ def _render_dsp(workspace: Path, dsp_path: Path, report: dict[str, Any], project
         "",
     ]
     return "\r\n".join(lines)
+
+
+def vc6_cpp_options_path(dsp_path: Path | str) -> Path:
+    return Path(dsp_path).with_suffix(".ini")
+
+
+def _rewrite_dsp_with_response_file(
+    workspace: Path,
+    dsp_path: Path,
+    report: dict[str, Any],
+) -> None:
+    response_options, inline_options = _partition_include_options(
+        dsp_path.parent,
+        workspace,
+        report,
+    )
+    response_path = vc6_cpp_options_path(dsp_path)
+    if not response_options:
+        if response_path.exists():
+            response_path.unlink()
+        return
+
+    _write_vc6_text(response_path, "\r\n".join(response_options))
+    text = dsp_path.read_text(encoding="cp932", errors="replace")
+    response_record = f'# ADD CPP @"{response_path.name}"'
+    output: list[str] = []
+    inserted = False
+    for line in text.splitlines():
+        if line.startswith("# ADD CPP") and _INCLUDE_OPTION_RE.search(line):
+            output.append(_strip_include_options(line, inline_options))
+            output.append(response_record)
+            inserted = True
+        else:
+            output.append(line)
+    if not inserted:
+        for index, line in enumerate(output):
+            if line.startswith("# ADD CPP"):
+                output.insert(index + 1, response_record)
+                inserted = True
+                break
+    if inserted:
+        _write_vc6_text(dsp_path, "\r\n".join(output))
+
+
+def _partition_include_options(
+    dsp_dir: Path,
+    workspace: Path,
+    report: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    response_options: list[str] = []
+    inline_options: list[str] = []
+    seen: set[str] = set()
+    for item in report.get("include_dirs", []):
+        option = _dsp_include_arg(dsp_dir, workspace, item)
+        key = option.lower()
+        if not option or key in seen:
+            continue
+        seen.add(key)
+        raw = item.get("raw") if isinstance(item, dict) else getattr(item, "raw", "")
+        target = inline_options if _requires_ide_expansion(str(raw or "")) else response_options
+        target.append(option)
+    return response_options, inline_options
+
+
+def _requires_ide_expansion(value: str) -> bool:
+    return "$" in value or _ENV_REFERENCE_RE.search(value) is not None
+
+
+def _strip_include_options(line: str, inline_options: list[str]) -> str:
+    stripped = _INCLUDE_OPTION_RE.sub("", line)
+    parts = [" ".join(stripped.split()), *inline_options]
+    return " ".join(part for part in parts if part)
+
+
+def _dsp_link_library_args(report: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    libraries = report.get("link_libraries", []) if isinstance(report, dict) else []
+    for raw in sorted(libraries, key=_link_order):
+        item = (
+            raw
+            if isinstance(raw, dict)
+            else raw.to_dict()
+            if hasattr(raw, "to_dict")
+            else {"path": raw}
+        )
+        path = str(item.get("path") or "").strip().replace("/", "\\")
+        if not path or path.lower() in seen:
+            continue
+        seen.add(path.lower())
+        values.append(f'"{_escape_option(path)}"')
+    return values
+
+
+def _dsp_library_path_args(report: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    paths = report.get("library_dirs", []) if isinstance(report, dict) else []
+    for raw in paths:
+        path = str(raw or "").strip().replace("/", "\\")
+        if not path or path.lower() in seen:
+            continue
+        seen.add(path.lower())
+        values.append(f'/libpath:"{_escape_option(path)}"')
+    return values
+
+
+def _link_order(value: Any) -> int:
+    raw = value.get("link_order", 0) if isinstance(value, dict) else getattr(value, "link_order", 0)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _render_group(title: str, default_filter: str, dsp_dir: Path, workspace: Path, files: list[Path]) -> str:

@@ -21,8 +21,7 @@ class CliOutputEncodingTests(unittest.TestCase):
             status="error",
             exit_code=1,
             command="build-probe",
-            message="compiler output contained replacement character",
-            data={"log_excerpt": "invalid byte was decoded as \ufffd"},
+            message="invalid byte was decoded as \ufffd",
             outcome=DomainOutcome("command", RunOutcome.ERROR, None),
         )
 
@@ -32,7 +31,7 @@ class CliOutputEncodingTests(unittest.TestCase):
         self.assertIn("\\ufffd", text)
         self.assertEqual(
             "invalid byte was decoded as \ufffd",
-            json.loads(text)["data"]["details"]["log_excerpt"],
+            json.loads(text)["message"],
         )
 
     def test_stream_writer_falls_back_when_console_encoding_rejects_text(self):

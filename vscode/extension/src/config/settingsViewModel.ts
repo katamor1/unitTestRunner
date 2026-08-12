@@ -102,16 +102,16 @@ function normalizeRaw(raw: RawSettings): RawSettings {
   return {
     ...raw,
     cliPath: nonEmptyString(raw.cliPath) ?? undefined,
-    sourceRoot: nonEmptyString(raw.sourceRoot) ?? nonEmptyString(raw.workspaceRoot),
+    sourceRoot: nonEmptyString(raw.sourceRoot),
     defaultConfiguration: nonEmptyString(raw.defaultConfiguration) ?? undefined,
   };
 }
 
 function fieldSpecs(raw: RawSettings, settings: ReturnType<typeof readAdapterSettingsFromObject>, defaultSourceRoot: string): FieldSpec[] {
-  const configuredSourceRoot = nonEmptyString(raw.sourceRoot) ?? nonEmptyString(raw.workspaceRoot) ?? '';
+  const configuredSourceRoot = nonEmptyString(raw.sourceRoot) ?? '';
   const configuredCliPath = nonEmptyString(raw.cliPath) ?? '';
   const configuredDefaultConfiguration = nonEmptyString(raw.defaultConfiguration) ?? '';
-  const configuredDefaultProject = nonEmptyString(raw.defaultProject) ?? nonEmptyString(raw.projectName) ?? '';
+  const configuredDefaultProject = nonEmptyString(raw.defaultProject) ?? '';
   const configuredVcvarsPath = nonEmptyString(raw.vcvarsPath) ?? '';
   const configuredSuiteManifestPath = nonEmptyString(raw.suiteManifestPath) ?? '';
   return [

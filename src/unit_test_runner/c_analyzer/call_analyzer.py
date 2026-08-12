@@ -100,7 +100,10 @@ def analyze_calls(
         )
         providers = sorted(provider_map.get(name, []), key=lambda item: item.link_order)
         target_kind = _target_kind(name, defined, macro_names, pointer_parameters, bool(providers))
-        if len(providers) > 1 and name not in multiple_provider_warnings:
+        provider_libraries = {
+            provider.library.as_posix().lower() for provider in providers
+        }
+        if len(provider_libraries) > 1 and name not in multiple_provider_warnings:
             multiple_provider_warnings.add(name)
             warnings.append(
                 CallAnalyzerWarning(

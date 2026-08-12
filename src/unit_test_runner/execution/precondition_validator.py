@@ -12,7 +12,8 @@ def validate_execution_preconditions(
 ) -> tuple[str, list[TestExecutionWarning], list[ExecutionReviewItem]]:
     warnings: list[TestExecutionWarning] = []
     review_items: list[ExecutionReviewItem] = []
-    status = build_probe_report.get("function", {}).get("status", "unknown")
+    data = build_probe_report.get("data")
+    status = data.get("status", "unknown") if isinstance(data, dict) else "unknown"
     if policy.require_successful_build_probe and status != "succeeded":
         warnings.append(TestExecutionWarning("build_probe_not_successful", "ビルドプローブが成功していないため、テスト実行をブロックします。"))
         review_items.append(

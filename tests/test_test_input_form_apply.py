@@ -7,7 +7,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tests.spec_support import write_test_input_form_fixture
-from unit_test_runner.contracts import ContractMode
+from unit_test_runner.contracts import ArtifactKind
+from unit_test_runner.execution.execution_models import TestRunRequest
+from unit_test_runner.execution.test_execution import execute_test_run
 from unit_test_runner.test_input_form import (
     TestInputFormError,
     apply_test_input_form,
@@ -15,6 +17,11 @@ from unit_test_runner.test_input_form import (
     parse_test_input_change_request,
 )
 from unit_test_runner.test_spec import load_test_spec_snapshot
+from unit_test_runner.workspace_artifacts import (
+    artifact_sha256,
+    set_review_record,
+    write_canonical_artifact,
+)
 
 
 def item_by(form, kind: str, label_suffix: str = ""):
@@ -46,7 +53,7 @@ class TestInputFormApplyTests(unittest.TestCase):
     def test_partial_save_changes_only_the_submitted_parent_and_increments_once(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             fixture = write_test_input_form_fixture(Path(temp_dir))
-            before = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
+            before = load_test_spec_snapshot(fixture.canonical_path)
             before_payload = before.spec.to_payload()
             form = build_test_input_form(fixture.workspace)
             mode = item_by(form, "input_assignment", "mode")
@@ -57,7 +64,7 @@ class TestInputFormApplyTests(unittest.TestCase):
                 expected_revision=before.spec.revision,
             )
 
-            after = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
+            after = load_test_spec_snapshot(fixture.canonical_path)
             candidate = next(
                 case
                 for case in after.spec.additional_case_candidates
@@ -98,7 +105,7 @@ class TestInputFormApplyTests(unittest.TestCase):
                 expected_revision=form.revision,
             )
 
-            saved = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
+            saved = load_test_spec_snapshot(fixture.canonical_path)
             candidate = next(
                 case
                 for case in saved.spec.additional_case_candidates
@@ -109,6 +116,86 @@ class TestInputFormApplyTests(unittest.TestCase):
             )
             self.assertFalse(parent["review_required"])
             self.assertEqual(1, result.confirmed_item_count)
+            self.assertTrue(result.views_written)
+            self.assertEqual(["test_spec"], [artifact.kind for artifact in result.artifacts])
+            self.assertEqual((), result.warnings)
+            self.assertTrue((fixture.canonical_path.parent / "test_spec.md").is_file())
+            self.assertTrue((fixture.canonical_path.parent / "test_spec.csv").is_file())
+
+    def test_saved_form_change_invalidates_review_and_build_before_a_reapproval_can_run(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = write_test_input_form_fixture(Path(temp_dir))
+            reports = fixture.workspace / "reports"
+            before = load_test_spec_snapshot(fixture.canonical_path)
+            subject = before.spec.to_payload()["subject"]
+            set_review_record(
+                fixture.workspace,
+                artifact_kind=ArtifactKind.TEST_SPEC,
+                artifact_sha256_value=artifact_sha256(fixture.canonical_path),
+                decision="approved",
+                reviewer="reviewer@example.com",
+                reviewed_at="2026-08-13T00:00:00Z",
+                comment="old spec approved",
+            )
+            write_canonical_artifact(
+                fixture.workspace,
+                ArtifactKind.BUILD_PROBE_REPORT,
+                subject,
+                {
+                    "status": "succeeded",
+                    "executed": True,
+                    "exit_code": 0,
+                    "started_at": None,
+                    "finished_at": None,
+                    "duration_ms": None,
+                    "commands": [],
+                    "diagnostics": [],
+                    "missing_includes": [],
+                    "unresolved_symbols": [],
+                    "pch_issues": [],
+                    "vc6_compatibility_issues": [],
+                    "log_files": [],
+                },
+            )
+            stale_executable = fixture.workspace / "bin" / "utr_probe.exe"
+            stale_executable.parent.mkdir(parents=True)
+            stale_executable.write_bytes(b"stale executable")
+            form = build_test_input_form(fixture.workspace)
+            mode = item_by(form, "input_assignment", "mode")
+
+            apply_test_input_form(
+                fixture.workspace,
+                request_for(mode, {"value_expression": "MODE_AUTO"}, True),
+                expected_revision=form.revision,
+            )
+
+            self.assertFalse((reports / "review_record.json").exists())
+            self.assertFalse((reports / "build_probe_report.json").exists())
+            self.assertTrue(stale_executable.exists())
+
+            set_review_record(
+                fixture.workspace,
+                artifact_kind=ArtifactKind.TEST_SPEC,
+                artifact_sha256_value=artifact_sha256(fixture.canonical_path),
+                decision="approved",
+                reviewer="reviewer@example.com",
+                reviewed_at="2026-08-13T00:00:00Z",
+                comment="new spec approved",
+            )
+            (reports / "harness_skeleton_report.json").write_text("{}", encoding="utf-8")
+            with patch(
+                "unit_test_runner.execution.test_execution.run_test_executable_cases"
+            ) as runner:
+                with self.assertRaisesRegex(ValueError, "Cannot read build_probe_report"):
+                    execute_test_run(
+                        TestRunRequest(
+                            workspace=fixture.workspace,
+                            executable=stale_executable,
+                            timeout_seconds=60,
+                            allow_placeholder_tests=True,
+                        )
+                    )
+            runner.assert_not_called()
 
     def test_confirmation_only_uses_current_values_and_can_mark_an_item_unconfirmed(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -123,7 +210,7 @@ class TestInputFormApplyTests(unittest.TestCase):
             )
 
             self.assertEqual(1, result.updated_item_count)
-            saved = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
+            saved = load_test_spec_snapshot(fixture.canonical_path)
             candidate = next(
                 case
                 for case in saved.spec.additional_case_candidates
@@ -223,7 +310,7 @@ class TestInputFormApplyTests(unittest.TestCase):
     def test_form_save_does_not_mutate_formal_review_or_provenance_fields(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             fixture = write_test_input_form_fixture(Path(temp_dir))
-            before = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
+            before = load_test_spec_snapshot(fixture.canonical_path)
             form = build_test_input_form(fixture.workspace)
             mode = item_by(form, "input_assignment", "mode")
             before_data = before.spec.to_payload()["data"]
@@ -240,7 +327,7 @@ class TestInputFormApplyTests(unittest.TestCase):
             )
 
             after_data = load_test_spec_snapshot(
-                fixture.canonical_path, mode=ContractMode.STRICT
+                fixture.canonical_path
             ).spec.to_payload()["data"]
             after_candidate = next(
                 case
@@ -276,7 +363,7 @@ class TestInputFormApplyTests(unittest.TestCase):
                     expected_revision=form.revision,
                 )
 
-            saved = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
+            saved = load_test_spec_snapshot(fixture.canonical_path)
             self.assertEqual(form.revision + 1, saved.spec.revision)
             self.assertEqual(saved.spec.revision, result.revision)
             self.assertFalse(result.views_written)

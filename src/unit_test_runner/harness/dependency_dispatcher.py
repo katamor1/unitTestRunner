@@ -20,6 +20,19 @@ def augment_call_report_for_dependency_policy(call_report: Any, dependency_polic
     if not policy:
         return payload
     candidates = payload.setdefault("stub_candidates", [])
+    blockers = payload.setdefault("_generation_blockers", [])
+    for dependency in policy.get("dependencies", []):
+        signature = dependency.get("signature", {})
+        if (
+            dependency.get("target_kind") == "same_file_static_function"
+            and dependency.get("resolved_mode") == "real"
+        ):
+            continue
+        if dependency.get("resolved_mode") not in {"real", "stub"} or signature.get("resolution") != "exact":
+            blockers.append(f"dependency {dependency.get('callee') or '<unknown>'} requires review")
+    for external_object in policy.get("external_objects", []):
+        if external_object.get("resolved_mode") not in {"real", "fixture"}:
+            blockers.append(f"external object {external_object.get('symbol') or '<unknown>'} requires review")
     governed_names = {str(item.get("callee")) for item in policy.get("dependencies", []) if item.get("callee")}
     candidates[:] = [item for item in candidates if str(item.get("name") or "") not in governed_names]
     existing = {str(item.get("name")) for item in candidates if item.get("name")}
@@ -29,7 +42,7 @@ def augment_call_report_for_dependency_policy(call_report: Any, dependency_polic
             continue
         signature = dependency.get("signature", {})
         parameters = signature.get("parameters", [])
-        return_type = str(signature.get("return_type_raw") or "int")
+        return_type = str(signature.get("return_type_raw") or "")
         return_category = str(signature.get("return_type_category") or _return_kind(return_type))
         candidates.append(
             {
@@ -84,7 +97,7 @@ def apply_dependency_dispatcher(
         callee = str(dependency.get("callee"))
         safe = sanitize_identifier(callee)
         signature = dependency.get("signature", {})
-        return_type = str(signature.get("return_type_raw") or "int").strip()
+        return_type = str(signature.get("return_type_raw") or "").strip()
         return_category = str(signature.get("return_type_category") or _return_kind(return_type))
         parameters = _normalized_parameters(signature.get("parameters", []))
         calling_convention = str(signature.get("calling_convention") or "").strip() or None
@@ -253,7 +266,7 @@ def _dispatchable_dependencies(policy: dict[str, Any]) -> list[dict[str, Any]]:
         signature = dependency.get("signature", {})
         if dependency.get("resolved_mode") not in {"real", "stub"}:
             continue
-        if signature.get("resolution") not in {"exact", "compatible_inferred"}:
+        if signature.get("resolution") != "exact":
             continue
         if dependency.get("target_kind") in {"macro_like", "function_pointer", "unknown", "same_file_static_function"}:
             continue
@@ -271,24 +284,28 @@ def _normalized_parameters(values: list[dict[str, Any]]) -> list[dict[str, Any]]
             {
                 "index": int(item.get("index", index)),
                 "name": name,
-                "type_raw": str(item.get("type_raw") or "int").strip(),
+                "type_raw": str(item.get("type_raw") or "").strip(),
                 "pointer_level": int(item.get("pointer_level") or 0),
                 "qualifiers": list(item.get("qualifiers", [])),
                 "is_variadic": bool(item.get("is_variadic", False)),
-                "canonical_type": str(item.get("canonical_type") or item.get("type_raw") or "int").strip(),
-                "type_category": str(item.get("type_category") or _type_category_from_raw(str(item.get("type_raw") or "int"))),
+                "canonical_type": str(item.get("canonical_type") or item.get("type_raw") or "").strip(),
+                "type_category": str(item.get("type_category") or _type_category_from_raw(str(item.get("type_raw") or ""))),
             }
         )
     return result
 
 
 def _signature_supported(return_type: str, return_category: str, parameters: list[dict[str, Any]]) -> bool:
+    if not return_type:
+        return False
     if return_category in {"aggregate", "function_pointer", "unknown", "variadic"}:
         return False
     compact_return = _compact_type(return_type)
     if (compact_return.startswith("struct ") or compact_return.startswith("union ")) and "*" not in compact_return:
         return False
     for item in parameters:
+        if not item.get("type_raw"):
+            return False
         if item.get("is_variadic"):
             return False
         if item.get("type_category") in {"function_pointer", "unknown", "variadic"}:

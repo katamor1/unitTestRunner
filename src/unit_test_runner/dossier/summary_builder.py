@@ -11,16 +11,13 @@ def build_summaries(payloads: dict[str, dict[str, Any]]) -> dict[str, Any]:
     boundary = payloads.get("boundary_equivalence_candidates", {})
     test_design = payloads.get("test_spec", {})
     build_probe = payloads.get("build_probe_report", {})
-    completion = payloads.get("build_completion_plan", {})
-    execution = payloads.get("test_execution_report", {})
-    evidence = payloads.get("evidence_manifest", {})
     return {
         "function_summary": _function_summary(signature, payloads),
         "dependency_summary": {
             "global_read_count": _global_read_count(global_access),
             "global_write_count": _global_write_count(global_access),
             "external_call_count": len(call_report.get("calls", [])),
-            "stub_candidate_count": len(completion.get("stub_completion_candidates", [])),
+            "stub_candidate_count": len(call_report.get("stub_candidates", [])),
         },
         "coverage_summary": {
             "coverage_item_count": _count_coverage_items(coverage_design),
@@ -29,16 +26,16 @@ def build_summaries(payloads: dict[str, dict[str, Any]]) -> dict[str, Any]:
         },
         "build_summary": {
             "build_probe_status": build_probe.get("function", {}).get("status", build_probe.get("status", "unknown")),
-            "completion_status": completion.get("function", {}).get("status", completion.get("status", "unknown")),
+            "completion_status": "not_applicable",
         },
         "execution_summary": {
-            "executed": execution.get("executed", False),
-            "status": execution.get("function", {}).get("status", execution.get("status", "unknown")),
-            "total": execution.get("parsed_result", {}).get("total", 0),
-            "passed": execution.get("parsed_result", {}).get("passed", 0),
-            "failed": execution.get("parsed_result", {}).get("failed", 0),
-            "inconclusive": execution.get("parsed_result", {}).get("inconclusive", 0),
-            "evidence_status": evidence.get("summary", {}).get("test_execution_status", "unknown"),
+            "executed": False,
+            "status": "not_run",
+            "total": 0,
+            "passed": 0,
+            "failed": 0,
+            "inconclusive": 0,
+            "evidence_status": "not_applicable",
         },
     }
 
@@ -56,17 +53,21 @@ def _function_summary(signature: dict[str, Any], payloads: dict[str, dict[str, A
 
 
 def _global_read_count(global_access: dict[str, Any]) -> int:
-    accesses = global_access.get("global_accesses")
-    if isinstance(accesses, list):
-        return sum(1 for item in accesses if item.get("access_kind") in {"read", "read_write", "address_taken"})
-    return len(global_access.get("reads", global_access.get("globals_read", [])))
+    accesses = global_access.get("global_accesses", [])
+    return sum(
+        1
+        for item in accesses
+        if item.get("access_kind") in {"read", "read_write", "address_taken"}
+    )
 
 
 def _global_write_count(global_access: dict[str, Any]) -> int:
-    accesses = global_access.get("global_accesses")
-    if isinstance(accesses, list):
-        return sum(1 for item in accesses if item.get("access_kind") in {"write", "read_write"})
-    return len(global_access.get("writes", global_access.get("globals_written", [])))
+    accesses = global_access.get("global_accesses", [])
+    return sum(
+        1
+        for item in accesses
+        if item.get("access_kind") in {"write", "read_write"}
+    )
 
 
 def _count_coverage_items(payload: dict[str, Any]) -> int:

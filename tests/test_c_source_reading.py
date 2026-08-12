@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from unit_test_runner.c_analyzer.masker import mask_source_text
+from unit_test_runner.c_analyzer.function_locator import locate_function
 from unit_test_runner.c_analyzer.preprocessor import scan_preprocessor
 from unit_test_runner.c_analyzer.source_digest import build_source_digest, write_source_digest
 from unit_test_runner.c_analyzer.source_reader import read_source
@@ -19,6 +20,30 @@ FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "vc6_project"
 
 
 class CSourceReadingTests(unittest.TestCase):
+    def test_known_inactive_code_is_excluded_while_unknown_conditions_remain_reviewable(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "conditional.c"
+            source.write_text(
+                "#if 0\n"
+                "int Target(void) { return -1; }\n"
+                "#endif\n"
+                "int Target(void) { return 1; }\n"
+                "#if UNKNOWN_FEATURE\n"
+                "int Maybe(void) { return 2; }\n"
+                "#endif\n",
+                encoding="ascii",
+            )
+
+            digest = build_source_digest(source, {"defines": []})
+            target = locate_function(digest, "Target")
+            maybe = locate_function(digest, "Maybe")
+
+        self.assertEqual("found", target.status)
+        self.assertEqual(4, target.selected_candidate.header_range.start.line)
+        self.assertEqual("found", maybe.status)
+        self.assertIn("unknown_active_state", [item.code for item in maybe.warnings])
+        self.assertIn("preprocessor_condition_unknown", [item.code for item in digest.warnings])
+
     def test_masker_removes_comment_string_and_char_braces_without_changing_lines(self):
         text = "int f(void) {\n  char c = '}';\n  puts(\"}\"); // }\n  /* } */\n}\n"
 

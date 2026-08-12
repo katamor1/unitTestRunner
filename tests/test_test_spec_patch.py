@@ -5,7 +5,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from unit_test_runner.contracts import ContractMode
 from unit_test_runner.test_spec import (
     InvalidTestSpecPatchError,
     TestSpec,
@@ -85,7 +84,7 @@ class TestSpecPatchTests(unittest.TestCase):
             self.assertEqual(2, updated.revision)
             self.assertEqual("updated", updated.test_cases[0]["title"])
             self.assertEqual("test_spec", artifact.kind)
-            self.assertEqual(2, load_test_spec(path, mode=ContractMode.STRICT).revision)
+            self.assertEqual(2, load_test_spec(path).revision)
 
 
 if __name__ == "__main__":

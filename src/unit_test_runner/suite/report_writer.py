@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from pathlib import Path
+from uuid import uuid4
 
+from unit_test_runner.contracts import ArtifactKind, validate_artifact
 from .models import SuiteRunReport
 
 
@@ -16,10 +19,32 @@ def write_suite_run_report(suite_path: Path | str, report: SuiteRunReport) -> di
         "markdown": reports / "suite_run_report.md",
         "csv": reports / "suite_run_report.csv",
     }
-    paths["json"].write_text(json.dumps(report.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    envelope = report.to_envelope()
+    violations = validate_artifact(ArtifactKind.SUITE_RUN_REPORT, envelope)
+    if violations:
+        detail = "; ".join(
+            f"{item.code} at {item.json_path}: {item.message}" for item in violations
+        )
+        raise ValueError(f"Invalid suite_run_report: {detail}")
+    _atomic_json_write(paths["json"], envelope)
     paths["markdown"].write_text(render_suite_run_markdown(report), encoding="utf-8")
     write_suite_run_csv(paths["csv"], report)
     return paths
+
+
+def _atomic_json_write(path: Path, payload: dict) -> None:
+    final_bytes = (
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        with temporary.open("xb") as handle:
+            handle.write(final_bytes)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def render_suite_run_markdown(report: SuiteRunReport) -> str:

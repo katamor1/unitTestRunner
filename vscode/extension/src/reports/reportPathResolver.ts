@@ -2,29 +2,22 @@ import { pathDialect } from '../platform/pathDialect';
 
 export interface ReportPaths {
   workspace: string;
+  functionDossierJson?: string;
   functionDossierMd?: string;
+  reviewRecordJson?: string;
   reviewChecklistMd?: string;
-  unresolvedItemsMd?: string;
-  nextActionsMd?: string;
-  quickSummaryJson?: string;
-  quickSummaryMd?: string;
-  testCaseDesignMd?: string;
-  testCaseDesignJson?: string;
-  testCaseDesignCsv?: string;
   testSpecJson?: string;
   testSpecMd?: string;
   testSpecCsv?: string;
-  functionSignatureJson?: string;
-  globalAccessJson?: string;
-  callReportJson?: string;
-  harnessSkeletonReportJson?: string;
-  harnessSkeletonReportMd?: string;
+  buildProbeReportJson?: string;
   buildProbeReportMd?: string;
-  testExecutionReportMd?: string;
-  evidencePackageMd?: string;
-  changeImpactReportMd?: string;
-  testCaseReconciliationReportMd?: string;
-  regressionSelectionCsv?: string;
+  testRunReportJson?: string;
+  testRunReportMd?: string;
+  reanalysisReportJson?: string;
+  reanalysisReportMd?: string;
+  suiteManifestJson?: string;
+  suiteRunReportJson?: string;
+  suiteRunReportMd?: string;
 }
 
 export function resolveReportPaths(workspace: string): ReportPaths {
@@ -32,28 +25,16 @@ export function resolveReportPaths(workspace: string): ReportPaths {
   const reports = dialect.join(workspace, 'reports');
   return {
     workspace,
+    functionDossierJson: dialect.join(reports, 'function_dossier.json'),
     functionDossierMd: dialect.join(reports, 'function_dossier.md'),
+    reviewRecordJson: dialect.join(reports, 'review_record.json'),
     reviewChecklistMd: dialect.join(reports, 'review_checklist.md'),
-    unresolvedItemsMd: dialect.join(reports, 'unresolved_items.md'),
-    nextActionsMd: dialect.join(reports, 'next_actions.md'),
-    quickSummaryJson: dialect.join(reports, 'quick_summary.json'),
-    quickSummaryMd: dialect.join(reports, 'quick_summary.md'),
-    testCaseDesignMd: dialect.join(reports, 'test_case_design.md'),
-    testCaseDesignJson: dialect.join(reports, 'test_case_design.json'),
-    testCaseDesignCsv: dialect.join(reports, 'test_case_design.csv'),
     testSpecJson: dialect.join(reports, 'test_spec.json'),
     testSpecMd: dialect.join(reports, 'test_spec.md'),
     testSpecCsv: dialect.join(reports, 'test_spec.csv'),
-    functionSignatureJson: dialect.join(reports, 'function_signature.json'),
-    globalAccessJson: dialect.join(reports, 'global_access.json'),
-    callReportJson: dialect.join(reports, 'call_report.json'),
-    harnessSkeletonReportJson: dialect.join(reports, 'harness_skeleton_report.json'),
-    harnessSkeletonReportMd: dialect.join(reports, 'harness_skeleton_report.md'),
+    buildProbeReportJson: dialect.join(reports, 'build_probe_report.json'),
     buildProbeReportMd: dialect.join(reports, 'build_probe_report.md'),
-    testExecutionReportMd: dialect.join(reports, 'test_execution_report.md'),
-    evidencePackageMd: dialect.join(reports, 'evidence_package.md'),
-    changeImpactReportMd: dialect.join(reports, 'change_impact_report.md'),
-    testCaseReconciliationReportMd: dialect.join(reports, 'test_case_reconciliation_report.md'),
-    regressionSelectionCsv: dialect.join(reports, 'regression_selection.csv'),
+    reanalysisReportJson: dialect.join(reports, 'reanalysis_report.json'),
+    reanalysisReportMd: dialect.join(reports, 'reanalysis_report.md'),
   };
 }

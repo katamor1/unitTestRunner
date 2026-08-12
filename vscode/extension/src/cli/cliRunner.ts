@@ -12,8 +12,28 @@ export interface CliResult {
 
 const PROCESS_GROUP_GRACE_MS = 250;
 const TERMINATION_WAIT_MS = 2000;
+let invocationActive = false;
 
-export function runCliInvocation(invocation: CliInvocation): Promise<CliResult> {
+export class CliInvocationBusyError extends Error {
+  constructor() {
+    super('UnitTestRunner CLI is already running.');
+    this.name = 'CliInvocationBusyError';
+  }
+}
+
+export async function runCliInvocation(invocation: CliInvocation): Promise<CliResult> {
+  if (invocationActive) {
+    throw new CliInvocationBusyError();
+  }
+  invocationActive = true;
+  try {
+    return await spawnCliInvocation(invocation);
+  } finally {
+    invocationActive = false;
+  }
+}
+
+function spawnCliInvocation(invocation: CliInvocation): Promise<CliResult> {
   return new Promise((resolve, reject) => {
     const child = childProcess.spawn(invocation.command, invocation.args, {
       cwd: invocation.workingDirectory,

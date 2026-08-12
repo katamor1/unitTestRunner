@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any
 
 from unit_test_runner.reports.japanese import ja_label, ja_text
 from unit_test_runner.review_ids import StableReviewIdRegistry, build_review_id
 
 from .dossier_models import DossierArtifact, DossierReviewItem, DossierUnresolvedItem
-from .review_decision_models import (
-    ReviewItemCollection,
-    ReviewItemSnapshot,
-    ReviewSubjectReference,
-)
 
 
 def build_review_items(
@@ -51,24 +46,6 @@ def build_review_items(
         registry,
         seen,
     )
-    _from_completion(
-        payloads.get("build_completion_plan", {}),
-        review_items,
-        unresolved,
-        artifact_map,
-        function_id,
-        registry,
-        seen,
-    )
-    _from_execution(
-        payloads.get("test_execution_report", {}),
-        review_items,
-        unresolved,
-        artifact_map,
-        function_id,
-        registry,
-        seen,
-    )
     if not review_items:
         semantic_key = "dossier/final-review"
         review_id = registry.register(
@@ -86,7 +63,7 @@ def build_review_items(
                 review_id=review_id,
                 category="evidence_review",
                 title="生成dossierの最終確認",
-                description="承認前に、生成された解析結果、テスト設計、ビルド状態、エビデンスを確認してください。",
+                description="承認前に、生成された解析結果とテスト設計を確認してください。",
                 related_artifacts=[subject_kind] if subject_kind else [],
                 related_test_cases=[],
                 severity="info",
@@ -106,39 +83,10 @@ def build_review_items(
                 "manual_final_review",
                 "最終的な人手レビューが必要です。",
                 "dossier生成は承認判断そのものではありません。",
-                suggested_action="function_dossier.md を確認し、review_decisions.json に判断を記録してください。",
+                suggested_action="function_dossier.md を確認し、review-set で判断を記録してください。",
             )
         )
     return review_items, unresolved
-
-
-def build_review_item_collection(
-    review_items: Iterable[DossierReviewItem],
-) -> ReviewItemCollection:
-    snapshots: list[ReviewItemSnapshot] = []
-    for item in review_items:
-        if item.semantic_subject_key is None or not item.subject_artifacts:
-            continue
-        subjects = tuple(
-            subject
-            if isinstance(subject, ReviewSubjectReference)
-            else ReviewSubjectReference.from_dict(subject)
-            for subject in item.subject_artifacts
-        )
-        function_ids = {subject.function_id for subject in subjects}
-        if len(function_ids) != 1 or None in function_ids:
-            continue
-        snapshots.append(
-            ReviewItemSnapshot(
-                review_id=item.review_id,
-                category=item.category,
-                function_id=next(iter(function_ids)) or "",
-                case_id=item.case_id,
-                semantic_subject_key=item.semantic_subject_key,
-                subject_artifacts=subjects,
-            )
-        )
-    return ReviewItemCollection(tuple(snapshots))
 
 
 def _from_test_spec_unresolved(
@@ -354,120 +302,6 @@ def _from_harness(
         )
 
 
-def _from_completion(
-    payload: dict[str, Any],
-    review_items: list[DossierReviewItem],
-    unresolved: list[DossierUnresolvedItem],
-    artifact_map: dict[str, DossierArtifact],
-    function_id: str,
-    registry: StableReviewIdRegistry,
-    seen: set[str],
-) -> None:
-    for index, manual in enumerate(payload.get("manual_action_items", []), start=1):
-        if not isinstance(manual, dict):
-            continue
-        raw_kind = str(manual.get("item_kind") or "manual_action")
-        semantic_key = str(manual.get("item_id") or f"build/manual/{raw_kind}/{index}")
-        review_id = registry.register(
-            category="build_review",
-            function_id=function_id,
-            case_id=None,
-            semantic_subject_key=semantic_key,
-        )
-        description = ja_text(manual.get("description", "手動でのビルド補完作業が残っています。"))
-        unresolved.append(
-            DossierUnresolvedItem(
-                f"UNRESOLVED_BUILD_{len(unresolved) + 1:03d}",
-                "build_completion",
-                raw_kind,
-                description,
-                ja_text(manual.get("reason", "ビルド補完は完全には自動化できません。")),
-                ["build_completion_plan"],
-                [],
-                ja_text(manual.get("suggested_action", "ビルド補完計画を確認してください。")),
-                blocks_readiness=False,
-            )
-        )
-        _append_unique(
-            review_items,
-            seen,
-            _review_item(
-                review_id=review_id,
-                category="build_review",
-                title=f"ビルド補完項目を確認: {ja_label(raw_kind)}",
-                description=description,
-                related_artifacts=["build_completion_plan"],
-                related_test_cases=[],
-                case_id=None,
-                semantic_key=semantic_key,
-                subject_kind="build_completion_plan",
-                artifact_map=artifact_map,
-                function_id=function_id,
-            ),
-        )
-
-
-def _from_execution(
-    payload: dict[str, Any],
-    review_items: list[DossierReviewItem],
-    unresolved: list[DossierUnresolvedItem],
-    artifact_map: dict[str, DossierArtifact],
-    function_id: str,
-    registry: StableReviewIdRegistry,
-    seen: set[str],
-) -> None:
-    status = payload.get("function", {}).get("status") or payload.get("status")
-    if status not in {
-        "inconclusive",
-        "failed",
-        "blocked",
-        "timeout",
-        "timed_out",
-        "not_run",
-        "cancelled",
-        "error",
-    }:
-        return
-    status_text = str(status)
-    semantic_key = f"execution/outcome/{status_text}"
-    review_id = registry.register(
-        category="execution_review",
-        function_id=function_id,
-        case_id=None,
-        semantic_subject_key=semantic_key,
-    )
-    status_label = ja_label(status_text)
-    unresolved.append(
-        DossierUnresolvedItem(
-            f"UNRESOLVED_EXEC_{len(unresolved) + 1:03d}",
-            "execution_evidence",
-            "execution_inconclusive",
-            f"テスト実行状態は「{status_label}」です。",
-            "このエビデンスだけでは最終PASS判定にはなりません。",
-            ["test_execution_report"],
-            [],
-            "結果を確認し、必要に応じてテストを再実行してください。",
-        )
-    )
-    _append_unique(
-        review_items,
-        seen,
-        _review_item(
-            review_id=review_id,
-            category="execution_review",
-            title=f"実行エビデンスを確認: {status_label}",
-            description=f"テスト実行状態は「{status_label}」です。",
-            related_artifacts=["test_execution_report"],
-            related_test_cases=[],
-            case_id=None,
-            semantic_key=semantic_key,
-            subject_kind="test_execution_report",
-            artifact_map=artifact_map,
-            function_id=function_id,
-        ),
-    )
-
-
 def _review_item(
     *,
     review_id: str,
@@ -484,15 +318,6 @@ def _review_item(
     severity: str = "warning",
     reviewer_role: str = "unit_test_reviewer",
 ) -> DossierReviewItem:
-    subjects: list[ReviewSubjectReference] = []
-    if subject_kind is not None and semantic_key is not None:
-        reference = _subject_reference(
-            artifact_map.get(subject_kind),
-            semantic_key=semantic_key,
-            function_id=function_id,
-        )
-        if reference is not None:
-            subjects.append(reference)
     return DossierReviewItem(
         review_id=review_id,
         category=category,
@@ -505,42 +330,7 @@ def _review_item(
         done=False,
         case_id=case_id,
         semantic_subject_key=semantic_key,
-        subject_artifacts=subjects,
-    )
-
-
-def _subject_reference(
-    artifact: DossierArtifact | None,
-    *,
-    semantic_key: str,
-    function_id: str,
-) -> ReviewSubjectReference | None:
-    if (
-        artifact is None
-        or artifact.contract_status != "valid"
-        or artifact.compatible_migrated
-        or artifact.sha256 is None
-    ):
-        return None
-    subject = artifact.contract_subject
-    source_path = subject.get("source_path")
-    source_sha256 = subject.get("source_sha256")
-    subject_function_id = subject.get("function_id")
-    if (
-        not isinstance(source_path, str)
-        or not isinstance(source_sha256, str)
-        or subject_function_id != function_id
-    ):
-        return None
-    return ReviewSubjectReference(
-        artifact_kind=artifact.artifact_kind,
-        path=artifact.path.as_posix(),
-        sha256=artifact.sha256,
-        revision=artifact.contract_revision,
-        source_path=source_path,
-        source_sha256=source_sha256,
-        function_id=function_id,
-        semantic_subject_key=semantic_key,
+        subject_artifacts=[],
     )
 
 

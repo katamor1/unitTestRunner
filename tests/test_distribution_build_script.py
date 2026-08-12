@@ -24,17 +24,23 @@ class DistributionBuildScriptTests(unittest.TestCase):
             r'"--collect-data"\s*,\s*"unit_test_runner\.schemas"',
         )
 
-    def test_exe_smoke_finalizes_dossier_before_vsix_packaging(self):
+    def test_exe_smoke_uses_the_v01_review_and_build_probe_flow(self):
         build_index = self.text.index('"-m", "PyInstaller"')
-        finalize_index = self.text.index('"--finalize-dossier"')
+        finalize_index = self.text.index('"finalize-dossier"')
+        review_index = self.text.index('"review-set"')
+        build_probe_index = self.text.index('"build-probe"')
         copy_index = self.text.index('Copy-Item -LiteralPath $exePath')
         package_index = self.text.index('"vsce", "package"')
 
         self.assertLess(build_index, finalize_index)
-        self.assertLess(finalize_index, copy_index)
+        self.assertLess(finalize_index, review_index)
+        self.assertLess(review_index, build_probe_index)
+        self.assertLess(build_probe_index, copy_index)
         self.assertLess(copy_index, package_index)
         self.assertIn('reports\\function_dossier.json', self.text)
-        self.assertIn('"prepare-review"', self.text)
+        self.assertIn('reports\\test_spec.json', self.text)
+        self.assertIn('"--artifact-kind", "test_spec"', self.text)
+        self.assertNotIn('"run-tests"', self.text)
 
     def test_script_builds_and_verifies_bundled_vsix(self):
         required_fragments = (

@@ -20,7 +20,8 @@
         "${config:unitTestRunner.defaultConfiguration}",
         "--out",
         "${config:unitTestRunner.outputRoot}/${input:functionName}",
-        "--finalize-dossier"
+        "--phase",
+        "design"
       ],
       "problemMatcher": []
     }

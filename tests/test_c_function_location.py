@@ -75,12 +75,13 @@ class CFunctionLocationTests(unittest.TestCase):
         self.assertEqual("medium", old_style.selected_candidate.confidence)
         self.assertIn("old_style_definition_detected", [warning.code for warning in old_style.warnings])
 
-    def test_duplicate_and_unmatched_brace_are_reported(self):
+    def test_known_inactive_duplicate_is_excluded_and_unmatched_brace_is_reported(self):
         duplicate = locate_function(self.digest(), "ConditionalDuplicate")
         broken = locate_function(self.digest(), "Broken")
 
-        self.assertEqual("multiple_candidates", duplicate.status)
-        self.assertIn("multiple_function_definitions", [warning.code for warning in duplicate.warnings])
+        self.assertEqual("found", duplicate.status)
+        self.assertEqual(37, duplicate.selected_candidate.header_range.start.line)
+        self.assertEqual(1, len(duplicate.candidates))
         self.assertEqual("malformed", broken.status)
         self.assertIn("unmatched_opening_brace", [warning.code for warning in broken.warnings])
 
@@ -142,9 +143,12 @@ class CFunctionLocationTests(unittest.TestCase):
             self.assertEqual(0, completed.returncode, completed.stderr)
             self.assertEqual("", completed.stderr)
             payload = json.loads(completed.stdout)
-            self.assertEqual("cli_result", payload["artifact_kind"])
-            self.assertEqual("passed", payload["data"]["outcome"])
-            self.assertIn("function_location", payload["data"]["details"])
+            self.assertEqual("analyze-function", payload["command"])
+            self.assertEqual("passed", payload["outcome"])
+            self.assertEqual(
+                {"function_dossier", "test_spec"},
+                {item["kind"] for item in payload["artifacts"]},
+            )
             self.assertTrue((out_dir / "reports" / "function_location.json").exists())
 
 

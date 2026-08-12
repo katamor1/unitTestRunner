@@ -11,9 +11,7 @@ from uuid import uuid4
 class RunPaths:
     run_id: str
     root: Path
-    execution_report: Path
-    result_json: Path
-    result_csv: Path
+    public_report: Path
     stdout_log: Path
     stderr_log: Path
     combined_log: Path
@@ -54,9 +52,7 @@ def validate_run_paths_available(workspace: Path, run_id: str) -> RunPaths:
     return RunPaths(
         run_id=run_id,
         root=root,
-        execution_report=root / "test_execution_report.json",
-        result_json=root / "test_result.json",
-        result_csv=root / "test_result.csv",
+        public_report=root / "test_run_report.json",
         stdout_log=logs / "stdout.log",
         stderr_log=logs / "stderr.log",
         combined_log=logs / "test_execution.log",

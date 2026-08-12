@@ -294,12 +294,31 @@ class BuildProbeReport:
     finished_at: str | None = None
     duration_ms: int | None = None
     schema_version: str = "0.1"
+    public_subject: dict[str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "source": {"path": _path_text(self.source_path)},
             "function": {"name": self.function_name, "status": self.status},
+            "executed": self.executed,
+            "exit_code": self.exit_code,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "duration_ms": self.duration_ms,
+            "commands": [item.to_dict() for item in self.commands],
+            "diagnostics": [item.to_dict() for item in self.diagnostics],
+            "missing_includes": [item.to_dict() for item in self.missing_includes],
+            "unresolved_symbols": [item.to_dict() for item in self.unresolved_symbols],
+            "pch_issues": [item.to_dict() for item in self.pch_issues],
+            "vc6_compatibility_issues": [item.to_dict() for item in self.vc6_compatibility_issues],
+            "log_files": [_path_text(item) for item in self.log_files],
+        }
+
+    def to_public_data(self) -> dict[str, Any]:
+        """Return the public report body without duplicating subject identity."""
+        return {
+            "status": self.status,
             "executed": self.executed,
             "exit_code": self.exit_code,
             "started_at": self.started_at,

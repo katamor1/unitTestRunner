@@ -13,7 +13,7 @@ def _path_text(path: Path | None) -> str | None:
 class ReanalysisPolicy:
     preserve_manual_edits: bool = True
     reuse_test_case_ids: bool = True
-    generate_updated_test_case_design: bool = False
+    generate_updated_test_case_design: bool = True
     overwrite_test_case_design: bool = False
     compare_build_context: bool = True
     compare_dependencies: bool = True

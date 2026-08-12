@@ -8,14 +8,8 @@ from .c90_writer import sha256_file
 from .dependency_dispatcher import apply_dependency_dispatcher, augment_call_report_for_dependency_policy
 from .harness_report_writer import write_harness_report
 from .harness_skeleton_generator import generate_harness_skeleton as _generate_harness_skeleton
-from .parameter_init_compat import apply_parameter_init_compat
 from .runner_output_enhancer import enhance_runner_output
 from .state_setup_reflector import reflect_state_setups
-from .target_invocation_compat import apply_target_invocation_compat
-from .type_bridge import enrich_signature_bridge_types
-
-apply_target_invocation_compat()
-apply_parameter_init_compat()
 
 
 def generate_harness_skeleton(
@@ -30,10 +24,7 @@ def generate_harness_skeleton(
     output_root = Path(output_root).resolve()
     policy = dependency_policy or _load_dependency_policy(output_root)
     augmented_call_report = augment_call_report_for_dependency_policy(call_report, policy)
-    signature_payload = function_signature.to_dict() if hasattr(function_signature, "to_dict") else function_signature
-    if isinstance(signature_payload, dict):
-        signature_payload = enrich_signature_bridge_types(signature_payload)
-    report = _generate_harness_skeleton(signature_payload, global_access, augmented_call_report, test_case_design, output_root, overwrite)
+    report = _generate_harness_skeleton(function_signature, global_access, augmented_call_report, test_case_design, output_root, overwrite)
     changed = []
     changed.extend(apply_dependency_dispatcher(output_root, policy, test_case_design, report))
     changed.extend(reflect_state_setups(output_root, test_case_design, report.function_name))
