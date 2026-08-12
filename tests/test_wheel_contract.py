@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -263,6 +264,14 @@ print(json.dumps({
 
 def _build_wheel(directory: Path, test_case: unittest.TestCase) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
+    source_root = directory / "_source"
+    source_root.mkdir()
+    shutil.copy2(REPO_ROOT / "pyproject.toml", source_root / "pyproject.toml")
+    shutil.copytree(
+        REPO_ROOT / "src",
+        source_root / "src",
+        ignore=shutil.ignore_patterns("*.egg-info", "__pycache__", "*.py[co]"),
+    )
     completed = subprocess.run(
         [
             sys.executable,
@@ -275,7 +284,7 @@ def _build_wheel(directory: Path, test_case: unittest.TestCase) -> Path:
             str(directory),
             ".",
         ],
-        cwd=REPO_ROOT,
+        cwd=source_root,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
