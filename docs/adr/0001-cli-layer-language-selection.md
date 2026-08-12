@@ -1,7 +1,9 @@
 # ADR-0001: CLI層の実装言語選定
 
+> **Superseded:** PythonをCLIコアに使う判断だけを履歴として保持します。旧コマンド・旧成果物の記述は現行契約ではありません。現在の境界は [v0.1 redesign roadmap](../v01-redesign-roadmap.md) を参照してください。
+
 作成日: 2026-07-04  
-状態: Accepted  
+状態: Superseded
 対象: `unitTestRunner` の CLI コア層  
 関連文書: `docs/function_level_vc6_unit_test_codex_design.md`
 

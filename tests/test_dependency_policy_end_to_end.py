@@ -8,7 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
-from unit_test_runner.build import generate_build_workspace
+from tests.spec_support import generate_public_build_workspace as generate_build_workspace
 from unit_test_runner.execution.execution_runner import run_test_executable_cases
 from unit_test_runner.harness import generate_harness_skeleton
 

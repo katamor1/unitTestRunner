@@ -94,6 +94,7 @@ try {
         "map-source",
         "--dsw", $DswPath,
         "--source", $Source,
+        "--project", $Project,
         "--out", $MembershipAllJson
     ) | Out-Null
 
@@ -102,6 +103,7 @@ try {
         "map-source",
         "--dsw", $DswPath,
         "--source", $Source,
+        "--project", $Project,
         "--out", $MembershipAllMarkdown
     ) | Out-Null
 
@@ -141,12 +143,9 @@ try {
     $membershipAll = Get-Content -Raw -Path $MembershipAllJson -Encoding UTF8 | ConvertFrom-Json
     $allMatches = @($membershipAll.matches)
     Assert-True ($allMatches.Count -ge 1) "Source membership did not find any DSP source entries."
-    if (-not [string]::IsNullOrWhiteSpace($ExpectedSecondProject)) {
-        $allProjectNames = @($allMatches | ForEach-Object { $_.project_name })
-        Assert-True ($membershipAll.status -eq "multiple_matches") "Expected multiple project membership for the smoke fixture."
-        Assert-True ($allProjectNames -contains $Project) "Primary project membership was not found: $Project"
-        Assert-True ($allProjectNames -contains $ExpectedSecondProject) "Second project membership was not found: $ExpectedSecondProject"
-    }
+    Assert-True ($membershipAll.status -eq "ok") "Explicit project membership did not resolve uniquely."
+    Assert-True ($allMatches.Count -eq 1) "Explicit project membership should have exactly one match."
+    Assert-True ($allMatches[0].project_name -eq $Project) "Explicit membership resolved to the wrong project."
 
     $membershipFiltered = Get-Content -Raw -Path $MembershipFilteredJson -Encoding UTF8 | ConvertFrom-Json
     $filteredMatches = @($membershipFiltered.matches)

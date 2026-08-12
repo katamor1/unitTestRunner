@@ -14,28 +14,6 @@ def _path_text(path: Path | None) -> str | None:
 
 
 @dataclass
-class DossierGenerationPolicy:
-    include_raw_artifact_index: bool = True
-    include_traceability_matrix: bool = True
-    include_review_checklist: bool = True
-    include_next_actions: bool = True
-    require_schema_version_match: bool = False
-    allow_missing_optional_artifacts: bool = True
-    markdown_detail_level: str = "summary_with_links"
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "include_raw_artifact_index": self.include_raw_artifact_index,
-            "include_traceability_matrix": self.include_traceability_matrix,
-            "include_review_checklist": self.include_review_checklist,
-            "include_next_actions": self.include_next_actions,
-            "require_schema_version_match": self.require_schema_version_match,
-            "allow_missing_optional_artifacts": self.allow_missing_optional_artifacts,
-            "markdown_detail_level": self.markdown_detail_level,
-        }
-
-
-@dataclass
 class DossierWarning:
     code: str
     message: str
@@ -70,7 +48,6 @@ class DossierArtifact:
         "stale",
     ]
     contract_violations: list[ContractViolation]
-    compatible_migrated: bool = False
     contract_subject: dict[str, Any] = field(default_factory=dict)
     contract_revision: int | None = None
     stale_candidate: bool = False

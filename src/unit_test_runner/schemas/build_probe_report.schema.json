@@ -1,24 +1,132 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://unit-test-runner.local/schemas/build_probe_report.schema.json",
-  "title": "Build Probe Report",
-  "allOf": [
-    {
-      "$ref": "common.schema.json"
-    },
-    {
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_kind", "subject", "data"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "artifact_kind": {"const": "build_probe_report"},
+    "subject": {"$ref": "common.schema.json#/$defs/subject"},
+    "data": {
       "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "executed", "exit_code", "started_at", "finished_at",
+        "duration_ms", "commands", "diagnostics", "missing_includes",
+        "unresolved_symbols", "pch_issues", "vc6_compatibility_issues", "log_files"
+      ],
       "properties": {
-        "artifact_kind": {
-          "const": "build_probe_report"
-        },
-        "schema_version": {
-          "const": "1.0.0"
-        },
-        "data": {
-          "$ref": "common.schema.json#/$defs/buildProbeReportData"
-        }
+        "status": {"enum": ["not_run", "blocked", "environment_missing", "succeeded", "failed"]},
+        "executed": {"type": "boolean"},
+        "exit_code": {"type": ["integer", "null"]},
+        "started_at": {"$ref": "#/$defs/nullableText"},
+        "finished_at": {"$ref": "#/$defs/nullableText"},
+        "duration_ms": {"type": ["integer", "null"], "minimum": 0},
+        "commands": {"type": "array", "items": {"$ref": "#/$defs/command"}},
+        "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}},
+        "missing_includes": {"type": "array", "items": {"$ref": "#/$defs/missingInclude"}},
+        "unresolved_symbols": {"type": "array", "items": {"$ref": "#/$defs/unresolvedSymbol"}},
+        "pch_issues": {"type": "array", "items": {"$ref": "#/$defs/pchIssue"}},
+        "vc6_compatibility_issues": {"type": "array", "items": {"$ref": "#/$defs/vc6Issue"}},
+        "log_files": {"type": "array", "items": {"type": "string", "minLength": 1}}
       }
     }
-  ]
+  },
+  "$defs": {
+    "nullableText": {
+      "oneOf": [
+        {"type": "string", "minLength": 1},
+        {"type": "null"}
+      ]
+    },
+    "nullablePath": {
+      "oneOf": [
+        {"type": "string", "minLength": 1},
+        {"type": "null"}
+      ]
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "message", "file", "line_number", "raw"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "severity": {"enum": ["info", "warning", "error"]},
+        "message": {"type": "string"},
+        "file": {"$ref": "#/$defs/nullablePath"},
+        "line_number": {"type": ["integer", "null"], "minimum": 1},
+        "raw": {"type": ["string", "null"]}
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command_id", "command_kind", "command_line", "exit_code",
+        "stdout_log", "stderr_log", "combined_log", "diagnostics"
+      ],
+      "properties": {
+        "command_id": {"type": "string", "minLength": 1},
+        "command_kind": {"type": "string", "minLength": 1},
+        "command_line": {"type": "string", "minLength": 1},
+        "exit_code": {"type": "integer"},
+        "stdout_log": {"$ref": "#/$defs/nullablePath"},
+        "stderr_log": {"$ref": "#/$defs/nullablePath"},
+        "combined_log": {"$ref": "#/$defs/nullablePath"},
+        "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}}
+      }
+    },
+    "missingInclude": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["include_name", "included_from", "line_number", "diagnostic_raw", "candidate_dirs"],
+      "properties": {
+        "include_name": {"type": "string", "minLength": 1},
+        "included_from": {"$ref": "#/$defs/nullablePath"},
+        "line_number": {"type": ["integer", "null"], "minimum": 1},
+        "diagnostic_raw": {"type": "string"},
+        "candidate_dirs": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "unresolvedSymbol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "symbol_name", "referenced_from", "diagnostic_code", "diagnostic_raw",
+        "stub_candidate", "related_call_name"
+      ],
+      "properties": {
+        "symbol_name": {"type": "string", "minLength": 1},
+        "referenced_from": {"type": ["string", "null"]},
+        "diagnostic_code": {"type": "string", "minLength": 1},
+        "diagnostic_raw": {"type": "string"},
+        "stub_candidate": {"type": "boolean"},
+        "related_call_name": {"type": ["string", "null"]}
+      }
+    },
+    "pchIssue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue_kind", "header", "diagnostic_raw", "suggested_action"],
+      "properties": {
+        "issue_kind": {"type": "string", "minLength": 1},
+        "header": {"type": ["string", "null"]},
+        "diagnostic_raw": {"type": "string"},
+        "suggested_action": {"type": "string"}
+      }
+    },
+    "vc6Issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue_kind", "file", "line_number", "diagnostic_raw", "suggested_action"],
+      "properties": {
+        "issue_kind": {"type": "string", "minLength": 1},
+        "file": {"$ref": "#/$defs/nullablePath"},
+        "line_number": {"type": ["integer", "null"], "minimum": 1},
+        "diagnostic_raw": {"type": "string"},
+        "suggested_action": {"type": "string"}
+      }
+    }
+  }
 }

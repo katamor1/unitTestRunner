@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from unit_test_runner.encoding import decode_bytes_auto
+
 from .c90_writer import include_guard_for, relative_posix, sanitize_identifier, sha256_file, write_c_file
 from .harness_models import (
     BuildHint,
@@ -17,6 +19,57 @@ from .harness_models import (
     UnresolvedPlaceholder,
 )
 from .harness_report_writer import write_harness_report
+from .type_bridge import enrich_signature_bridge_types
+
+
+_QUOTE_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*"([^"]+)"', re.MULTILINE)
+_SCALAR_PUBLIC_TYPES = {
+    "char",
+    "signed char",
+    "unsigned char",
+    "short",
+    "short int",
+    "signed short",
+    "signed short int",
+    "unsigned short",
+    "unsigned short int",
+    "int",
+    "signed",
+    "signed int",
+    "unsigned",
+    "unsigned int",
+    "long",
+    "long int",
+    "signed long",
+    "signed long int",
+    "unsigned long",
+    "unsigned long int",
+    "float",
+    "double",
+}
+_SCALAR_BASE_TYPES = {
+    *_SCALAR_PUBLIC_TYPES,
+    "long long",
+    "long long int",
+    "signed long long",
+    "signed long long int",
+    "unsigned long long",
+    "long double",
+}
+_SCALAR_TYPEDEFS = {
+    "BOOL",
+    "BYTE",
+    "WORD",
+    "DWORD",
+    "UINT",
+    "ULONG",
+    "USHORT",
+    "UCHAR",
+    "INT",
+    "LONG",
+    "SHORT",
+    "CHAR",
+}
 
 
 def generate_harness_skeleton(
@@ -29,7 +82,7 @@ def generate_harness_skeleton(
 ) -> HarnessSkeletonReport:
     output_root = Path(output_root).resolve()
     policy = HarnessGenerationPolicy(overwrite_existing=overwrite)
-    signature = _payload(function_signature)
+    signature = enrich_signature_bridge_types(_payload(function_signature))
     globals_payload = _payload(global_access)
     calls = _payload(call_report)
     test_case_design_payload = _payload(test_case_design)
@@ -40,11 +93,30 @@ def generate_harness_skeleton(
     warnings: list[HarnessGenerationWarning] = []
     unresolved: list[UnresolvedPlaceholder] = []
     build_hints: list[BuildHint] = []
+    generation_blockers = _generation_blockers(
+        function_name,
+        source_path,
+        function_payload,
+        globals_payload,
+        calls,
+        test_case_design_payload,
+    )
 
     _ensure_layout(output_root)
     _write_assert_files(output_root, generated_files, overwrite)
     stubs = _write_stub_files(output_root, calls, test_case_design_payload, generated_files, warnings, overwrite)
-    tests = _write_test_files(output_root, signature, globals_payload, test_case_design_payload, stubs, generated_files, unresolved, warnings, overwrite)
+    tests = _write_test_files(
+        output_root,
+        signature,
+        globals_payload,
+        test_case_design_payload,
+        stubs,
+        generated_files,
+        unresolved,
+        warnings,
+        generation_blockers,
+        overwrite,
+    )
     _write_target_invocation(output_root, signature, generated_files, warnings, overwrite)
     _write_runner_files(output_root, function_name, tests, generated_files, overwrite)
     build_hints.extend(_build_hints(source_path, stubs, tests))
@@ -434,10 +506,22 @@ def _write_target_invocation(
     function_payload = signature.get("function", {})
     function_name = function_payload.get("name", "unknown_function")
     source_path = Path(signature.get("source", {}).get("path") or "")
-    return_type = _return_type(function_payload)
+    raw_return_type = _return_type(function_payload)
+    return_info = function_payload.get("return_type") if isinstance(function_payload.get("return_type"), dict) else {}
+    return_bridge_kind = str(return_info.get("bridge_kind") or "unresolved")
     parameters = _signature_parameters(function_payload)
-    prototype = f"{return_type} Target_Invoke_{sanitize_identifier(function_name)}({_signature_parameter_list(parameters)})"
-    target_include = f"{source_path.stem}.h" if source_path.stem else "target_header_review_required.h"
+    raw_parameter_list = _signature_parameter_list(parameters)
+    public_return_type = _public_return_type(raw_return_type, return_bridge_kind)
+    public_parameter_list = _public_parameter_list(parameters)
+    public_prototype = f"{public_return_type} Target_Invoke_{sanitize_identifier(function_name)}({public_parameter_list})"
+    target_prototype = f"{raw_return_type} {function_name}({raw_parameter_list})"
+    source_includes = _source_quote_includes(source_path)
+    include_block = _include_block(source_includes)
+    public_include_block = include_block if _public_prototype_needs_headers(
+        raw_return_type,
+        return_bridge_kind,
+        parameters,
+    ) else ""
     if function_payload.get("storage_class") == "static":
         warnings.append(
             HarnessGenerationWarning(
@@ -450,26 +534,49 @@ def _write_target_invocation(
 #ifndef TARGET_INVOCATION_H_
 #define TARGET_INVOCATION_H_
 
-{prototype};
+{public_include_block}{public_prototype};
 
 #endif
 """
-    invocation_args = ", ".join(parameter["name"] for parameter in parameters) or ""
-    if return_type == "void":
-        call_line = f"    {function_name}({invocation_args});"
+    invocation_args = ", ".join(_target_argument_cast(parameter) for parameter in parameters) or ""
+    call_expression = f"{function_name}({invocation_args})"
+    if raw_return_type == "void":
+        call_line = f"    {call_expression};"
+    elif public_return_type == raw_return_type:
+        call_line = f"    return {call_expression};"
     else:
-        call_line = f"    return {function_name}({invocation_args});"
+        call_line = f"    return ({public_return_type})({call_expression});"
     source = f"""/* generated target invocation skeleton: review required */
 #include "target_invocation.h"
-#include "{target_include}"
+{include_block}
+{target_prototype};
 
-{prototype}
+{public_prototype}
 {{
 {call_line}
 }}
 """
     _write_c(output_root, generated_files, "generated/harness/target_invocation.h", "target_invocation_header", header, [function_name], True, overwrite)
     _write_c(output_root, generated_files, "generated/harness/target_invocation.c", "target_invocation_source", source, [function_name], True, overwrite)
+
+
+def _source_quote_includes(source_path: Path) -> list[str]:
+    try:
+        text = decode_bytes_auto(source_path.read_bytes())
+    except OSError:
+        return []
+    includes: list[str] = []
+    for match in _QUOTE_INCLUDE_RE.finditer(text):
+        include = match.group(1).strip().replace("\\", "/")
+        if include and include not in includes:
+            includes.append(include)
+    return includes
+
+
+def _include_block(includes: list[str]) -> str:
+    if not includes:
+        return ""
+    return "".join(f'#include "{include}"\n' for include in includes) + "\n"
 
 
 def _write_test_files(
@@ -481,6 +588,7 @@ def _write_test_files(
     generated_files: list[GeneratedFile],
     unresolved: list[UnresolvedPlaceholder],
     warnings: list[HarnessGenerationWarning],
+    generation_blockers: list[str],
     overwrite: bool,
 ) -> list[TestSkeleton]:
     function_payload = signature.get("function", {})
@@ -494,33 +602,39 @@ def _write_test_files(
     test_skeletons: list[TestSkeleton] = []
     functions: list[str] = []
     prototypes: list[str] = []
+    all_blockers: list[str] = list(generation_blockers)
     for index, case in enumerate(test_case_design.get("test_cases", []), start=1):
         case_id = case.get("test_case_id") or f"TC_{safe_function}_{index:03d}"
         test_func = f"Test_{sanitize_identifier(case_id)}"
         prototypes.append(f"void {test_func}(void);")
         coverage_ids = [link.get("coverage_id", "") for link in case.get("coverage_links", []) if link.get("coverage_id")]
         related_stubs = sorted({setup.get("stub_name", "") for setup in case.get("stub_setups", []) if setup.get("stub_name")})
-        placeholder_count = _count_placeholders(case)
-        if placeholder_count:
+        blockers = _case_review_blockers(case, parameters, return_type, stub_names)
+        blockers = list(dict.fromkeys([*generation_blockers, *blockers]))
+        all_blockers.extend(blockers)
+        placeholder_count = len(blockers)
+        if blockers:
             unresolved.append(
                 UnresolvedPlaceholder(
-                    placeholder_id=f"UP_{sanitize_identifier(case_id)}_EXPECTED",
-                    placeholder_kind="expected_return",
-                    name="TBD_EXPECTED_RETURN_INT",
+                    placeholder_id=f"UP_{sanitize_identifier(case_id)}_REVIEW",
+                    placeholder_kind="review_gate",
+                    name="review_required",
                     related_test_case_id=case_id,
                     related_stub_name=None,
-                    reason="Expected result is not determined during test design generation.",
-                    suggested_action="Review generated test case and replace TBD expected values.",
+                    reason="; ".join(blockers),
+                    suggested_action="Review the exact inputs, dependency behavior, and expected observations before a real run.",
                 )
             )
             warnings.append(
                 HarnessGenerationWarning(
-                    code="expected_value_placeholder_generated",
-                    message=f"Expected placeholder generated for {case_id}.",
+                    code="review_only_scaffold_generated",
+                    message=f"Review-only scaffold generated for {case_id}: {'; '.join(blockers)}.",
                     related_test_case_id=case_id,
                 )
             )
-        functions.append(_render_test_function(test_func, case, parameters, return_type, function_name, stub_safe_names))
+            functions.append(_render_review_only_test_function(test_func, blockers))
+        else:
+            functions.append(_render_test_function(test_func, case, parameters, return_type, function_name, stub_safe_names))
         test_skeletons.append(
             TestSkeleton(
                 test_case_id=case_id,
@@ -530,13 +644,26 @@ def _write_test_files(
                 related_coverage_ids=coverage_ids,
                 related_stub_names=related_stubs,
                 placeholder_count=placeholder_count,
-                review_required=True,
+                review_required=bool(blockers),
             )
         )
     if not functions:
         test_func = f"Test_TC_{safe_function}_001"
         prototypes.append(f"void {test_func}(void);")
-        functions.append(_render_test_function(test_func, {}, parameters, return_type, function_name, stub_safe_names))
+        blocker = "no reviewed test case was supplied"
+        all_blockers.append(blocker)
+        unresolved.append(
+            UnresolvedPlaceholder(
+                placeholder_id=f"UP_TC_{safe_function}_001_REVIEW",
+                placeholder_kind="review_gate",
+                name="review_required",
+                related_test_case_id=f"TC_{safe_function}_001",
+                related_stub_name=None,
+                reason=blocker,
+                suggested_action="Supply and review at least one exact test case before a real run.",
+            )
+        )
+        functions.append(_render_review_only_test_function(test_func, [blocker]))
         test_skeletons.append(
             TestSkeleton(
                 test_case_id=f"TC_{safe_function}_001",
@@ -549,7 +676,9 @@ def _write_test_files(
                 review_required=True,
             )
         )
+    source_path = Path(signature.get("source", {}).get("path") or "")
     include_lines = [
+        *(f'#include "{include}"' for include in _source_quote_includes(source_path)),
         '#include "utr_assert.h"',
         '#include "utr_runner.h"',
         '#include "target_invocation.h"',
@@ -558,13 +687,13 @@ def _write_test_files(
         include_lines.insert(0, "#include <string.h>")
     for stub_safe in stub_safe_names:
         include_lines.append(f'#include "stub_{stub_safe}.h"')
-    define_lines = ["#define TBD_EXPECTED_RETURN_INT (0)", "#define TBD_VALID_INT_VALUE (0)"]
-    define_lines.extend(_placeholder_defines(test_case_design))
+    gate_lines = []
+    if all_blockers:
+        gate_lines = ['#error "UTR_REVIEW_REQUIRED: exact reviewed inputs and oracles are required before execution"', ""]
     source = "\n".join(
         [
             "/* generated test skeleton: review required */",
-            *define_lines,
-            "",
+            *gate_lines,
             *include_lines,
             "",
             *global_declarations,
@@ -594,28 +723,29 @@ def _render_test_function(
     call_args: list[str] = []
     for parameter in parameters:
         name = parameter["name"]
-        type_raw = parameter["type_raw"]
         call_args.append(name)
-        if parameter.get("is_array"):
-            declarations.append(f"    {parameter['array_base_type']} {name}[{parameter['array_size']}];")
-            setup_lines.append(f"    {name}[0] = 0;")
-            continue
-        if parameter.get("pointer_level", 0) > 0:
-            base_type = parameter.get("base_type") or "int"
-            declarations.append(f"    {base_type} {name}_storage;")
-            declarations.append(f"    {type_raw} {name};")
-            value = assignments.get(name, {}).get("value_expression")
+        assignment = assignments.get(name, {})
+        value = assignment.get("value_expression")
+        if parameter.get("is_array") or int(parameter.get("pointer_level") or 0) > 0:
+            declarations.append(f"    static double {name}_storage[512];")
+            declarations.append(f"    void *{name};")
             if value == "NULL":
                 setup_lines.append(f"    {name} = NULL;")
             else:
-                setup_lines.append(f"    {name}_storage = 0;")
-                setup_lines.append(f"    {name} = &{name}_storage;")
+                setup_lines.append(f"    {name} = (void *){name}_storage;")
             continue
-        declarations.append(f"    {type_raw} {name};")
-        value = _safe_c_value(assignments.get(name, {}).get("value_expression"))
-        setup_lines.append(f"    {name} = {value};")
-    if return_type != "void":
-        declarations.append(f"    {return_type} actual_return;")
+        declarations.extend(
+            _value_parameter_declaration_and_setup(
+                value,
+                name,
+                _public_value_type(parameter.get("type_raw"), parameter.get("bridge_kind")),
+                str(parameter.get("bridge_kind") or "unresolved"),
+                setup_lines,
+            )
+        )
+    public_return_type = _public_return_type(return_type)
+    if public_return_type != "void":
+        declarations.append(f"    {public_return_type} actual_return;")
     lines.extend(declarations)
     lines.append("")
     for stub_safe in stub_safe_names:
@@ -627,17 +757,210 @@ def _render_test_function(
         lines.append(f"    Stub_{stub_safe}_SetReturn({_safe_c_value(setup.get('value_expression'))});")
     lines.extend(setup_lines)
     invocation = f"Target_Invoke_{sanitize_identifier(function_name)}({', '.join(call_args)})"
-    if return_type == "void":
+    if public_return_type == "void":
         lines.append(f"    {invocation};")
     else:
         lines.append(f"    actual_return = {invocation};")
-    if return_type != "void":
-        lines.append("    UTR_ASSERT_EQ_INT(TBD_EXPECTED_RETURN_INT, actual_return);")
-    for stub_safe in stub_safe_names:
-        lines.append(f"    UTR_ASSERT_TRUE(Stub_{stub_safe}_GetCallCount() >= 0);")
+    if public_return_type != "void":
+        lines.append(f"    UTR_ASSERT_EQ_INT({_return_expectation(case)}, (int)actual_return);")
+    for stub_safe, expected in _stub_call_count_expectations(case).items():
+        lines.append(f"    UTR_ASSERT_EQ_INT({expected}, Stub_{stub_safe}_GetCallCount());")
     lines.extend(_expected_observation_assertions(case))
     lines.extend(["}", ""])
     return "\n".join(lines)
+
+
+def _value_parameter_declaration_and_setup(
+    value: Any,
+    name: str,
+    type_raw: str,
+    bridge_kind: str,
+    setup_lines: list[str],
+) -> list[str]:
+    if bridge_kind == "aggregate":
+        return [f"    {type_raw} {name} = {{0}};"]
+    if bridge_kind == "unresolved":
+        setup_lines.append(f"    /* review required: unresolved value type for {name}; no lossy initializer emitted. */")
+        return [f"    {type_raw} {name};"]
+    setup_lines.append(f"    {name} = {_safe_initializer_value(value)};")
+    return [f"    {type_raw} {name};"]
+
+
+def _safe_initializer_value(value: Any) -> str:
+    return _safe_c_value(value)
+
+
+def _render_review_only_test_function(test_func: str, blockers: list[str]) -> str:
+    reason = "; ".join(blockers).replace("*/", "* /")
+    return "\n".join(
+        [
+            f"void {test_func}(void)",
+            "{",
+            f"    /* review required: {reason} */",
+            "}",
+            "",
+        ]
+    )
+
+
+def _generation_blockers(
+    function_name: str,
+    source_path: Path,
+    function_payload: dict[str, Any],
+    globals_payload: dict[str, Any],
+    call_report: dict[str, Any],
+    test_case_design: dict[str, Any],
+) -> list[str]:
+    blockers: list[str] = []
+    if not _is_supported_execution_target(function_name, source_path):
+        blockers.append("target is outside the reviewed Control_Update/practical fixture paths")
+    if _has_executable_unresolved_items(test_case_design):
+        blockers.append("test design contains unresolved items")
+    return_type = function_payload.get("return_type") or {}
+    if not str(return_type.get("raw") or return_type.get("normalized") or "").strip():
+        blockers.append("target return type is missing")
+    elif return_type.get("bridge_kind") == "unresolved":
+        blockers.append("target return type is unresolved")
+    for parameter in function_payload.get("parameters", []):
+        type_info = parameter.get("type") or {}
+        name = parameter.get("name") or f"arg{parameter.get('index', '?')}"
+        if type_info.get("is_function_pointer"):
+            blockers.append(f"parameter {name} is a function pointer")
+        elif type_info.get("bridge_kind") == "unresolved":
+            blockers.append(f"parameter {name} type is unresolved")
+    declarations = {
+        str(item.get("name") or ""): item
+        for item in globals_payload.get("file_scope_declarations", [])
+        if item.get("name")
+    }
+    if any(item.get("confidence") == "low" for item in declarations.values()):
+        blockers.append("file-scope type classification is unresolved")
+    expected_globals = {
+        str(observation.get("target_name") or "")
+        for case in test_case_design.get("test_cases", [])
+        for observation in case.get("expected_observations", [])
+        if observation.get("observation_kind") == "global_value"
+    }
+    for name in sorted(expected_globals):
+        declaration = declarations.get(name)
+        if declaration is None or not str(declaration.get("type_raw") or "").strip():
+            blockers.append(f"global oracle {name} has no exact declaration type")
+    unsupported = {
+        "macro_like",
+        "function_pointer",
+        "member_call",
+        "function_address_use",
+        "mixed_call_forms",
+        "unknown",
+    }
+    for call in call_report.get("calls", []):
+        kind = str(call.get("target_kind") or "unknown")
+        if kind in unsupported:
+            blockers.append(f"call {call.get('name') or '<unknown>'} has unsupported form {kind}")
+    blockers.extend(str(item) for item in call_report.get("_generation_blockers", []) if str(item).strip())
+    return list(dict.fromkeys(blockers))
+
+
+def _has_executable_unresolved_items(test_case_design: dict[str, Any]) -> bool:
+    executable_case_ids = {
+        str(case.get("test_case_id") or "")
+        for case in test_case_design.get("test_cases", [])
+        if str(case.get("test_case_id") or "").strip()
+    }
+    for item in test_case_design.get("unresolved_items", []):
+        if not isinstance(item, dict):
+            return True
+        related_case_ids = {
+            str(case_id)
+            for case_id in item.get("related_test_case_ids") or []
+            if str(case_id).strip()
+        }
+        if not related_case_ids or related_case_ids & executable_case_ids:
+            return True
+    return False
+
+
+def _is_supported_execution_target(function_name: str, source_path: Path) -> bool:
+    if function_name == "Control_Update":
+        return True
+    normalized = source_path.as_posix().casefold()
+    return function_name == "DeviceControl_Update" and "/vc6_practical_project/" in f"/{normalized.strip('/')}"
+
+
+def _case_review_blockers(
+    case: dict[str, Any],
+    parameters: list[dict[str, Any]],
+    return_type: str,
+    stub_names: list[str],
+) -> list[str]:
+    blockers: list[str] = []
+    for field in ("input_assignments", "state_setups", "stub_setups", "dependency_overrides", "expected_observations"):
+        if any(bool(item.get("review_required")) for item in case.get(field, [])):
+            blockers.append(f"{field} contains review-required values")
+    assignments = {str(item.get("target_name") or ""): item for item in case.get("input_assignments", [])}
+    for parameter in parameters:
+        name = str(parameter.get("name") or "")
+        assignment = assignments.get(name)
+        if assignment is None:
+            blockers.append(f"parameter {name} has no exact assignment")
+            continue
+        value = str(assignment.get("value_expression") or "").strip()
+        if parameter.get("is_array") or int(parameter.get("pointer_level") or 0) > 0:
+            if value not in {"NULL", "VALID_STORAGE"}:
+                blockers.append(f"parameter {name} has an unrepresentable pointer value")
+        elif not _is_safe_c_scalar_expression(value):
+            blockers.append(f"parameter {name} has an unrepresentable scalar value")
+    if return_type != "void" and _return_expectation(case) is None:
+        blockers.append("non-void target has no exact reviewed return oracle")
+    for observation in case.get("expected_observations", []):
+        kind = observation.get("observation_kind")
+        value = str(observation.get("expected_expression") or "").strip()
+        if kind in {"return_value", "global_value"} and not _is_safe_c_scalar_expression(value):
+            blockers.append(f"{kind} has an unrepresentable expected value")
+        elif kind == "char_array_string" and not _is_safe_c_string_expression(value):
+            blockers.append("char_array_string has an unrepresentable expected value")
+    call_counts = _stub_call_count_expectations(case)
+    related = {sanitize_identifier(name) for name in stub_names}
+    for setup in case.get("stub_setups", []):
+        if setup.get("setup_kind") == "call_count_observation":
+            safe = sanitize_identifier(setup.get("stub_name"))
+            requested = str(setup.get("value_expression") or "").strip()
+            if requested and safe in related and safe not in call_counts:
+                blockers.append(f"stub {setup.get('stub_name')} has no exact call-count oracle")
+    return list(dict.fromkeys(blockers))
+
+
+def _return_expectation(case: dict[str, Any]) -> str | None:
+    for observation in case.get("expected_observations", []):
+        if observation.get("observation_kind") != "return_value" or observation.get("review_required"):
+            continue
+        value = str(observation.get("expected_expression") or "").strip()
+        if _is_safe_c_scalar_expression(value):
+            return value
+    return None
+
+
+def _stub_call_count_expectations(case: dict[str, Any]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for setup in case.get("stub_setups", []):
+        if setup.get("setup_kind") != "call_count_observation" or setup.get("review_required"):
+            continue
+        value = str(setup.get("value_expression") or "").strip()
+        if _is_safe_c_integer_expression(value):
+            result[sanitize_identifier(setup.get("stub_name"))] = value
+    return result
+
+
+def _is_safe_c_integer_expression(value: str) -> bool:
+    return re.fullmatch(r"[-+]?(?:0[xX][0-9A-Fa-f]+|[0-9]+)[uUlL]*", value) is not None
+
+
+def _is_safe_c_scalar_expression(value: str) -> bool:
+    return _is_safe_c_integer_expression(value) or re.fullmatch(r"[A-Za-z_]\w*", value) is not None
+
+
+def _is_safe_c_string_expression(value: str) -> bool:
+    return re.fullmatch(r'L?"(?:[^"\\]|\\.)*"', value) is not None
 
 
 def _needs_string_compare(test_case_design: dict[str, Any]) -> bool:
@@ -646,26 +969,6 @@ def _needs_string_compare(test_case_design: dict[str, Any]) -> bool:
             if observation.get("observation_kind") == "char_array_string":
                 return True
     return False
-
-
-def _placeholder_defines(test_case_design: dict[str, Any]) -> list[str]:
-    known = {"TBD_EXPECTED_RETURN_INT", "TBD_VALID_INT_VALUE"}
-    defines: list[str] = []
-    for case in test_case_design.get("test_cases", []):
-        for observation in case.get("expected_observations", []):
-            expression = str(observation.get("expected_expression") or "").strip()
-            if expression in known or not _is_tbd_identifier(expression):
-                continue
-            known.add(expression)
-            if observation.get("observation_kind") == "char_array_string":
-                defines.append(f'#define {expression} ""')
-            else:
-                defines.append(f"#define {expression} (0)")
-    return sorted(defines)
-
-
-def _is_tbd_identifier(value: str) -> bool:
-    return value.startswith("TBD") and re.match(r"^[A-Za-z_]\w*$", value) is not None
 
 
 def _extern_global_declarations(globals_payload: dict[str, Any], test_case_design: dict[str, Any]) -> list[str]:
@@ -759,22 +1062,13 @@ def _c_string_expression(value: Any, placeholder: str) -> str:
 
 def _safe_c_value(value: Any) -> str:
     if value is None:
-        return "TBD_VALID_INT_VALUE"
+        raise ValueError("A reviewed C value is required.")
     text = str(value).strip()
     if text == "NULL":
         return "NULL"
-    if text.isdigit() or (text.startswith("-") and text[1:].isdigit()):
+    if _is_safe_c_scalar_expression(text):
         return text
-    return f"0 /* candidate: {text} */"
-
-
-def _count_placeholders(case: dict[str, Any]) -> int:
-    count = 0
-    for observation in case.get("expected_observations", []):
-        expression = observation.get("expected_expression")
-        if expression is None or str(expression).startswith("TBD"):
-            count += 1
-    return count or 1
+    raise ValueError(f"C value cannot be represented without review: {text}")
 
 
 def _signature_parameters(function_payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -796,6 +1090,7 @@ def _signature_parameters(function_payload: dict[str, Any]) -> list[dict[str, An
                     "array_size": array_size,
                     "is_array": True,
                     "pointer_level": 0,
+                    "bridge_kind": type_info.get("bridge_kind") or item.get("bridge_kind") or "unresolved",
                 }
             )
             continue
@@ -806,6 +1101,7 @@ def _signature_parameters(function_payload: dict[str, Any]) -> list[dict[str, An
                 "base_type": type_info.get("base_type") or "int",
                 "is_array": False,
                 "pointer_level": int(type_info.get("pointer_level") or 0),
+                "bridge_kind": type_info.get("bridge_kind") or item.get("bridge_kind") or "unresolved",
             }
         )
     return parameters
@@ -823,6 +1119,92 @@ def _signature_parameter_declaration(parameter: dict[str, Any]) -> str:
     if parameter.get("is_array") or re.search(rf"\b{re.escape(name)}\b", type_raw):
         return type_raw
     return f"{type_raw} {name}"
+
+
+def _public_parameter_list(parameters: list[dict[str, Any]]) -> str:
+    if not parameters:
+        return "void"
+    return ", ".join(f"{_public_type_for_parameter(parameter)} {parameter['name']}" for parameter in parameters)
+
+
+def _public_type_for_parameter(parameter: dict[str, Any]) -> str:
+    if int(parameter.get("pointer_level") or 0) > 0 or parameter.get("is_array"):
+        return "void *"
+    raw = _compact_type(parameter.get("type_raw"))
+    return raw or "int"
+
+
+def _public_value_type(type_raw: Any, bridge_kind: Any = None) -> str:
+    compact = _compact_type(type_raw)
+    if bridge_kind in {"scalar", "aggregate", "unresolved"} and compact:
+        return compact
+    return compact if compact in _SCALAR_BASE_TYPES or compact in _SCALAR_TYPEDEFS else (compact or "int")
+
+
+def _public_return_type(raw_return_type: Any, bridge_kind: str = "unresolved") -> str:
+    raw = _compact_type(raw_return_type)
+    if raw == "void":
+        return "void"
+    if "*" in raw:
+        return "void *"
+    if bridge_kind in {"scalar", "aggregate", "unresolved"} and raw:
+        return raw
+    return raw if raw in _SCALAR_PUBLIC_TYPES else (raw or "int")
+
+
+def _public_prototype_needs_headers(
+    raw_return_type: str,
+    return_bridge_kind: str,
+    parameters: list[dict[str, Any]],
+) -> bool:
+    return_type = _compact_type(raw_return_type)
+    if return_type not in {"", "void"} and "*" not in return_type:
+        if return_bridge_kind != "unresolved" or return_type not in _SCALAR_PUBLIC_TYPES:
+            if return_type not in _SCALAR_PUBLIC_TYPES:
+                return True
+    for parameter in parameters:
+        if int(parameter.get("pointer_level") or 0) > 0 or parameter.get("is_array"):
+            continue
+        raw = _compact_type(parameter.get("type_raw"))
+        if raw and raw not in _SCALAR_PUBLIC_TYPES:
+            return True
+    return False
+
+
+def _target_argument_cast(parameter: dict[str, Any]) -> str:
+    name = parameter["name"]
+    raw_type = str(parameter.get("type_raw") or "int").strip()
+    if int(parameter.get("pointer_level") or 0) > 0 or parameter.get("is_array"):
+        return f"({raw_type}){name}"
+    public_type = _public_type_for_parameter(parameter)
+    if public_type != raw_type:
+        return f"({raw_type}){name}"
+    return name
+
+
+def _is_scalar_type(type_raw: Any) -> bool:
+    compact = _compact_type(type_raw)
+    if not compact:
+        return True
+    if "*" in compact:
+        return True
+    if compact in _SCALAR_BASE_TYPES:
+        return True
+    if compact in _SCALAR_TYPEDEFS:
+        return True
+    if compact.endswith("_t"):
+        return True
+    if compact.startswith("enum "):
+        return True
+    if compact.startswith("struct ") or compact.startswith("union "):
+        return False
+    return False
+
+
+def _compact_type(type_raw: Any) -> str:
+    text = str(type_raw or "").strip()
+    text = text.replace("const ", "").replace("volatile ", "")
+    return " ".join(text.split())
 
 
 def _return_type(function_payload: dict[str, Any]) -> str:

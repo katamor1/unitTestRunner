@@ -1,12 +1,42 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from pathlib import Path, PurePosixPath
+from typing import Any, Mapping
 
 
-def _path_text(path: Path | None) -> str:
-    return "" if path is None else path.as_posix()
+SUBJECT_FIELDS = (
+    "source_path",
+    "source_sha256",
+    "function",
+    "project",
+    "configuration",
+)
+
+
+def normalize_subject(value: Mapping[str, Any]) -> dict[str, str]:
+    if set(value) != set(SUBJECT_FIELDS):
+        raise ValueError("Suite function subject must contain exactly five identity fields.")
+    subject = {field: str(value[field]) for field in SUBJECT_FIELDS}
+    if any(not item for item in subject.values()):
+        raise ValueError("Suite function subject fields must be non-empty.")
+    return subject
+
+
+def resolve_manifest_workspace(suite_root: Path, value: str) -> Path:
+    if not value or "\\" in value:
+        raise ValueError("Suite workspace must be a manifest-relative POSIX path.")
+    relative = PurePosixPath(value)
+    if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+        raise ValueError("Suite workspace must not be absolute or contain dot traversal.")
+    if relative.parts and ":" in relative.parts[0]:
+        raise ValueError("Suite workspace must not contain a drive-qualified path.")
+    resolved = (suite_root / Path(*relative.parts)).resolve()
+    try:
+        resolved.relative_to(suite_root.resolve())
+    except ValueError as error:
+        raise ValueError("Suite workspace escapes the suite output root.") from error
+    return resolved
 
 
 @dataclass
@@ -14,65 +44,102 @@ class SuiteEntry:
     entry_id: str
     enabled: bool
     tags: list[str]
-    function: dict[str, str]
+    subject: dict[str, str]
     workspace: Path
-    dossier: Path
-    test_execution_report: Path
-    registered_at: str
+    workspace_path: str
+    test_spec_sha256: str
+    harness_sha256: str
+
+    @property
+    def function(self) -> dict[str, str]:
+        return {
+            "name": self.subject["function"],
+            "source": self.subject["source_path"],
+            "project": self.subject["project"],
+            "configuration": self.subject["configuration"],
+        }
+
+    @property
+    def dossier(self) -> Path:
+        return self.workspace / "reports" / "function_dossier.json"
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "entry_id": self.entry_id,
             "enabled": self.enabled,
             "tags": list(self.tags),
-            "function": dict(self.function),
-            "workspace": _path_text(self.workspace),
-            "dossier": _path_text(self.dossier),
-            "test_execution_report": _path_text(self.test_execution_report),
-            "registered_at": self.registered_at,
+            "subject": dict(self.subject),
+            "workspace": self.workspace_path,
+            "test_spec_sha256": self.test_spec_sha256,
+            "harness_sha256": self.harness_sha256,
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "SuiteEntry":
+    def from_dict(cls, payload: Mapping[str, Any], suite_root: Path) -> "SuiteEntry":
+        workspace_path = str(payload.get("workspace") or "")
         return cls(
-            entry_id=str(payload.get("entry_id", "")),
-            enabled=bool(payload.get("enabled", True)),
-            tags=[str(tag) for tag in payload.get("tags", []) if str(tag)],
-            function={str(key): str(value) for key, value in dict(payload.get("function", {})).items()},
-            workspace=Path(str(payload.get("workspace", ""))).resolve(),
-            dossier=Path(str(payload.get("dossier", ""))).resolve(),
-            test_execution_report=Path(str(payload.get("test_execution_report", ""))).resolve(),
-            registered_at=str(payload.get("registered_at", "")),
+            entry_id=str(payload.get("entry_id") or ""),
+            enabled=bool(payload.get("enabled")),
+            tags=[str(tag) for tag in payload.get("tags", [])],
+            subject=normalize_subject(payload.get("subject", {})),
+            workspace=resolve_manifest_workspace(suite_root, workspace_path),
+            workspace_path=workspace_path,
+            test_spec_sha256=str(payload.get("test_spec_sha256") or ""),
+            harness_sha256=str(payload.get("harness_sha256") or ""),
         )
 
 
 @dataclass
 class SuiteManifest:
     suite_id: str
-    source_root: Path | None
-    dsw_path: Path | None
     entries: list[SuiteEntry] = field(default_factory=list)
-    schema_version: str = "0.1"
+    schema_version: str = "1.0.0"
+    subject: dict[str, str] | None = None
+    revision: int = 0
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_data(self) -> dict[str, Any]:
         return {
-            "schema_version": self.schema_version,
             "suite_id": self.suite_id,
-            "source_root": _path_text(self.source_root),
-            "dsw_path": _path_text(self.dsw_path),
+            "revision": self.revision,
             "entries": [entry.to_dict() for entry in self.entries],
         }
 
+    def to_dict(self) -> dict[str, Any]:
+        if self.subject is None:
+            raise ValueError("An empty unregistered suite has no public manifest subject.")
+        return {
+            "schema_version": "1.0.0",
+            "artifact_kind": "suite_manifest",
+            "subject": dict(self.subject),
+            "data": self.to_data(),
+        }
+
     @classmethod
-    def from_dict(cls, payload: dict[str, Any], suite_id: str = "default") -> "SuiteManifest":
-        source_root = str(payload.get("source_root") or "")
-        dsw_path = str(payload.get("dsw_path") or "")
+    def from_dict(
+        cls,
+        payload: Mapping[str, Any],
+        *,
+        suite_root: Path,
+        suite_id: str = "default",
+    ) -> "SuiteManifest":
+        if payload.get("schema_version") != "1.0.0" or payload.get("artifact_kind") != "suite_manifest":
+            raise ValueError("Suite manifest must use the public 1.0.0 envelope; regenerate it.")
+        data = payload.get("data")
+        if not isinstance(data, Mapping):
+            raise ValueError("Suite manifest data must be an object.")
+        entries = [
+            SuiteEntry.from_dict(item, suite_root)
+            for item in data.get("entries", [])
+            if isinstance(item, Mapping)
+        ]
+        entry_ids = [entry.entry_id for entry in entries]
+        if len(entry_ids) != len(set(entry_ids)):
+            raise ValueError("Suite manifest contains duplicate entry_id values.")
         return cls(
-            suite_id=str(payload.get("suite_id") or suite_id),
-            source_root=Path(source_root).resolve() if source_root else None,
-            dsw_path=Path(dsw_path).resolve() if dsw_path else None,
-            entries=[SuiteEntry.from_dict(item) for item in payload.get("entries", []) if isinstance(item, dict)],
-            schema_version=str(payload.get("schema_version") or "0.1"),
+            suite_id=str(data.get("suite_id") or suite_id),
+            entries=entries,
+            subject=normalize_subject(payload.get("subject", {})),
+            revision=int(data.get("revision", 0)),
         )
 
 
@@ -81,16 +148,12 @@ class SuiteRunPolicy:
     run_tests: bool = False
     dry_run: bool = True
     timeout_seconds: int = 60
-    fail_fast: bool = False
-    require_green: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "run_tests": self.run_tests,
             "dry_run": self.dry_run,
             "timeout_seconds": self.timeout_seconds,
-            "fail_fast": self.fail_fast,
-            "require_green": self.require_green,
         }
 
 
@@ -109,12 +172,16 @@ class SuiteRunEntryResult:
     unresolved_review_count: int
     report_path: Path | None
     error: str | None = None
+    subject: dict[str, str] | None = None
+    workspace_path: str | None = None
+    changed_fields: list[str] = field(default_factory=list)
+    fingerprints: dict[str, dict[str, str | None]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        payload = {
+        payload: dict[str, Any] = {
             "entry_id": self.entry_id,
             "function": self.function_name,
-            "workspace": _path_text(self.workspace),
+            "workspace": self.workspace_path or self.workspace.as_posix(),
             "outcome": self.execution_status,
             "green_status": self.green_status,
             "executed": self.executed,
@@ -123,13 +190,18 @@ class SuiteRunEntryResult:
             "failed_tests": self.failed_tests,
             "inconclusive_tests": self.inconclusive_tests,
             "unresolved_review_count": self.unresolved_review_count,
+            "changed_fields": list(self.changed_fields),
+            "fingerprints": {
+                key: dict(value) for key, value in self.fingerprints.items()
+            },
         }
+        if self.subject is not None:
+            payload["subject"] = dict(self.subject)
         if self.report_path is not None:
-            payload["report_path"] = _path_text(self.report_path)
+            payload["report_path"] = self.report_path.as_posix()
         if self.error:
             payload["error"] = self.error
         return payload
-
 
 @dataclass
 class SuiteRunReport:
@@ -139,15 +211,31 @@ class SuiteRunReport:
     policy: SuiteRunPolicy
     results: list[SuiteRunEntryResult]
     summary: dict[str, int]
-    schema_version: str = "0.1"
+    schema_version: str = "1.0.0"
+    subject: dict[str, str] | None = None
+    manifest_revision: int = 0
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_data(self) -> dict[str, Any]:
         return {
-            "schema_version": self.schema_version,
             "outcome": self.status,
             "suite_id": self.suite_id,
-            "selector": self.selector,
+            "manifest_revision": self.manifest_revision,
+            "selector": dict(self.selector),
             "policy": self.policy.to_dict(),
             "summary": dict(self.summary),
             "results": [result.to_dict() for result in self.results],
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        """Retain the in-process report projection used by CLI result assembly."""
+        return self.to_data()
+
+    def to_envelope(self) -> dict[str, Any]:
+        if self.subject is None:
+            raise ValueError("suite_run_report requires the manifest anchor subject.")
+        return {
+            "schema_version": "1.0.0",
+            "artifact_kind": "suite_run_report",
+            "subject": dict(self.subject),
+            "data": self.to_data(),
         }

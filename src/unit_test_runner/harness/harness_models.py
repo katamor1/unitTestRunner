@@ -18,8 +18,8 @@ class HarnessGenerationPolicy:
     generate_stub_headers: bool = True
     generate_argument_capture: bool = True
     generate_call_count_assertions: bool = True
-    generate_placeholder_assertions: bool = True
-    fail_on_unresolved_expected: bool = False
+    generate_placeholder_assertions: bool = False
+    fail_on_unresolved_expected: bool = True
     overwrite_existing: bool = False
     c_encoding: str = "cp932"
 

@@ -7,11 +7,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
-from unit_test_runner.harness.parameter_init_compat import _render_test_function
+from unit_test_runner.harness.harness_skeleton_generator import _render_test_function
 
 
-class ParameterInitCompatTests(unittest.TestCase):
-    def test_null_pointer_candidate_uses_valid_opaque_storage_by_default(self):
+class ParameterInitializationTests(unittest.TestCase):
+    def test_reviewed_null_pointer_assignment_remains_null(self):
         text = _render_test_function(
             "Test_TC_Shared3_001",
             {
@@ -20,11 +20,17 @@ class ParameterInitCompatTests(unittest.TestCase):
                         "target_name": "prm",
                         "value_expression": "NULL",
                         "value_kind": "null_pointer",
-                        "review_required": True,
+                        "review_required": False,
                     }
                 ],
                 "stub_setups": [],
-                "expected_observations": [],
+                "expected_observations": [
+                    {
+                        "observation_kind": "return_value",
+                        "expected_expression": "0",
+                        "review_required": False,
+                    }
+                ],
             },
             [
                 {
@@ -42,9 +48,8 @@ class ParameterInitCompatTests(unittest.TestCase):
         self.assertIn("static double prm_storage[512];", text)
         self.assertIn("void *prm;", text)
         self.assertNotIn("memset(", text)
-        self.assertIn("prm = (void *)prm_storage;", text)
-        self.assertIn("NULL candidate for prm is not used", text)
-        self.assertNotIn("prm = NULL;", text)
+        self.assertIn("prm = NULL;", text)
+        self.assertNotIn("prm = (void *)prm_storage;", text)
         self.assertNotIn("gbl_input prm_storage", text)
 
 

@@ -16,17 +16,11 @@ def classify_test_execution(
     state = _canonical_outcome(str(getattr(report, "status", "error")))
     green = _is_green(report) if state is RunOutcome.PASSED else False
     if state is RunOutcome.PASSED and not green:
-        state = RunOutcome.INCONCLUSIVE
+        state = RunOutcome.FAILED
     return state, green
 
 
 def _canonical_outcome(value: str) -> RunOutcome:
-    aliases = {
-        "not_run": RunOutcome.INCONCLUSIVE,
-        "timeout": RunOutcome.TIMED_OUT,
-    }
-    if value in aliases:
-        return aliases[value]
     try:
         return RunOutcome(value)
     except ValueError:

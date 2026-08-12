@@ -1,4 +1,4 @@
-import csv
+import copy
 import json
 import os
 import subprocess
@@ -23,7 +23,7 @@ from unit_test_runner.c_analyzer.global_access_analyzer import analyze_global_ac
 from unit_test_runner.c_analyzer.signature_extractor import extract_signature
 from unit_test_runner.c_analyzer.source_digest import build_source_digest
 from unit_test_runner.test_design.test_case_design_generator import generate_test_case_design
-from unit_test_runner.test_design.test_case_design_writer import write_test_case_design_report
+from unit_test_runner.test_design.test_case_models import TestCaseGenerationPolicy
 
 
 def run_module(*args):
@@ -74,6 +74,17 @@ class TestCaseDesignGenerationTests(unittest.TestCase):
         all_stubs = [stub for case in cases for stub in case["stub_setups"]]
         self.assertTrue(any(stub["stub_name"] == "CheckLimit" and stub["setup_kind"] == "return_value" for stub in all_stubs))
         self.assertTrue(any(stub["setup_kind"] == "call_count_observation" for stub in all_stubs))
+        for case in cases:
+            return_stub_names = [
+                stub["stub_name"]
+                for stub in case["stub_setups"]
+                if stub["setup_kind"] == "return_value"
+            ]
+            self.assertEqual(
+                len(return_stub_names),
+                len(set(return_stub_names)),
+                case["test_case_id"],
+            )
 
         observations = [observation for case in cases for observation in case["expected_observations"]]
         self.assertTrue(any(observation["observation_kind"] == "return_value" and observation["expected_expression"] == "TBD_EXPECTED_RETURN" for observation in observations))
@@ -97,10 +108,94 @@ class TestCaseDesignGenerationTests(unittest.TestCase):
         unresolved_kinds = {item["item_kind"] for item in payload["unresolved_items"]}
         self.assertIn("expected_return_unknown", unresolved_kinds)
 
-    def test_legacy_writer_is_disabled_in_favor_of_canonical_test_spec(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            with self.assertRaises(ValueError):
-                write_test_case_design_report(Path(temp_dir), self.report)
+    def test_generator_uses_stable_semantic_ids_when_coverage_order_changes(self):
+        signature = {
+            "source": {"path": "src/control.c", "sha256": "a" * 64},
+            "function": {"name": "Control_Update", "parameters": []},
+        }
+        coverage_items = [
+            {
+                "coverage_id": "COV_BRANCH_TRUE",
+                "coverage_type": "branch_true",
+                "target_id": "BRANCH_SENSOR",
+                "purpose": "sensor is valid",
+                "condition_value": "true",
+                "confidence": "high",
+            },
+            {
+                "coverage_id": "COV_RETURN_ERROR",
+                "coverage_type": "return_path",
+                "target_id": "RETURN_ERROR",
+                "purpose": "error return",
+                "condition_value": "-1",
+                "confidence": "high",
+            },
+        ]
+        boundary = {
+            "input_candidates": [
+                {
+                    "candidate_id": "CAND_SENSOR",
+                    "target_name": "sensor",
+                    "target_kind": "parameter",
+                    "value_expression": "1",
+                    "value_kind": "boundary_at",
+                    "related_coverage_ids": ["COV_BRANCH_TRUE"],
+                    "purpose": "valid sensor",
+                    "confidence": "high",
+                    "review_required": False,
+                },
+                {
+                    "candidate_id": "CAND_ERROR",
+                    "target_name": "sensor",
+                    "target_kind": "parameter",
+                    "value_expression": "-1",
+                    "value_kind": "boundary_below",
+                    "related_coverage_ids": ["COV_RETURN_ERROR"],
+                    "purpose": "error sensor",
+                    "confidence": "high",
+                    "review_required": False,
+                },
+            ],
+            "state_candidates": [],
+            "stub_return_candidates": [],
+        }
+        boundary["input_candidates"].append(copy.deepcopy(boundary["input_candidates"][0]))
+        policy = TestCaseGenerationPolicy(max_cases_per_coverage_item=0)
+
+        def generate(items):
+            return generate_test_case_design(
+                signature,
+                {"global_accesses": []},
+                {"calls": []},
+                {"coverage_items": items},
+                boundary,
+                policy=policy,
+            ).to_dict()
+
+        first = generate(coverage_items)
+        second = generate(list(reversed(copy.deepcopy(coverage_items))))
+        first_case_ids = {
+            item["coverage_links"][0]["coverage_id"]: item["test_case_id"]
+            for item in first["test_cases"]
+        }
+        second_case_ids = {
+            item["coverage_links"][0]["coverage_id"]: item["test_case_id"]
+            for item in second["test_cases"]
+        }
+        first_candidate_ids = {
+            item["candidate_links"][0]: item["test_case_id"]
+            for item in first["additional_case_candidates"]
+        }
+        second_candidate_ids = {
+            item["candidate_links"][0]: item["test_case_id"]
+            for item in second["additional_case_candidates"]
+        }
+
+        self.assertEqual(first_case_ids, second_case_ids)
+        self.assertEqual(first_candidate_ids, second_candidate_ids)
+        self.assertEqual(len(first_case_ids), len(set(first_case_ids.values())))
+        self.assertEqual(len(first_candidate_ids), len(set(first_candidate_ids.values())))
+        self.assertEqual(2, len(first["additional_case_candidates"]))
 
     def test_analyze_function_generates_test_case_design_artifacts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -126,160 +221,16 @@ class TestCaseDesignGenerationTests(unittest.TestCase):
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             result = json.loads(completed.stdout)
-            self.assertEqual("passed", result["data"]["outcome"])
+            self.assertEqual("passed", result["outcome"])
             reports = out_dir / "reports"
             for filename in ["test_spec.json", "test_spec.md", "test_spec.csv"]:
                 self.assertTrue((reports / filename).exists(), filename)
             design = json.loads((reports / "test_spec.json").read_text(encoding="utf-8"))
-            self.assertEqual("1.1.0", design["schema_version"])
+            self.assertEqual("1.0.0", design["schema_version"])
             self.assertTrue(design["data"]["additional_case_candidates"])
             dossier = json.loads((reports / "function_dossier.json").read_text(encoding="utf-8"))
-            self.assertIn("test_spec", dossier)
-
-    def test_generate_test_design_cli_supports_all_and_explicit_report_inputs(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            out_dir = Path(temp_dir) / "Control_Update"
-            analyze = run_module(
-                "--json",
-                "analyze-function",
-                "--workspace",
-                str(VC6_FIXTURE_ROOT),
-                "--dsw",
-                str(VC6_FIXTURE_ROOT / "Product.dsw"),
-                "--source",
-                "src/control.c",
-                "--function",
-                "Control_Update",
-                "--configuration",
-                "Win32 Debug",
-                "--project",
-                "Control",
-                "--out",
-                str(out_dir),
-            )
-            self.assertEqual(0, analyze.returncode, analyze.stderr)
-            reports = out_dir / "reports"
-
-            all_out = Path(temp_dir) / "design-all"
-            from_dossier = run_module(
-                "--json",
-                "generate-test-design",
-                "--dossier",
-                str(reports / "function_dossier.json"),
-                "--format",
-                "all",
-                "--out",
-                str(all_out),
-            )
-            self.assertEqual(0, from_dossier.returncode, from_dossier.stderr)
-            payload = json.loads(from_dossier.stdout)
-            self.assertEqual("passed", payload["data"]["outcome"])
-            design_details = payload["data"]["details"]["test_spec"]
-            self.assertTrue(Path(design_details["json"]).exists())
-            self.assertTrue(Path(design_details["markdown"]).exists())
-            self.assertTrue(Path(design_details["csv"]).exists())
-            self.assertEqual(
-                {"test_spec.md", "test_spec.csv"},
-                {Path(artifact["path"]).name for artifact in payload["data"]["artifacts"]},
-            )
-
-            explicit_json = reports / "test_spec.json"
-            explicit = run_module(
-                "--json",
-                "generate-test-design",
-                "--function-signature",
-                str(reports / "function_signature.json"),
-                "--global-access",
-                str(reports / "global_access.json"),
-                "--call-report",
-                str(reports / "call_report.json"),
-                "--coverage-design",
-                str(reports / "coverage_design.json"),
-                "--boundary-candidates",
-                str(reports / "boundary_equivalence_candidates.json"),
-                "--format",
-                "json",
-                "--out",
-                str(explicit_json),
-            )
-            self.assertEqual(0, explicit.returncode, explicit.stderr)
-            explicit_payload = json.loads(explicit.stdout)
-            self.assertEqual(str(explicit_json.resolve()), explicit_payload["data"]["details"]["test_spec"])
-            self.assertEqual("1.1.0", json.loads(explicit_json.read_text(encoding="utf-8"))["schema_version"])
-
-    def test_generate_test_design_from_finalized_dossier_renders_existing_reviewed_design(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            out_dir = Path(temp_dir) / "Control_Update"
-            analyze = run_module(
-                "--json",
-                "analyze-function",
-                "--workspace",
-                str(VC6_FIXTURE_ROOT),
-                "--dsw",
-                str(VC6_FIXTURE_ROOT / "Product.dsw"),
-                "--source",
-                "src/control.c",
-                "--function",
-                "Control_Update",
-                "--configuration",
-                "Win32 Debug",
-                "--project",
-                "Control",
-                "--out",
-                str(out_dir),
-                "--finalize-dossier",
-            )
-            self.assertEqual(0, analyze.returncode, analyze.stderr)
-            reports = out_dir / "reports"
-            design_path = reports / "test_spec.json"
-            reviewed_design = json.loads(design_path.read_text(encoding="utf-8"))
-            case = reviewed_design["data"]["additional_case_candidates"][0]
-            patch = Path(temp_dir) / "patch.json"
-            patch.write_text(
-                json.dumps(
-                    {
-                        "operations": [
-                            {
-                                "op": "replace",
-                                "case_id": case["test_case_id"],
-                                "path": "/expected_observations/0/expected_expression",
-                                "value": "REVIEWED_EXPECTED_RETURN",
-                            }
-                        ]
-                    }
-                ),
-                encoding="utf-8",
-            )
-            updated = run_module(
-                "--json", "update-test-spec", "--workspace", str(out_dir),
-                "--patch", str(patch), "--expected-revision", "1",
-            )
-            self.assertEqual(0, updated.returncode, updated.stderr)
-
-            rendered_out = Path(temp_dir) / "rendered-design"
-            rendered = run_module(
-                "--json",
-                "generate-test-design",
-                "--dossier",
-                str(reports / "function_dossier.json"),
-                "--format",
-                "all",
-                "--out",
-                str(rendered_out),
-            )
-
-            self.assertEqual(0, rendered.returncode, rendered.stderr)
-            payload = json.loads(rendered.stdout)
-            self.assertEqual("passed", payload["data"]["outcome"])
-            with (rendered_out / "test_spec.csv").open(encoding="utf-8-sig", newline="") as handle:
-                rows = list(csv.DictReader(handle))
-            self.assertTrue(rows)
-            self.assertIn("REVIEWED_EXPECTED_RETURN", rows[0]["case_json"])
-            rendered_json = json.loads(design_path.read_text(encoding="utf-8"))
-            self.assertEqual(
-                "REVIEWED_EXPECTED_RETURN",
-                rendered_json["data"]["additional_case_candidates"][0]["expected_observations"][0]["expected_expression"],
-            )
+            self.assertEqual("function_dossier", dossier["artifact_kind"])
+            self.assertEqual(design["subject"], dossier["subject"])
 
 
 if __name__ == "__main__":

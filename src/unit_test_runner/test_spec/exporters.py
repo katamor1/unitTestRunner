@@ -10,8 +10,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-from unit_test_runner.contracts import ContractMode
-
 from .models import TestSpec
 from .path_safety import (
     assert_no_reparse_components,
@@ -80,7 +78,6 @@ def export_test_spec_views(
         )
     snapshot = load_test_spec_snapshot(
         canonical_path,
-        mode=ContractMode.STRICT,
     )
     if canonical_json_bytes(spec) != canonical_json_bytes(snapshot.spec):
         raise ValueError(
@@ -189,7 +186,6 @@ def _export_snapshot_views(
         with _exclusive_lock(lock_path):
             current = load_test_spec_snapshot(
                 canonical_path,
-                mode=ContractMode.STRICT,
             )
             if current.sha256 != snapshot.sha256:
                 if require_current:

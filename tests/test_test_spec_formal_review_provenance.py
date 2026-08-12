@@ -9,10 +9,7 @@ import time
 import unittest
 from pathlib import Path
 
-from unit_test_runner.dossier import (
-    analyze_function_workflow,
-    generate_harness_skeleton_from_reports,
-)
+from unit_test_runner.dossier import analyze_function_workflow
 from unit_test_runner.dossier.workflow import load_test_spec_for_consumer
 from unit_test_runner.test_spec import signature_sha256
 
@@ -363,43 +360,6 @@ class TestSpecFormalReviewProvenanceTests(unittest.TestCase):
                         workspace / "reports" / "test_spec.json"
                     )
 
-    def test_source_parent_symlink_is_rejected_before_harness_output(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            workspace = root / "analysis"
-            canonical = analyze(workspace)
-            linked_project = root / "linked-project"
-            linked_project.mkdir()
-            try:
-                os.symlink(
-                    FIXTURE / "src",
-                    linked_project / "src",
-                    target_is_directory=True,
-                )
-            except OSError as error:
-                self.skipTest(f"symlink creation unavailable: {error}")
-            request_path = workspace / "input" / "request.json"
-            request = json.loads(request_path.read_text(encoding="utf-8"))
-            request["workspace"] = linked_project.as_posix()
-            request_path.write_text(
-                json.dumps(request, indent=2, ensure_ascii=False) + "\n",
-                encoding="utf-8",
-            )
-            reports = workspace / "reports"
-            out = root / "unsafe-source-harness"
-
-            with self.assertRaises(ValueError):
-                generate_harness_skeleton_from_reports(
-                    reports / "function_signature.json",
-                    reports / "global_access.json",
-                    reports / "call_report.json",
-                    canonical,
-                    out,
-                    dependency_policy_path=reports / "dependency_policy.json",
-                )
-
-            self.assertFalse(out.exists())
-
     def test_reanalysis_provenance_parent_symlink_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir) / "analysis"
@@ -553,73 +513,6 @@ class TestSpecFormalReviewProvenanceTests(unittest.TestCase):
 
                 with self.assertRaises(ValueError):
                     load_test_spec_for_consumer(canonical)
-
-    def test_cross_workspace_harness_inputs_are_rejected_before_output(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            update = root / "update"
-            reset = root / "reset"
-            update_spec = analyze(update)
-            reset_spec = analyze(reset, "Control_Reset")
-            self.assertTrue(update_spec.is_file())
-            out = root / "mixed-harness"
-
-            with self.assertRaises(ValueError):
-                generate_harness_skeleton_from_reports(
-                    update / "reports" / "function_signature.json",
-                    update / "reports" / "global_access.json",
-                    update / "reports" / "call_report.json",
-                    reset_spec,
-                    out,
-                    dependency_policy_path=update
-                    / "reports"
-                    / "dependency_policy.json",
-                )
-
-            self.assertFalse(out.exists())
-
-    def test_alternate_supplied_report_path_is_rejected_before_output(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            workspace = Path(temp_dir) / "workspace"
-            canonical = analyze(workspace)
-            reports = workspace / "reports"
-            alternate_call = reports / "call_report_copy.json"
-            shutil.copyfile(reports / "call_report.json", alternate_call)
-            out = Path(temp_dir) / "alternate-harness"
-
-            with self.assertRaises(ValueError):
-                generate_harness_skeleton_from_reports(
-                    reports / "function_signature.json",
-                    reports / "global_access.json",
-                    alternate_call,
-                    canonical,
-                    out,
-                    dependency_policy_path=reports / "dependency_policy.json",
-                )
-
-            self.assertFalse(out.exists())
-
-    def test_supplied_report_hash_mismatch_is_rejected_before_output(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            workspace = Path(temp_dir) / "workspace"
-            canonical = analyze(workspace)
-            reports = workspace / "reports"
-            call_report = reports / "call_report.json"
-            call_report.write_bytes(call_report.read_bytes() + b" \n")
-            out = Path(temp_dir) / "stale-harness"
-
-            with self.assertRaises(ValueError):
-                generate_harness_skeleton_from_reports(
-                    reports / "function_signature.json",
-                    reports / "global_access.json",
-                    call_report,
-                    canonical,
-                    out,
-                    dependency_policy_path=reports / "dependency_policy.json",
-                )
-
-            self.assertFalse(out.exists())
-
 
 if __name__ == "__main__":
     unittest.main()

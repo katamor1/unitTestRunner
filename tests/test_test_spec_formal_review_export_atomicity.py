@@ -5,7 +5,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch as mock_patch
 
-from unit_test_runner.contracts import ContractMode
 from unit_test_runner.test_spec import (
     TestSpec,
     TestSpecViewDurabilityError,
@@ -101,7 +100,7 @@ class TestSpecFormalReviewExportAtomicityTests(unittest.TestCase):
             )
             views["csv"].write_bytes(mismatched_csv)
             before = (views["markdown"].read_bytes(), mismatched_csv)
-            candidate = load_test_spec(canonical, mode=ContractMode.STRICT)
+            candidate = load_test_spec(canonical)
             candidate.test_cases[0]["title"] = "revision two"
             new_snapshot, _artifact = save_test_spec_snapshot(
                 canonical,
@@ -142,7 +141,7 @@ class TestSpecFormalReviewExportAtomicityTests(unittest.TestCase):
                 canonical.parent,
                 canonical_path=canonical,
             )
-            candidate = load_test_spec(canonical, mode=ContractMode.STRICT)
+            candidate = load_test_spec(canonical)
             candidate.test_cases[0]["title"] = "revision two"
             new_snapshot, _artifact = save_test_spec_snapshot(
                 canonical,
@@ -198,7 +197,7 @@ class TestSpecFormalReviewExportAtomicityTests(unittest.TestCase):
             )
             old_markdown = old_views["markdown"].read_bytes()
             old_csv = old_views["csv"].read_bytes()
-            candidate = load_test_spec(canonical, mode=ContractMode.STRICT)
+            candidate = load_test_spec(canonical)
             candidate.test_cases[0]["title"] = "revision two"
             new_snapshot, _artifact = save_test_spec_snapshot(
                 canonical,
@@ -271,7 +270,7 @@ class TestSpecFormalReviewExportAtomicityTests(unittest.TestCase):
                 expected_revision=None,
                 current_context=context,
             )
-            candidate = load_test_spec(canonical, mode=ContractMode.STRICT)
+            candidate = load_test_spec(canonical)
             candidate.test_cases[0]["title"] = "writer-b"
             writer_b, _artifact = save_test_spec_snapshot(
                 canonical,

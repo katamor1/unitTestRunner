@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unit-test-runner.local/schemas/reanalysis_report.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_kind", "subject", "data"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "artifact_kind": {"const": "reanalysis_report"},
+    "subject": {"$ref": "common.schema.json#/$defs/subject"},
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change_impact", "test_case_reconciliation", "regression_selection"],
+      "properties": {
+        "change_impact": {"$ref": "#/$defs/changeImpact"},
+        "test_case_reconciliation": {"$ref": "#/$defs/reconciliation"},
+        "regression_selection": {"$ref": "#/$defs/regressionSelection"},
+        "candidate": {"$ref": "#/$defs/candidate"}
+      }
+    }
+  },
+  "$defs": {
+    "nullableText": {"type": ["string", "null"]},
+    "stringArray": {"type": "array", "items": {"type": "string"}},
+    "warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "message": {"type": "string"},
+        "related_test_case_id": {"type": "string", "minLength": 1},
+        "related_artifact": {"type": "string", "minLength": 1}
+      }
+    },
+    "snapshotArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_kind", "path", "sha256", "schema_version", "exists"],
+      "properties": {
+        "artifact_kind": {"type": "string", "minLength": 1},
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {
+          "oneOf": [
+            {"$ref": "common.schema.json#/$defs/sha256"},
+            {"type": "null"}
+          ]
+        },
+        "schema_version": {"$ref": "#/$defs/nullableText"},
+        "exists": {"type": "boolean"}
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot_id", "function_name", "source_path", "source_sha256",
+        "build_context_hash", "created_at", "artifacts"
+      ],
+      "properties": {
+        "snapshot_id": {"type": "string", "minLength": 1},
+        "function_name": {"type": "string", "minLength": 1},
+        "source_path": {"$ref": "#/$defs/nullableText"},
+        "source_sha256": {
+          "oneOf": [
+            {"$ref": "common.schema.json#/$defs/sha256"},
+            {"type": "null"}
+          ]
+        },
+        "build_context_hash": {
+          "oneOf": [
+            {"$ref": "common.schema.json#/$defs/sha256"},
+            {"type": "null"}
+          ]
+        },
+        "created_at": {"$ref": "#/$defs/nullableText"},
+        "artifacts": {
+          "type": "object",
+          "additionalProperties": {"$ref": "#/$defs/snapshotArtifact"}
+        }
+      }
+    },
+    "sourceChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change_kind", "description", "old_value", "new_value", "impact_level", "evidence"],
+      "properties": {
+        "change_kind": {"type": "string", "minLength": 1},
+        "description": {"type": "string"},
+        "old_value": {"$ref": "#/$defs/nullableText"},
+        "new_value": {"$ref": "#/$defs/nullableText"},
+        "impact_level": {"type": "string", "minLength": 1},
+        "evidence": {"type": "string"}
+      }
+    },
+    "interfaceChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "change_kind", "target_name", "old_signature", "new_signature",
+        "impact_level", "affected_test_case_ids", "suggested_action"
+      ],
+      "properties": {
+        "change_kind": {"type": "string", "minLength": 1},
+        "target_name": {"type": "string", "minLength": 1},
+        "old_signature": {"$ref": "#/$defs/nullableText"},
+        "new_signature": {"$ref": "#/$defs/nullableText"},
+        "impact_level": {"type": "string", "minLength": 1},
+        "affected_test_case_ids": {"$ref": "#/$defs/stringArray"},
+        "suggested_action": {"type": "string"}
+      }
+    },
+    "dependencyChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "change_kind", "name", "old_kind", "new_kind", "impact_level",
+        "affected_test_case_ids", "suggested_action"
+      ],
+      "properties": {
+        "change_kind": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "old_kind": {"$ref": "#/$defs/nullableText"},
+        "new_kind": {"$ref": "#/$defs/nullableText"},
+        "impact_level": {"type": "string", "minLength": 1},
+        "affected_test_case_ids": {"$ref": "#/$defs/stringArray"},
+        "suggested_action": {"type": "string"}
+      }
+    },
+    "coverageChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "change_kind", "old_coverage_id", "new_coverage_id", "old_condition",
+        "new_condition", "similarity", "affected_test_case_ids", "suggested_action"
+      ],
+      "properties": {
+        "change_kind": {"type": "string", "minLength": 1},
+        "old_coverage_id": {"$ref": "#/$defs/nullableText"},
+        "new_coverage_id": {"$ref": "#/$defs/nullableText"},
+        "old_condition": {"$ref": "#/$defs/nullableText"},
+        "new_condition": {"$ref": "#/$defs/nullableText"},
+        "similarity": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "affected_test_case_ids": {"$ref": "#/$defs/stringArray"},
+        "suggested_action": {"type": "string"}
+      }
+    },
+    "designImpact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "test_case_id", "impact_kind", "old_status", "new_reuse_status",
+        "reason", "required_updates", "review_required", "confidence"
+      ],
+      "properties": {
+        "test_case_id": {"type": "string", "minLength": 1},
+        "impact_kind": {"type": "string", "minLength": 1},
+        "old_status": {"type": "string"},
+        "new_reuse_status": {"type": "string"},
+        "reason": {"type": "string"},
+        "required_updates": {"$ref": "#/$defs/stringArray"},
+        "review_required": {"type": "boolean"},
+        "confidence": {"type": "string", "minLength": 1}
+      }
+    },
+    "recommendation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recommendation_kind", "reason", "selected_count", "blocked_count", "new_required_count", "manual_review_count"],
+      "properties": {
+        "recommendation_kind": {"type": "string", "minLength": 1},
+        "reason": {"type": "string"},
+        "selected_count": {"type": "integer", "minimum": 0},
+        "blocked_count": {"type": "integer", "minimum": 0},
+        "new_required_count": {"type": "integer", "minimum": 0},
+        "manual_review_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "changeImpact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "previous_snapshot", "current_snapshot", "source_changes",
+        "interface_changes", "dependency_changes", "coverage_changes",
+        "test_design_impacts", "regression_recommendation", "warnings"
+      ],
+      "properties": {
+        "status": {"type": "string", "minLength": 1},
+        "previous_snapshot": {"$ref": "#/$defs/snapshot"},
+        "current_snapshot": {"$ref": "#/$defs/snapshot"},
+        "source_changes": {"type": "array", "items": {"$ref": "#/$defs/sourceChange"}},
+        "interface_changes": {"type": "array", "items": {"$ref": "#/$defs/interfaceChange"}},
+        "dependency_changes": {"type": "array", "items": {"$ref": "#/$defs/dependencyChange"}},
+        "coverage_changes": {"type": "array", "items": {"$ref": "#/$defs/coverageChange"}},
+        "test_design_impacts": {"type": "array", "items": {"$ref": "#/$defs/designImpact"}},
+        "regression_recommendation": {
+          "oneOf": [
+            {"$ref": "#/$defs/recommendation"},
+            {"type": "null"}
+          ]
+        },
+        "warnings": {"type": "array", "items": {"$ref": "#/$defs/warning"}}
+      }
+    },
+    "reconciledCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "test_case_id", "reuse_status", "previous_coverage_ids", "current_coverage_ids",
+        "previous_candidate_ids", "current_candidate_ids", "preserved_fields",
+        "updated_fields", "review_required_fields", "reason", "confidence"
+      ],
+      "properties": {
+        "test_case_id": {"type": "string", "minLength": 1},
+        "reuse_status": {"type": "string", "minLength": 1},
+        "previous_coverage_ids": {"$ref": "#/$defs/stringArray"},
+        "current_coverage_ids": {"$ref": "#/$defs/stringArray"},
+        "previous_candidate_ids": {"$ref": "#/$defs/stringArray"},
+        "current_candidate_ids": {"$ref": "#/$defs/stringArray"},
+        "preserved_fields": {"$ref": "#/$defs/stringArray"},
+        "updated_fields": {"$ref": "#/$defs/stringArray"},
+        "review_required_fields": {"$ref": "#/$defs/stringArray"},
+        "reason": {"type": "string"},
+        "confidence": {"type": "string", "minLength": 1}
+      }
+    },
+    "mergeItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["item_id", "test_case_id", "field_name", "previous_value", "proposed_value", "reason", "suggested_action"],
+      "properties": {
+        "item_id": {"type": "string", "minLength": 1},
+        "test_case_id": {"type": "string", "minLength": 1},
+        "field_name": {"type": "string", "minLength": 1},
+        "previous_value": {"$ref": "#/$defs/nullableText"},
+        "proposed_value": {"$ref": "#/$defs/nullableText"},
+        "reason": {"type": "string"},
+        "suggested_action": {"type": "string"}
+      }
+    },
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "preserved_test_cases", "updated_test_cases", "obsolete_test_cases",
+        "blocked_test_cases", "new_test_case_candidates", "manual_merge_items", "warnings"
+      ],
+      "properties": {
+        "status": {"type": "string", "minLength": 1},
+        "preserved_test_cases": {"type": "array", "items": {"$ref": "#/$defs/reconciledCase"}},
+        "updated_test_cases": {"type": "array", "items": {"$ref": "#/$defs/reconciledCase"}},
+        "obsolete_test_cases": {"type": "array", "items": {"$ref": "#/$defs/reconciledCase"}},
+        "blocked_test_cases": {"type": "array", "items": {"$ref": "#/$defs/reconciledCase"}},
+        "new_test_case_candidates": {"type": "array", "items": {"$ref": "#/$defs/reconciledCase"}},
+        "manual_merge_items": {"type": "array", "items": {"$ref": "#/$defs/mergeItem"}},
+        "warnings": {"type": "array", "items": {"$ref": "#/$defs/warning"}}
+      }
+    },
+    "regressionCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["test_case_id", "selection_status", "priority", "reasons", "related_changes", "review_required"],
+      "properties": {
+        "test_case_id": {"type": "string", "minLength": 1},
+        "selection_status": {"type": "string", "minLength": 1},
+        "priority": {"type": "string", "minLength": 1},
+        "reasons": {"$ref": "#/$defs/stringArray"},
+        "related_changes": {"$ref": "#/$defs/stringArray"},
+        "review_required": {"type": "boolean"}
+      }
+    },
+    "regressionSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "selected_test_cases", "skipped_test_cases", "new_required_test_cases",
+        "blocked_test_cases", "selection_reason_summary", "warnings"
+      ],
+      "properties": {
+        "status": {"type": "string", "minLength": 1},
+        "selected_test_cases": {"type": "array", "items": {"$ref": "#/$defs/regressionCase"}},
+        "skipped_test_cases": {"type": "array", "items": {"$ref": "#/$defs/regressionCase"}},
+        "new_required_test_cases": {"type": "array", "items": {"$ref": "#/$defs/regressionCase"}},
+        "blocked_test_cases": {"type": "array", "items": {"$ref": "#/$defs/regressionCase"}},
+        "selection_reason_summary": {"type": "string"},
+        "warnings": {"type": "array", "items": {"$ref": "#/$defs/warning"}}
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "base_revision", "conflict_count"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*\\\\).+$"},
+        "sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "base_revision": {"type": "integer", "minimum": 0},
+        "conflict_count": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

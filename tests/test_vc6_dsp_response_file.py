@@ -8,8 +8,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
-from unit_test_runner.vc6.debug_workspace_response import _strip_include_options, vc6_cpp_options_path
-from unit_test_runner.vc6.debug_workspace_writer import write_vc6_debug_project
+from unit_test_runner.vc6.debug_workspace_writer import (
+    _strip_include_options,
+    vc6_cpp_options_path,
+    write_vc6_debug_project,
+)
 
 
 class Vc6DspResponseFileTests(unittest.TestCase):

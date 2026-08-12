@@ -1,7 +1,9 @@
 # unitTestRunner 計画レビュー: 現状評価と今後の展望
 
+> **Historical / superseded:** 2026-07-04時点の旧計画レビューです。旧artifact・旧CLIを現行仕様として使用しないでください。現在の完了条件は [v0.1 redesign roadmap](../v01-redesign-roadmap.md) に限定されます。
+
 作成日: 2026-07-04  
-状態: v0.1
+状態: Historical
 対象リポジトリ: `katamor1/unitTestRunner`  
 対象文書: `docs/implementation/step02` から `step16` まで、および関連ADR・設計書
 

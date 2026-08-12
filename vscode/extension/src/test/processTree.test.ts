@@ -4,7 +4,7 @@ import { it } from 'node:test';
 import * as os from 'os';
 import * as path from 'path';
 
-import { runCliInvocation } from '../cli/cliRunner';
+import { CliInvocationBusyError, runCliInvocation } from '../cli/cliRunner';
 
 function processExists(pid: number): boolean {
   try {
@@ -52,6 +52,15 @@ it('terminates the CLI process tree before returning a timeout result', async ()
     const recorded = JSON.parse(fs.readFileSync(pidFile, 'utf-8')) as { parent: number; child: number };
     pids = [recorded.parent, recorded.child];
     assert.equal(await waitForProcessesToExit(pids), true, `processes still running after timeout: ${pids.filter(processExists).join(', ')}`);
+    const reused = await runCliInvocation({
+      command: process.execPath,
+      args: ['-e', "process.stdout.write('reused')"],
+      workingDirectory: process.cwd(),
+      displayCommand: 'node reused-after-timeout',
+      timeoutSeconds: 2,
+      requiresConfirmation: false,
+    });
+    assert.equal(reused.stdout, 'reused');
   } finally {
     for (const pid of pids) {
       if (processExists(pid)) {
@@ -64,4 +73,59 @@ it('terminates the CLI process tree before returning a timeout result', async ()
     }
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
   }
+});
+
+it('rejects a second invocation before spawn and releases the gate after completion', async () => {
+  const first = runCliInvocation({
+    command: process.execPath,
+    args: ['-e', 'setTimeout(() => {}, 150)'],
+    workingDirectory: process.cwd(),
+    displayCommand: 'node first',
+    timeoutSeconds: 2,
+    requiresConfirmation: false,
+  });
+
+  await assert.rejects(
+    runCliInvocation({
+      command: process.execPath,
+      args: ['-e', "process.stdout.write('second')"],
+      workingDirectory: process.cwd(),
+      displayCommand: 'node second',
+      timeoutSeconds: 2,
+      requiresConfirmation: false,
+    }),
+    CliInvocationBusyError,
+  );
+  await first;
+
+  const third = await runCliInvocation({
+    command: process.execPath,
+    args: ['-e', "process.stdout.write('third')"],
+    workingDirectory: process.cwd(),
+    displayCommand: 'node third',
+    timeoutSeconds: 2,
+    requiresConfirmation: false,
+  });
+  assert.equal(third.stdout, 'third');
+});
+
+it('releases the single-flight gate after a spawn error', async () => {
+  await assert.rejects(runCliInvocation({
+    command: path.join(os.tmpdir(), 'unit-test-runner-command-does-not-exist.exe'),
+    args: [],
+    workingDirectory: process.cwd(),
+    displayCommand: 'missing-command',
+    timeoutSeconds: 2,
+    requiresConfirmation: false,
+  }));
+
+  const result = await runCliInvocation({
+    command: process.execPath,
+    args: ['-e', "process.stdout.write('after-error')"],
+    workingDirectory: process.cwd(),
+    displayCommand: 'node after-error',
+    timeoutSeconds: 2,
+    requiresConfirmation: false,
+  });
+  assert.equal(result.stdout, 'after-error');
 });

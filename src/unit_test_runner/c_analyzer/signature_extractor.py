@@ -15,6 +15,7 @@ from .analysis_common import (
 )
 from .signature_models import FunctionSignature, ParameterInfo, SignatureWarning, TypeInfo
 from .source_models import SourceDigest
+from .type_classifier import classify_c_type
 
 
 def extract_signature(digest: SourceDigest, function_location: object) -> FunctionSignature:
@@ -38,6 +39,7 @@ def extract_signature(digest: SourceDigest, function_location: object) -> Functi
     style = "knr" if knr_block else "ansi"
     storage, calling, return_type = _parse_return_type(return_side, warnings, candidate.header_range.start.line)
     parameters = _parse_parameters(params_raw, style, knr_block, warnings)
+    _apply_shared_type_classification(digest, return_type, parameters, warnings)
     status = "parsed" if not any(warning.code in {"malformed_parameter_list", "signature_not_found"} for warning in warnings) else "partial"
     confidence = "medium" if style == "knr" or warnings else "high"
     return FunctionSignature(
@@ -176,8 +178,6 @@ def classify_type(
     is_union = bool(type_words[:1] == ["union"])
     is_enum = bool(type_words[:1] == ["enum"])
     is_typedef_like = bool(base_type and not is_struct and not is_union and not is_enum and not all(word in BASIC_TYPE_WORDS for word in type_words))
-    if is_typedef_like:
-        warnings.append(SignatureWarning("typedef_unresolved", f"Typedef-like type was not resolved: {base_type}", text=raw))
     return TypeInfo(
         raw=raw,
         normalized=normalized,
@@ -195,6 +195,27 @@ def classify_type(
         array_dimensions=array_dimensions,
         confidence=confidence,
     )
+
+
+def _apply_shared_type_classification(
+    digest: SourceDigest,
+    return_type: TypeInfo,
+    parameters: list[ParameterInfo],
+    warnings: list[SignatureWarning],
+) -> None:
+    defining_files = [digest.source.path]
+    for include in digest.includes:
+        for candidate in include.resolved_candidates:
+            if candidate.is_file() and candidate not in defining_files:
+                defining_files.append(candidate)
+    values = [("return", return_type), *[(item.name or f"arg{item.index}", item.type_info) for item in parameters]]
+    for name, type_info in values:
+        if not type_info.raw or type_info.raw in {"void", "..."}:
+            continue
+        classification = classify_c_type(type_info.raw, defining_files)
+        if classification.kind == "unresolved":
+            type_info.confidence = "low"
+            warnings.append(SignatureWarning("type_unresolved", f"Type requires review for {name}: {type_info.raw}", text=type_info.raw))
 
 
 def _last_identifier(raw: str) -> str | None:

@@ -13,6 +13,7 @@ from unit_test_runner.c_analyzer.object_definition_finder import find_file_scope
 from unit_test_runner.c_analyzer.masker import mask_source_text
 from unit_test_runner.c_analyzer.signature_extractor import extract_signature
 from unit_test_runner.c_analyzer.source_digest import build_source_digest
+from unit_test_runner.c_analyzer.type_classifier import classify_c_type
 
 from .models import (
     DependencyEvidence,
@@ -90,7 +91,7 @@ def analyze_dependency_policy(
         shared_globals = sorted(target_globals.intersection(callee_globals))
         external_link_calls = (
             _implementation_external_link_calls(root, implementation_source, callee)
-            if configured_mode != "stub" and signature.resolution in {"exact", "compatible_inferred"}
+            if configured_mode != "stub" and signature.resolution == "exact"
             else []
         )
         evidence = _dependency_evidence(
@@ -111,7 +112,7 @@ def analyze_dependency_policy(
             external_link_calls,
         )
         rewrite_sites = []
-        if target_kind in _SUPPORTED_DIRECT_KINDS and resolved_mode in {"real", "stub"} and signature.resolution in {"exact", "compatible_inferred"}:
+        if target_kind in _SUPPORTED_DIRECT_KINDS and resolved_mode in {"real", "stub"} and signature.resolution == "exact":
             rewrite_sites = [_rewrite_site(call, callee) for call in calls if _rewrite_site(call, callee) is not None]
         dependencies.append(
             DependencyPolicyEntry(
@@ -249,7 +250,7 @@ def _dependency_evidence(
     external_link_calls: list[str],
 ) -> list[DependencyEvidence]:
     result: list[DependencyEvidence] = []
-    if target_kind == "same_file_function":
+    if target_kind in {"same_file_function", "same_file_static_function"}:
         result.append(DependencyEvidence("same_source", f"{callee} is defined in the target source.", "call_report", 3))
     elif implementation_source is not None:
         result.append(DependencyEvidence("implementation_available", f"Implementation found at {implementation_source.as_posix()}.", "signature_resolver", 1))
@@ -302,6 +303,14 @@ def _resolve_dependency_mode(
     if configured_mode not in _VALID_DEPENDENCY_MODES:
         warnings.append(f"Unsupported configured_mode {configured_mode}; auto was used.")
         configured_mode = "auto"
+    if target_kind == "same_file_static_function":
+        if configured_mode == "stub":
+            return (
+                "review_required",
+                "review_required",
+                [*warnings, "A same-file static function cannot be replaced by the external dispatcher."],
+            )
+        return "real", "resolved", warnings
     if target_kind in _UNSUPPORTED_KINDS:
         return "review_required", "review_required", [*warnings, f"{target_kind} is outside the safe direct-call rewrite scope."]
     if signature_resolution == "review_required":
@@ -373,6 +382,12 @@ def _analyze_external_objects(
         declaration_header = _find_declaration_header(symbol, headers, root)
         definition_candidates = [_relative(path, root) for path in _find_object_definitions(symbol, sources)]
         resolved_mode, review_status, warnings = _resolve_object_mode(configured_mode, definition_candidates)
+        type_raw = str(declaration.get("type_raw") or "").strip()
+        type_sources = [*headers, *sources]
+        if classify_c_type(type_raw, type_sources).kind == "unresolved":
+            resolved_mode = "review_required"
+            review_status = "review_required"
+            warnings = [*warnings, f"External object type requires review: {type_raw or '<missing>'}."]
         definition_source = definition_candidates[0] if resolved_mode == "real" and len(definition_candidates) == 1 else None
         evidence = []
         if definition_source:
@@ -384,7 +399,7 @@ def _analyze_external_objects(
         result.append(
             ExternalObjectPolicyEntry(
                 symbol=symbol,
-                type_raw=str(declaration.get("type_raw") or "int"),
+                type_raw=type_raw,
                 configured_mode=configured_mode,
                 resolved_mode=resolved_mode,
                 review_status=review_status,

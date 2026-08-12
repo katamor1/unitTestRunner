@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unit-test-runner.local/schemas/test_run_report.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_kind", "subject", "data"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "artifact_kind": {"const": "test_run_report"},
+    "subject": {"$ref": "common.schema.json#/$defs/subject"},
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id", "outcome", "executed", "test_spec_sha256",
+        "requested_case_ids", "started_case_ids", "completed_case_ids",
+        "not_run_case_ids", "summary", "case_results", "warnings"
+      ],
+      "properties": {
+        "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+        "outcome": {"enum": ["planned", "passed", "failed", "blocked", "timed_out", "cancelled", "error"]},
+        "executed": {"type": "boolean"},
+        "test_spec_sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "requested_case_ids": {"$ref": "#/$defs/case_ids"},
+        "started_case_ids": {"$ref": "#/$defs/case_ids"},
+        "completed_case_ids": {"$ref": "#/$defs/case_ids"},
+        "not_run_case_ids": {"$ref": "#/$defs/case_ids"},
+        "summary": {"type": "object"},
+        "case_results": {"type": "array", "items": {"type": "object"}},
+        "warnings": {"type": "array", "items": {"type": "object"}}
+      }
+    }
+  },
+  "$defs": {
+    "case_ids": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    }
+  }
+}

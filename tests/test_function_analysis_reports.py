@@ -175,16 +175,19 @@ class FunctionAnalysisReportTests(unittest.TestCase):
                 "--project",
                 "Control",
                 "--phase",
-                "execution",
+                "harness",
                 "--out",
                 str(out_dir),
             )
 
             self.assertEqual(0, completed.returncode, completed.stderr)
             result = json.loads(completed.stdout)
-            self.assertEqual("cli_result", result["artifact_kind"])
-            self.assertEqual("passed", result["data"]["outcome"])
-            self.assertIn("dossier review", result["data"]["message"])
+            self.assertEqual(
+                {"command", "outcome", "message", "artifacts", "diagnostics"},
+                set(result),
+            )
+            self.assertEqual("passed", result["outcome"])
+            self.assertEqual("analyze-function", result["command"])
             reports = out_dir / "reports"
             for filename in [
                 "function_signature.json",
@@ -202,20 +205,8 @@ class FunctionAnalysisReportTests(unittest.TestCase):
                 "test_spec.csv",
                 "harness_skeleton_report.json",
                 "harness_skeleton_report.md",
-                "build_workspace_report.json",
-                "build_workspace_report.md",
-                "build_probe_report.json",
-                "build_probe_report.md",
-                "build_completion_plan.json",
-                "build_completion_plan.md",
-                "build_completion_iteration_report.json",
-                "build_completion_iteration_report.md",
-                "test_execution_report.json",
-                "test_execution_report.md",
-                "test_result.json",
-                "test_result.csv",
-                "evidence_manifest.json",
-                "evidence_package.md",
+                "function_dossier.json",
+                "function_dossier.md",
             ]:
                 self.assertTrue((reports / filename).exists(), filename)
                 if filename.endswith(".json"):
@@ -229,12 +220,6 @@ class FunctionAnalysisReportTests(unittest.TestCase):
                 "boundary_equivalence_candidates.md": "# 境界値・同値クラス候補レポート",
                 "test_spec.md": "# テスト仕様（生成ビュー）",
                 "harness_skeleton_report.md": "# ハーネスひな形レポート",
-                "build_workspace_report.md": "# ビルドワークスペースレポート",
-                "build_probe_report.md": "# ビルドプローブレポート",
-                "build_completion_plan.md": "# ビルド補完計画",
-                "build_completion_iteration_report.md": "# ビルド補完イテレーションレポート",
-                "test_execution_report.md": "# テスト実行レポート",
-                "evidence_package.md": "# 関数単体テストエビデンスパッケージ",
             }
             for filename, heading in japanese_headings.items():
                 markdown = (reports / filename).read_text(encoding="utf-8")
@@ -244,19 +229,14 @@ class FunctionAnalysisReportTests(unittest.TestCase):
                 self.assertFalse(markdown.startswith("# Build "), filename)
 
             dossier = json.loads((reports / "function_dossier.json").read_text(encoding="utf-8"))
-            self.assertIn("function_signature", dossier)
-            self.assertIn("global_access", dossier)
-            self.assertIn("call_report", dossier)
-            self.assertIn("coverage_design", dossier)
-            self.assertIn("boundary_equivalence_candidates", dossier)
-            self.assertIn("test_spec", dossier)
-            self.assertNotIn("test_case_design", dossier)
-            self.assertIn("harness_skeleton", dossier)
-            self.assertIn("build_workspace", dossier)
-            self.assertIn("build_probe", dossier)
-            self.assertIn("build_completion", dossier)
-            self.assertIn("test_execution", dossier)
-            self.assertIn("evidence", dossier)
+            self.assertEqual("1.0.0", dossier["schema_version"])
+            self.assertEqual("function_dossier", dossier["artifact_kind"])
+            self.assertEqual("Control_Update", dossier["subject"]["function"])
+            self.assertIn("build_context", dossier["data"])
+            self.assertIn("test_design", dossier["data"])
+            self.assertNotIn("build_completion", dossier["data"])
+            self.assertNotIn("test_execution", dossier["data"])
+            self.assertNotIn("evidence", dossier["data"])
 
 
 if __name__ == "__main__":

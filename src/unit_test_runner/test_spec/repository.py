@@ -7,21 +7,21 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Any, Callable, Mapping, TypeVar
 from uuid import uuid4
 
-from unit_test_runner.cli.artifacts import ProducedArtifact
+from unit_test_runner.cli.artifacts import ProducedArtifact, build_produced_artifact
 from unit_test_runner.contracts import (
     ArtifactKind,
-    ContractMode,
     ContractViolation,
-    migrate_payload,
-    validate_payload,
+    validate_artifact,
 )
-from unit_test_runner.contracts.registry import get_contract
 from unit_test_runner.path_utils import resolved_relative_to
+from unit_test_runner.workspace_artifacts import (
+    WorkspaceRegenerationRequired,
+    load_public_artifact,
+)
 
-from .migration import migrate_legacy_test_case_design
 from .models import (
     CurrentArtifactContext,
     TestSpec,
@@ -50,12 +50,10 @@ class TestSpecSnapshot:
 def load_test_spec(
     path: Path,
     *,
-    mode: ContractMode,
     current_context: CurrentArtifactContext | None = None,
 ) -> TestSpec:
     return load_test_spec_snapshot(
         path,
-        mode=mode,
         current_context=current_context,
     ).spec
 
@@ -63,21 +61,19 @@ def load_test_spec(
 def load_test_spec_snapshot(
     path: Path,
     *,
-    mode: ContractMode,
     current_context: CurrentArtifactContext | None = None,
 ) -> TestSpecSnapshot:
     path = Path(path)
-    if mode is ContractMode.STRICT:
-        try:
-            assert_safe_canonical_test_spec_path(path)
-        except ValueError as error:
-            raise TestSpecContractError(
-                (
-                    ContractViolation(
-                        "unsafe_canonical_path", "$", str(error), "blocking"
-                    ),
-                )
-            ) from error
+    try:
+        assert_safe_canonical_test_spec_path(path)
+    except ValueError as error:
+        raise TestSpecContractError(
+            (
+                ContractViolation(
+                    "unsafe_canonical_path", "$", str(error), "blocking"
+                ),
+            )
+        ) from error
     try:
         raw_bytes = path.read_bytes()
     except OSError as error:
@@ -86,7 +82,6 @@ def load_test_spec_snapshot(
         ) from error
     return _snapshot_from_bytes(
         raw_bytes,
-        mode=mode,
         current_context=current_context,
     )
 
@@ -94,12 +89,11 @@ def load_test_spec_snapshot(
 def _snapshot_from_bytes(
     raw_bytes: bytes,
     *,
-    mode: ContractMode,
     current_context: CurrentArtifactContext | None = None,
 ) -> TestSpecSnapshot:
     try:
-        decoded = json.loads(raw_bytes.decode("utf-8-sig"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        decoded = json.loads(raw_bytes.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as error:
         raise TestSpecContractError(
             (ContractViolation("parse_error", "$", str(error)),)
         ) from error
@@ -107,64 +101,27 @@ def _snapshot_from_bytes(
         raise TestSpecContractError(
             (ContractViolation("schema_error", "$", "Artifact root must be an object."),)
         )
-    declared_kind = decoded.get("artifact_kind")
-    if declared_kind == ArtifactKind.TEST_SPEC.value:
-        contract = get_contract(ArtifactKind.TEST_SPEC)
-        source_version = str(decoded.get("schema_version") or "")
-        if source_version == contract.current_version:
-            payload = decoded
-        elif (
-            mode is ContractMode.COMPATIBLE
-            and source_version in contract.compatible_source_versions
-        ):
-            try:
-                payload = migrate_payload(
-                    ArtifactKind.TEST_SPEC,
-                    decoded,
-                    target_version=contract.current_version,
-                )
-            except (TypeError, ValueError) as error:
-                raise TestSpecContractError(
-                    (ContractViolation("migration_error", "$", str(error)),)
-                ) from error
-        else:
-            raise TestSpecContractError(
-                (
-                    ContractViolation(
-                        "unsupported_version",
-                        "$.schema_version",
-                        "test_spec requires schema version "
-                        f"{contract.current_version}; received "
-                        f"{source_version or '<missing>'}.",
-                    ),
-                )
-            )
-        contract_violations = validate_payload(ArtifactKind.TEST_SPEC, payload)
-        if contract_violations:
-            raise TestSpecContractError(contract_violations)
-    elif declared_kind is not None:
+    source_version = decoded.get("schema_version")
+    if source_version != "1.0.0":
+        raise WorkspaceRegenerationRequired(
+            f"Workspace test_spec uses schema {source_version!r}; regenerate the workspace for v0.1."
+        )
+    if decoded.get("artifact_kind") != ArtifactKind.TEST_SPEC.value:
         raise TestSpecContractError(
             (
                 ContractViolation(
                     "artifact_kind_mismatch",
                     "$.artifact_kind",
-                    "Expected test_spec; received " + repr(declared_kind) + ".",
+                    "Expected test_spec; received "
+                    + repr(decoded.get("artifact_kind"))
+                    + ".",
                 ),
             )
         )
-    else:
-        if mode is ContractMode.STRICT:
-            raise TestSpecContractError(
-                (
-                    ContractViolation(
-                        "unsupported_version",
-                        "$.schema_version",
-                        "Strict test_spec reads require the current canonical envelope.",
-                    ),
-                )
-            )
-        payload = migrate_legacy_test_case_design(decoded)
-    spec = TestSpec.from_payload(payload, validate=False)
+    contract_violations = validate_artifact(ArtifactKind.TEST_SPEC, decoded)
+    if contract_violations:
+        raise TestSpecContractError(contract_violations)
+    spec = TestSpec.from_payload(decoded, validate=False)
     violations = validate_test_spec(spec, current_context=current_context)
     if violations:
         raise TestSpecContractError(violations)
@@ -235,8 +192,9 @@ def save_test_spec_snapshot(
         raise ValueError("Canonical test_spec lock must not be a symbolic link.")
     with _exclusive_lock(lock_path):
         exists = path.exists()
+        current: TestSpec | None = None
         if exists:
-            current = load_test_spec(path, mode=ContractMode.STRICT)
+            current = load_test_spec(path)
             if expected_revision is None or current.revision != expected_revision:
                 raise StaleRevisionError(
                     f"Expected test_spec revision {expected_revision!r}; current revision is {current.revision}."
@@ -256,7 +214,12 @@ def save_test_spec_snapshot(
                     "Initial test_spec creation must start at revision 0 or 1."
                 )
             final_revision = 1
-        candidate = spec.with_revision(final_revision)
+        candidate = _bind_subject_context(
+            spec.with_revision(final_revision),
+            current_context,
+            current=current,
+            workspace=resolved_root,
+        )
         violations = validate_test_spec(candidate, current_context=current_context)
         if violations:
             raise TestSpecContractError(violations)
@@ -275,17 +238,162 @@ def save_test_spec_snapshot(
                 pass
         snapshot = _snapshot_from_bytes(
             final_bytes,
-            mode=ContractMode.STRICT,
             current_context=current_context,
         )
-        artifact = ProducedArtifact(
+        artifact = build_produced_artifact(
+            resolved_root,
+            path,
             kind=ArtifactKind.TEST_SPEC.value,
-            path=relative_path.as_posix(),
-            exists=True,
-            sha256=snapshot.sha256,
-            schema_version=snapshot.spec.schema_version,
         )
     return snapshot, artifact
+
+
+def _bind_subject_context(
+    spec: TestSpec,
+    context: CurrentArtifactContext,
+    *,
+    current: TestSpec | None,
+    workspace: Path,
+) -> TestSpec:
+    candidates = [
+        _complete_subject_pair(context.project, context.configuration),
+        resolve_workspace_subject_context(workspace),
+        _complete_subject_pair(
+            current.project if current is not None else None,
+            current.configuration if current is not None else None,
+        ),
+    ]
+    resolved = next((value for value in candidates if value is not None), None)
+    if resolved is None:
+        raise WorkspaceRegenerationRequired(
+            "Cannot bind test_spec project and full configuration; regenerate the workspace for v0.1."
+        )
+    project, configuration = resolved
+    mismatches: list[ContractViolation] = []
+    for field_name, actual, expected in (
+        ("project", spec.project, project),
+        ("configuration", spec.configuration, configuration),
+    ):
+        if isinstance(actual, str) and actual.strip() and actual != expected:
+            mismatches.append(
+                ContractViolation(
+                    f"stale_{field_name}",
+                    f"$.subject.{field_name}",
+                    f"Test spec {field_name} does not match the current workspace.",
+                    "blocking",
+                )
+            )
+    if mismatches:
+        raise TestSpecContractError(tuple(mismatches))
+    return spec.with_subject_context(
+        project=project,
+        configuration=configuration,
+    )
+
+
+def resolve_workspace_subject_context(
+    workspace: Path,
+) -> tuple[str, str] | None:
+    return _subject_pair_from_current_dossier(
+        workspace
+    ) or _subject_pair_from_request(workspace)
+
+
+def _complete_subject_pair(
+    project: object,
+    configuration: object,
+) -> tuple[str, str] | None:
+    if not isinstance(project, str) or not project.strip():
+        return None
+    if not isinstance(configuration, str) or not configuration.strip():
+        return None
+    return project, configuration
+
+
+def _subject_pair_from_current_dossier(
+    workspace: Path,
+) -> tuple[str, str] | None:
+    path = workspace / "reports" / "function_dossier.json"
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if (
+        not isinstance(payload, Mapping)
+        or payload.get("schema_version") != "1.0.0"
+        or payload.get("artifact_kind") != ArtifactKind.FUNCTION_DOSSIER.value
+    ):
+        return None
+    current = load_public_artifact(path, ArtifactKind.FUNCTION_DOSSIER)
+    subject = current.get("subject")
+    if not isinstance(subject, Mapping):
+        return None
+    return _complete_subject_pair(
+        subject.get("project"),
+        subject.get("configuration"),
+    )
+
+
+def _subject_pair_from_request(workspace: Path) -> tuple[str, str] | None:
+    path = workspace / "input" / "request.json"
+    if not path.is_file():
+        return None
+    try:
+        request = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(request, Mapping):
+            raise ValueError("request root is not an object")
+        source_root = Path(_required_request_text(request, "workspace")).resolve()
+        dsw = Path(_required_request_text(request, "dsw"))
+        if not dsw.is_absolute():
+            dsw = source_root / dsw
+        source = _required_request_text(request, "source")
+        requested_configuration = _required_request_text(
+            request,
+            "configuration",
+        )
+        raw_project = request.get("project")
+        requested_project = (
+            raw_project
+            if isinstance(raw_project, str) and raw_project.strip()
+            else None
+        )
+        from unit_test_runner.vc6 import select_project_context
+
+        project, configuration, _memberships = select_project_context(
+            source_root,
+            dsw,
+            source,
+            requested_configuration,
+            requested_project,
+        )
+        resolved = _complete_subject_pair(
+            project.get("project_name"),
+            configuration.get("full_name"),
+        )
+        if resolved is None:
+            raise ValueError("selected project has no full configuration")
+        return resolved
+    except (
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as error:
+        raise WorkspaceRegenerationRequired(
+            "Cannot bind test_spec subject from input/request.json; "
+            f"regenerate the workspace for v0.1: {error}"
+        ) from error
+
+
+def _required_request_text(request: Mapping[str, Any], key: str) -> str:
+    value = request.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"missing {key}")
+    return value
 
 
 def canonical_json_bytes(spec: TestSpec) -> bytes:

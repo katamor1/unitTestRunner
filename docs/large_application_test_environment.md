@@ -118,10 +118,11 @@ py -m unit_test_runner analyze-function `
   --function DeviceControl_Update `
   --configuration "DeviceControl - Win32 Debug" `
   --project DeviceControl `
-  --out $out
+  --out $out `
+  --phase harness
 
 py -m unit_test_runner build-probe `
-  --dossier "$out\reports\function_dossier.json" `
+  --workspace $out `
   --dry-run
 ```
 

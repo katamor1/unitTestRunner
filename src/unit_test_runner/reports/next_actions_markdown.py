@@ -22,10 +22,6 @@ _MD_REPORTS_BY_ARTIFACT = {
     "harness_skeleton_report": "reports/harness_skeleton_report.md",
     "build_workspace_report": "reports/build_workspace_report.md",
     "build_probe_report": "reports/build_probe_report.md",
-    "build_completion_plan": "reports/build_completion_plan.md",
-    "build_completion_iteration_report": "reports/build_completion_iteration_report.md",
-    "test_execution_report": "reports/test_execution_report.md",
-    "evidence_manifest": "reports/evidence_package.md",
 }
 
 _DEFAULT_ARTIFACT_PATHS = {
@@ -33,9 +29,6 @@ _DEFAULT_ARTIFACT_PATHS = {
     "harness_skeleton_report": "reports/harness_skeleton_report.json",
     "build_workspace_report": "reports/build_workspace_report.json",
     "build_probe_report": "reports/build_probe_report.json",
-    "build_completion_plan": "reports/build_completion_plan.json",
-    "test_execution_report": "reports/test_execution_report.json",
-    "evidence_manifest": "reports/evidence_manifest.json",
 }
 
 
@@ -101,9 +94,6 @@ def _links_for_action(
     elif action.action_kind in {"add_include_path", "resolve_pch_issue"}:
         links.extend(artifact_links.get("build_workspace_report") or _fallback_artifact_links("build_workspace_report"))
         links.extend(artifact_links.get("build_probe_report") or _fallback_artifact_links("build_probe_report"))
-    elif action.action_kind == "rerun_tests":
-        links.extend(artifact_links.get("test_execution_report") or _fallback_artifact_links("test_execution_report"))
-        links.extend(artifact_links.get("evidence_manifest") or _fallback_artifact_links("evidence_manifest"))
     elif action.action_kind == "approve_dossier":
         links.append(_markdown_link("関数dossier", "function_dossier.md"))
         links.append(_markdown_link("レビュー確認リスト", "review_checklist.md"))

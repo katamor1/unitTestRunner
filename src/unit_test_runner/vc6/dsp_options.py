@@ -106,6 +106,74 @@ def merge_build_settings(target: DspBuildSettings, source: DspBuildSettings) -> 
         target.debug_info = source.debug_info
 
 
+def effective_build_settings(
+    base_options: list[str],
+    configuration_options: list[str],
+    configuration_subtract_options: list[str] = (),
+    source_add_options: list[str] = (),
+    source_subtract_options: list[str] = (),
+    *,
+    dsp_dir: Path,
+    workspace_root: Path | None = None,
+) -> DspBuildSettings:
+    """Apply the VC6 compiler layers without inventing settings.
+
+    Developer Studio evaluates project BASE options, configuration ADD/SUBTRACT,
+    then source-file ADD/SUBTRACT.  Keeping the ordered token stream here makes
+    source selection and the emitted build context use the same semantics.
+    """
+
+    options = [*_option_units(base_options), *_option_units(configuration_options)]
+    options = _subtract_options(options, _option_units(configuration_subtract_options))
+    options.extend(_option_units(source_add_options))
+    options = _subtract_options(options, _option_units(source_subtract_options))
+    return parse_build_settings(options, dsp_dir, workspace_root)
+
+
+def _subtract_options(options: list[str], subtract_options: list[str] | tuple[str, ...]) -> list[str]:
+    result = list(options)
+    for subtract in subtract_options:
+        key = _option_identity(subtract)
+        for index in range(len(result) - 1, -1, -1):
+            if _option_identity(result[index]) == key:
+                del result[index]
+                break
+    return result
+
+
+def _option_identity(token: str) -> tuple[str, str]:
+    text = str(token).strip()
+    upper = text.upper()
+    for prefix in ("/D", "/I", "/FI", "/YU", "/YC"):
+        if upper.startswith(prefix):
+            value = _strip_quotes(text[len(prefix) :]).replace("\\", "/")
+            return prefix, value.casefold()
+    return upper, ""
+
+
+def _option_units(options: list[str] | tuple[str, ...]) -> list[str]:
+    """Join VC6 options whose value is a separate token before layering.
+
+    DSP files commonly spell a define as ``/D "NAME"``.  Treating those as
+    two independent tokens makes ``# SUBTRACT CPP /D "NAME"`` remove an
+    unrelated ``/D`` marker.  The joined spelling remains accepted by the
+    existing parser while giving ADD/SUBTRACT one stable identity.
+    """
+
+    result: list[str] = []
+    index = 0
+    values = list(options)
+    while index < len(values):
+        token = values[index]
+        if token.upper() in {"/D", "/I", "/FI", "/YU", "/YC"} and index + 1 < len(values):
+            result.append(f"{token}{values[index + 1]}")
+            index += 2
+            continue
+        result.append(token)
+        index += 1
+    return result
+
+
 def _strip_quotes(value: str) -> str:
     return value.strip().strip('"')
 

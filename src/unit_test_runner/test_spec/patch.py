@@ -6,8 +6,6 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from unit_test_runner.cli.artifacts import ProducedArtifact
-from unit_test_runner.contracts import ContractMode
-
 from .models import CurrentArtifactContext, TestSpec
 from .repository import TestSpecSnapshot, load_test_spec, save_test_spec_snapshot
 
@@ -123,7 +121,7 @@ def update_test_spec_snapshot(
     expected_revision: int,
     current_context: CurrentArtifactContext,
 ) -> tuple[TestSpecSnapshot, ProducedArtifact]:
-    current = load_test_spec(path, mode=ContractMode.STRICT)
+    current = load_test_spec(path)
     candidate = apply_test_spec_patch(current, patch)
     saved, artifact = save_test_spec_snapshot(
         path,

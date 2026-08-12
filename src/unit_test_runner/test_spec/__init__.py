@@ -39,11 +39,6 @@ from .identity import (
     stable_function_id,
 )
 from .generation import create_test_spec_from_design, test_spec_consumer_payload
-from .legacy_adapter import (
-    assert_safe_legacy_alias_paths,
-    load_legacy_test_case_design_view,
-)
-
 __all__ = [
     "ArtifactReference",
     "CurrentArtifactContext",
@@ -62,7 +57,6 @@ __all__ = [
     "create_test_spec_from_design",
     "apply_test_spec_patch",
     "artifact_reference",
-    "assert_safe_legacy_alias_paths",
     "bind_test_spec_inputs",
     "build_current_artifact_context",
     "export_test_spec_snapshot_custom_view",
@@ -70,7 +64,6 @@ __all__ = [
     "export_test_spec_views",
     "load_test_spec",
     "load_test_spec_snapshot",
-    "load_legacy_test_case_design_view",
     "save_test_spec",
     "save_test_spec_snapshot",
     "signature_sha256",

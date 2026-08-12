@@ -29,11 +29,15 @@ def resolve_executable(
     warnings: list[TestExecutionWarning] = []
     if not absolute.exists():
         warnings.append(TestExecutionWarning("executable_not_found", f"実行ファイルが見つかりません: {relative}", related_file=relative))
+    data = build_probe_report.get("data")
+    build_probe_status = (
+        data.get("status", "unknown") if isinstance(data, dict) else "unknown"
+    )
     return ExecutableInfo(
         path=relative,
         exists=absolute.exists(),
         sha256=sha256_file(absolute),
         generated_from="build_probe",
-        build_probe_status=build_probe_report.get("function", {}).get("status", "unknown"),
+        build_probe_status=build_probe_status,
         warnings=warnings,
     )

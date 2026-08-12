@@ -1,136 +1,57 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
-import { describe, it } from 'node:test';
 import * as path from 'path';
+import { describe, it } from 'node:test';
 
 import { buildSettingsViewModel } from '../config/settingsViewModel';
+import { renderSuiteHtml } from '../suite/suitePanel';
 import { renderSettings } from '../workflow/settingsPanelRenderer';
-import { renderWorkflowHtml } from '../workflow/workflowPanel';
-import {
-  buildWorkflowStepViews,
-  EMPTY_REPORT_AVAILABILITY,
-  OPTIONAL_WORKFLOW_ACTIONS,
-  WorkflowState,
-} from '../workflow/workflowState';
 
-function settingsModel() {
-  return buildSettingsViewModel(
-    {
-      cliPath: 'unit-test-runner',
-      sourceRoot: 'C:\\work\\product',
-      dswPath: 'C:\\work\\product\\Product.dsw',
-      outputRoot: 'D:\\unit-test-output',
-      defaultConfiguration: 'Win32 Debug',
-      defaultProject: 'Control',
-    },
-    'C:\\work\\product',
-  );
+function source(relative: string): string {
+  return fs.readFileSync(path.join(process.cwd(), relative), 'utf8');
 }
 
-function fieldById(id: string) {
-  const field = settingsModel().fields.find((item) => item.id === id);
-  assert.ok(field, id);
-  return field;
-}
-
-function source(relativePath: string): string {
-  return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf-8');
-}
-
-describe('Japanese GUI copy contract', () => {
-  it('uses clear Japanese labels and descriptions in the settings panel', () => {
-    assert.equal(fieldById('sourceRoot').label, 'ソースのルートフォルダー');
-    assert.equal(fieldById('dswPath').label, 'VC6ワークスペースファイル（.dsw）');
-    assert.equal(fieldById('outputRoot').label, '出力先フォルダー');
-    assert.equal(fieldById('suiteManifestPath').label, 'スイート定義ファイル');
-    assert.equal(fieldById('defaultConfiguration').label, '既定のビルド構成');
-    assert.equal(fieldById('vcvarsPath').label, 'VC6環境設定ファイル');
-    assert.match(fieldById('outputRoot').description, /出力先フォルダー/);
-    assert.match(fieldById('suiteManifestPath').description, /スイート定義ファイル/);
-
-    const html = renderSettings(settingsModel());
-    assert.match(html, /必須項目はすべて設定されています。/);
-    assert.doesNotMatch(html, /設定確認は完了しています。/);
-  });
-
-  it('uses Japanese workflow terminology without changing report file names', () => {
-    const state: WorkflowState = {
-      settingsReady: true,
-      functionName: 'Control_Update',
-      outputWorkspace: 'D:\\unit-test-output\\Control_Update',
-      completedStepIds: ['settings'],
-    };
-    const steps = buildWorkflowStepViews(state, EMPTY_REPORT_AVAILABILITY);
-    const html = renderWorkflowHtml({} as never, state, settingsModel(), steps, OPTIONAL_WORKFLOW_ACTIONS);
-
-    assert.match(html, /クイックチェックを実行/);
-    assert.match(html, /クイックチェックの概要を開く/);
-    assert.match(html, /フルゲートへ進む/);
-    assert.match(html, /出力ワークスペースを開く/);
-    assert.match(html, /事前確認を実行/);
-    assert.match(html, /function_dossier\.md/);
-    assert.doesNotMatch(html, /出力workspace/);
-    assert.doesNotMatch(html, /dry-runを実行/);
-    assert.doesNotMatch(html, /Quick Summary/);
-  });
-
-  it('uses concrete Japanese actions and result labels in both suite views', () => {
-    const panel = source(path.join('src', 'suite', 'suitePanel.ts'));
-    const dashboard = source(path.join('src', 'suite', 'suiteDashboard.ts'));
-    const combined = `${panel}\n${dashboard}`;
-
-    for (const label of [
-      '現在の関数をスイートに登録',
-      'スイート一覧を開く',
-      '選択したテストを実行',
-      'タグを指定して実行',
-      '全件テストを実行して合否を確認',
-      'スイート定義ファイルを開く',
-      '合計',
-      '合格',
-      '不合格',
-      '実行済み',
-      '実行結果',
-      'ワークスペース',
-    ]) {
-      assert.match(combined, new RegExp(label));
+describe('Japanese v0.1 UI copy', () => {
+  it('uses clear settings labels and no migration language', () => {
+    const model = buildSettingsViewModel({
+      cliPath: 'unit-test-runner', sourceRoot: 'C:\\work', dswPath: 'C:\\work\\P.dsw',
+      outputRoot: 'D:\\out', defaultConfiguration: 'Win32 Debug',
+    }, 'C:\\work');
+    const html = renderSettings(model);
+    for (const label of ['ソースのルートフォルダー', 'VC6ワークスペースファイル', '出力先フォルダー', 'スイート定義ファイル']) {
+      assert.match(html, new RegExp(label));
     }
-
-    assert.match(combined, /現在の関数をスイートに登録.*追加してください。/s);
-    assert.doesNotMatch(combined, /広い一覧を開く/);
-    assert.doesNotMatch(combined, /実行status/);
-    assert.doesNotMatch(combined, /suite manifest未設定/);
-    assert.doesNotMatch(combined, /Not GREEN/);
+    assert.doesNotMatch(html, /旧設定|互換|migration/);
   });
 
-  it('uses Japanese command palette, view, setting, dialog, and notification copy', () => {
-    const packageJson = JSON.parse(source('package.json'));
-    const commands = new Map<string, string>(
-      packageJson.contributes.commands.map((item: { command: string; title: string }) => [item.command, item.title]),
-    );
-    const views = new Map<string, string>(
-      packageJson.contributes.views.unitTestRunner.map((item: { id: string; name: string }) => [item.id, item.name]),
-    );
-    const properties = packageJson.contributes.configuration.properties as Record<string, { description: string }>;
+  it('offers only register, explicit selection, enable, filter, run, and latest report in suite UI', () => {
+    const html = renderSuiteHtml({
+      suitePath: 'D:\\out\\suite_manifest.json', reportPath: 'D:\\out\\reports\\suite_run_report.json',
+      reportExists: false, lastRunStatus: 'not_run', summary: { total: 0, green: 0, notGreen: 0, executed: 0, failed: 0 },
+      entries: [{
+        entryId: 'entry-1', enabled: true, selected: false, tags: ['smoke'], functionName: 'Control_Update',
+        source: 'src/control.c', project: 'Control', configuration: 'Control - Win32 Debug', workspace: '../fn',
+        lastRunStatus: 'not_run', greenStatus: 'not_run', executed: false, totalTests: 0, passedTests: 0,
+        failedTests: 0, inconclusiveTests: 0, unresolvedReviewCount: 0, error: '',
+      }],
+    });
+    for (const label of ['現在の関数をスイートに登録', '選択したテストを実行', '最新レポートを開く', '関数名またはタグで絞り込み', '実行対象', '有効']) {
+      assert.match(html, new RegExp(label));
+    }
+    assert.match(html, /aria-label="実行対象を選択:/);
+    assert.match(html, /aria-label="有効化:/);
+    assert.doesNotMatch(html, /ダッシュボード|全件テスト|タグを指定して実行/);
+  });
 
-    assert.equal(commands.get('unitTestRunner.quickCheckCurrentFunction'), 'UnitTestRunner: 現在の関数をクイックチェック');
-    assert.equal(commands.get('unitTestRunner.quickCheckSelectedFunction'), 'UnitTestRunner: 選択した関数をクイックチェック');
-    assert.equal(commands.get('unitTestRunner.runFullGateForCurrentFunction'), 'UnitTestRunner: 現在の関数でフルゲートを実行');
-    assert.equal(commands.get('unitTestRunner.analyzeCurrentFunction'), 'UnitTestRunner: 現在の関数を解析');
-    assert.equal(commands.get('unitTestRunner.openTestInputEditor'), 'UnitTestRunner: 未確定テスト項目を入力');
-    assert.equal(commands.get('unitTestRunner.openSuiteManifest'), 'UnitTestRunner: スイート定義ファイルを開く');
-    assert.equal(commands.get('unitTestRunner.runAllSuiteTestsRequireGreen'), 'UnitTestRunner: 全件テストを実行して合否を確認');
-    assert.equal(views.get('unitTestRunner.workflow'), '関数テスト');
-    assert.equal(views.get('unitTestRunner.suite'), 'テストスイート');
-    assert.doesNotMatch(properties['unitTestRunner.sourceRoot'].description, /workspace folder/);
-    assert.doesNotMatch(properties['unitTestRunner.suiteManifestPath'].description, /スイートmanifest|manifestのパス/);
-
-    const extension = source(path.join('src', 'extension.ts'));
-    assert.match(extension, /'ビルドを実行'/);
-    assert.match(extension, /'テストを実行'/);
-    assert.match(extension, /'全件テストを実行'/);
-    assert.match(extension, /合計\$\{summary\.total\}件のうち/);
-    assert.doesNotMatch(extension, /'続行'/);
-    assert.doesNotMatch(extension, /出力workspaceのパス/);
+  it('declares only the thin adapter command and setting surface', () => {
+    const manifest = JSON.parse(source('package.json')) as { contributes: { commands: Array<{ command: string; title: string }>; configuration: { properties: Record<string, unknown> } } };
+    const ids = manifest.contributes.commands.map((item) => item.command);
+    assert.equal(ids.length, 16);
+    assert.equal(ids.includes('unitTestRunner.prepareHarness'), true);
+    assert.equal(ids.includes('unitTestRunner.openTestInputEditor'), true);
+    assert.equal(ids.some((id) => /quick|Evidence|generateTestDesign|generateHarnessSkeleton|Dashboard/.test(id)), false);
+    const settings = Object.keys(manifest.contributes.configuration.properties);
+    assert.equal(settings.length, 12);
+    assert.equal(settings.some((key) => /workspaceRoot|projectName|quick|useJsonOutput|showOutputChannel/.test(key)), false);
   });
 });

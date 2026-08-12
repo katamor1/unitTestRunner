@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import re
-import shutil
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from unit_test_runner.contracts import ArtifactKind, ContractMode, RunOutcome, load_artifact
-from unit_test_runner.harness.c90_writer import sha256_file
+from unit_test_runner.contracts import ArtifactKind, RunOutcome
+from unit_test_runner.workspace_artifacts import (
+    artifact_sha256,
+    is_current_review_approved,
+    load_public_artifact,
+    write_test_run_report,
+)
 
 from .execution_models import (
-    EvidenceManifest,
     ExecutionCommandResult,
     ExecutionReviewItem,
     TestCaseExecutionResult,
@@ -22,32 +22,35 @@ from .execution_models import (
     TestRunRequest,
     TestResultSummary,
 )
-from .evidence_manifest import (
-    build_evidence_manifest,
-    build_evidence_manifest_from_run,
-    write_evidence_package,
-)
-from .evidence_paths import EvidencePaths, create_evidence_paths
 from .executable_resolver import resolve_executable
 from .execution_runner import build_execution_command, run_test_executable_cases
 from .precondition_validator import validate_execution_preconditions
-from .report_loader import load_execution_run
 from .run_paths import create_run_paths
-from .test_result_writer import (
-    build_artifact_payload,
-    current_producer_commit,
-    write_test_execution_reports,
-    write_validated_artifact,
-)
 
 
 def execute_test_run(request: TestRunRequest) -> TestExecutionReport:
     workspace = Path(request.workspace).resolve()
-    paths = create_run_paths(workspace, request.run_id)
+    if not is_current_review_approved(workspace, ArtifactKind.TEST_SPEC):
+        raise PermissionError(
+            "Current test_spec is not covered by an approved review_record."
+        )
     reports = workspace / "reports"
-    test_case_design = _read_canonical_test_spec(reports)
+    test_spec_payload = load_public_artifact(
+        reports / "test_spec.json",
+        ArtifactKind.TEST_SPEC,
+    )
+    test_case_design = dict(test_spec_payload["data"])
+    requested_case_ids = select_test_case_ids(
+        test_case_design,
+        request.selector_kind,
+        list(request.selector_values),
+    )
+    paths = create_run_paths(workspace, request.run_id)
     harness_report = _read_json(reports / "harness_skeleton_report.json")
-    build_probe = _read_json(reports / "build_probe_report.json")
+    build_probe = load_public_artifact(
+        reports / "build_probe_report.json",
+        ArtifactKind.BUILD_PROBE_REPORT,
+    )
     build_workspace = _read_json(reports / "build_workspace_report.json")
     policy = TestExecutionPolicy(
         run_tests=True,
@@ -74,7 +77,14 @@ def execute_test_run(request: TestRunRequest) -> TestExecutionReport:
     warnings: list[TestExecutionWarning] = []
     command_result: ExecutionCommandResult | None = None
     parsed_summary = TestResultSummary()
-    design_case_results = _case_results_from_design(test_case_design)
+    design_results_by_id = {
+        item.test_case_id: item
+        for item in _case_results_from_design(test_case_design)
+        if item.test_case_id
+    }
+    design_case_results = [
+        design_results_by_id[case_id] for case_id in requested_case_ids
+    ]
     case_results = list(design_case_results)
     status = RunOutcome.BLOCKED.value
     executed = False
@@ -101,13 +111,10 @@ def execute_test_run(request: TestRunRequest) -> TestExecutionReport:
         )
     elif precondition_status == "ready":
         executed = True
-        test_case_ids = [
-            case.test_case_id for case in design_case_results if case.test_case_id
-        ]
         command_result, parsed_summary, runner_case_results, raw_status = run_test_executable_cases(
             workspace,
             executable_info,
-            test_case_ids,
+            requested_case_ids,
             request.timeout_seconds,
             run_paths=paths,
         )
@@ -135,7 +142,7 @@ def execute_test_run(request: TestRunRequest) -> TestExecutionReport:
             status = _canonical_run_outcome(_status_from_summary(parsed_summary, raw_status))
     if review_items and executed and policy.treat_placeholder_as_inconclusive:
         if status == RunOutcome.PASSED.value:
-            status = RunOutcome.INCONCLUSIVE.value
+            status = RunOutcome.BLOCKED.value
         for case in case_results:
             case.review_required = True
             if case.status == "passed":
@@ -161,44 +168,121 @@ def execute_test_run(request: TestRunRequest) -> TestExecutionReport:
         parsed_result=parsed_summary,
         case_results=case_results,
         unresolved_review_items=review_items,
-        evidence_files=[],
         warnings=warnings,
         policy=policy,
         schema_version="1.0.0",
         run_paths=paths,
     )
-    subject = _execution_subject(workspace, source_path, function_name)
-    producer_commit = current_producer_commit()
-    write_test_execution_reports(
-        paths,
-        report,
-        subject=subject,
-        producer_commit=producer_commit,
+    started_case_ids, completed_case_ids, not_run_case_ids = _case_progress_ids(
+        requested_case_ids,
+        case_results,
     )
-    execution_hash = sha256_file(paths.execution_report)
-    if execution_hash is None:
-        raise ValueError("Execution report was not published.")
-    pointer = build_artifact_payload(
-        ArtifactKind.LATEST_RUN_POINTER,
+    write_test_run_report(
+        workspace,
+        paths.run_id,
+        test_spec_payload["subject"],
         {
             "run_id": paths.run_id,
-            "execution_report": {
-                "artifact_kind": ArtifactKind.TEST_EXECUTION_REPORT.value,
-                "path": paths.execution_report.relative_to(workspace).as_posix(),
-                "sha256": execution_hash,
-            },
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "outcome": _canonical_run_outcome(status),
+            "executed": executed,
+            "test_spec_sha256": artifact_sha256(reports / "test_spec.json"),
+            "requested_case_ids": requested_case_ids,
+            "started_case_ids": started_case_ids,
+            "completed_case_ids": completed_case_ids,
+            "not_run_case_ids": not_run_case_ids,
+            "summary": parsed_summary.to_dict(),
+            "case_results": [item.to_dict() for item in case_results],
+            "warnings": [item.to_dict() for item in warnings],
         },
-        subject=subject,
-        producer_commit=producer_commit,
-    )
-    write_validated_artifact(
-        workspace / "reports" / "latest_run.json",
-        ArtifactKind.LATEST_RUN_POINTER,
-        pointer,
-        atomic=True,
     )
     return report
+
+
+def _case_progress_ids(
+    requested_case_ids: list[str],
+    case_results: list[TestCaseExecutionResult],
+) -> tuple[list[str], list[str], list[str]]:
+    status_by_id = {
+        str(item.test_case_id): str(item.status)
+        for item in case_results
+        if item.test_case_id
+    }
+    not_run = [
+        case_id
+        for case_id in requested_case_ids
+        if status_by_id.get(case_id) in {None, "not_run", "not_found_in_output"}
+    ]
+    started = [case_id for case_id in requested_case_ids if case_id not in not_run]
+    completed_statuses = {"passed", "failed", "skipped"}
+    completed = [
+        case_id
+        for case_id in requested_case_ids
+        if status_by_id.get(case_id) in completed_statuses
+    ]
+    return started, completed, not_run
+
+
+def select_test_case_ids(
+    test_spec_data: dict[str, Any],
+    selector_kind: str,
+    selector_values: list[str],
+) -> list[str]:
+    cases = test_spec_data.get("test_cases")
+    if not isinstance(cases, list):
+        raise ValueError("Current test_spec has no test_cases array.")
+    ordered_ids: list[str] = []
+    cases_by_id: dict[str, dict[str, Any]] = {}
+    for raw_case in cases:
+        if not isinstance(raw_case, dict):
+            raise ValueError("Current test_spec contains an invalid test case.")
+        case_id = raw_case.get("test_case_id")
+        if not isinstance(case_id, str) or not case_id:
+            raise ValueError("Every test case must have a non-empty test_case_id.")
+        if case_id in cases_by_id:
+            raise ValueError(f"Duplicate test_case_id in test_spec: {case_id}")
+        cases_by_id[case_id] = raw_case
+        ordered_ids.append(case_id)
+
+    def enabled(case: dict[str, Any]) -> bool:
+        return case.get("enabled", True) is not False and case.get("disabled") is not True
+
+    if selector_kind == "all":
+        if selector_values:
+            raise ValueError("The all selector does not accept values.")
+        selected = [case_id for case_id in ordered_ids if enabled(cases_by_id[case_id])]
+    elif selector_kind == "case_id":
+        if not selector_values or any(not value for value in selector_values):
+            raise ValueError("At least one non-empty case ID is required.")
+        if len(set(selector_values)) != len(selector_values):
+            raise ValueError("Duplicate case IDs are not allowed.")
+        missing = [value for value in selector_values if value not in cases_by_id]
+        disabled = [
+            value
+            for value in selector_values
+            if value in cases_by_id and not enabled(cases_by_id[value])
+        ]
+        if missing:
+            raise ValueError("Unknown test case IDs: " + ", ".join(missing))
+        if disabled:
+            raise ValueError("Disabled test case IDs: " + ", ".join(disabled))
+        selected = list(selector_values)
+    elif selector_kind == "tag":
+        if len(selector_values) != 1 or not selector_values[0]:
+            raise ValueError("A single non-empty tag is required.")
+        tag = selector_values[0]
+        matching = [
+            case_id
+            for case_id in ordered_ids
+            if tag in list(cases_by_id[case_id].get("tags") or [])
+        ]
+        selected = [case_id for case_id in matching if enabled(cases_by_id[case_id])]
+        if matching and not selected:
+            raise ValueError(f"All test cases for tag {tag!r} are disabled.")
+    else:
+        raise ValueError(f"Unknown test selector: {selector_kind}")
+    if not selected:
+        raise ValueError("The test selector matched no enabled cases.")
+    return selected
 
 
 def validate_test_run_preflight(
@@ -211,7 +295,10 @@ def validate_test_run_preflight(
     reports = workspace / "reports"
     test_case_design = _read_canonical_test_spec(reports)
     harness_report = _read_json(reports / "harness_skeleton_report.json")
-    build_probe = _read_json(reports / "build_probe_report.json")
+    build_probe = load_public_artifact(
+        reports / "build_probe_report.json",
+        ArtifactKind.BUILD_PROBE_REPORT,
+    )
     build_workspace = _read_json(reports / "build_workspace_report.json")
     _workspace_relative_source_path(workspace, build_workspace)
     executable_info = resolve_executable(workspace, executable, build_probe)
@@ -238,52 +325,6 @@ def validate_test_run_preflight(
             )
         )
     return warnings, review_items
-
-
-def prepare_evidence_from_existing_run(
-    workspace: Path,
-    run_id: str | None = None,
-) -> tuple[EvidencePaths, TestExecutionReport, EvidenceManifest]:
-    workspace = Path(workspace).resolve()
-    loaded_run = load_execution_run(workspace, run_id)
-    paths = create_evidence_paths(workspace, loaded_run.run_id)
-    try:
-        producer_commit = current_producer_commit()
-        manifest = build_evidence_manifest_from_run(
-            workspace,
-            loaded_run,
-            paths,
-            producer_commit=producer_commit,
-        )
-        manifest.evidence_paths = paths
-        manifest_hash = sha256_file(paths.evidence_manifest)
-        if manifest_hash is None:
-            raise ValueError("Evidence manifest was not published.")
-        pointer = build_artifact_payload(
-            ArtifactKind.LATEST_EVIDENCE_POINTER,
-            {
-                "evidence_id": paths.evidence_id,
-                "source_run_id": loaded_run.run_id,
-                "evidence_manifest": {
-                    "artifact_kind": ArtifactKind.EVIDENCE_MANIFEST.value,
-                    "path": paths.evidence_manifest.relative_to(workspace).as_posix(),
-                    "sha256": manifest_hash,
-                },
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            },
-            subject=loaded_run.payload["subject"],
-            producer_commit=producer_commit,
-        )
-        write_validated_artifact(
-            workspace / "reports" / "latest_evidence.json",
-            ArtifactKind.LATEST_EVIDENCE_POINTER,
-            pointer,
-            atomic=True,
-        )
-    except Exception:
-        shutil.rmtree(paths.root, ignore_errors=True)
-        raise
-    return paths, loaded_run.report, manifest
 
 
 def _workspace_relative_source_path(
@@ -325,168 +366,33 @@ def _mapped_workspace_source(
     raise ValueError(f"Execution source path is outside workspace: {source}")
 
 
-def _execution_subject(
-    workspace: Path,
-    source_path: Path,
-    function_name: str,
-) -> dict[str, str]:
-    source_hash = sha256_file(workspace / source_path)
-    if source_hash is None:
-        raise ValueError(f"Execution source file does not exist: {source_path}")
-    identity_seed = f"{source_path.as_posix()}\0{function_name}".encode("utf-8")
-    suffix = hashlib.sha256(identity_seed).hexdigest()[:12]
-    slug = re.sub(r"[^a-z0-9]+", "_", function_name.lower()).strip("_")
-    return {
-        "function_id": f"fn_{slug or 'function'}_{suffix}",
-        "source_path": source_path.as_posix(),
-        "source_sha256": source_hash,
-    }
-
-
 def _canonical_run_outcome(status: str) -> str:
     if status == "timeout":
         return RunOutcome.TIMED_OUT.value
     if status == "not_run":
-        return RunOutcome.INCONCLUSIVE.value
+        return RunOutcome.BLOCKED.value
+    if status == "inconclusive":
+        return RunOutcome.BLOCKED.value
     try:
         return RunOutcome(status).value
     except ValueError:
         return RunOutcome.ERROR.value
 
 
-def prepare_test_execution_evidence(
-    workspace: Path | str,
-    executable: Path | str | None = None,
-    run_tests: bool = False,
-    dry_run: bool = True,
-    timeout_seconds: int = 60,
-    allow_placeholder_tests: bool = True,
-    treat_placeholder_as_inconclusive: bool = True,
-    run_id: str | None = None,
-) -> tuple[TestExecutionReport, EvidenceManifest]:
-    workspace = Path(workspace).resolve()
-    if run_tests and not dry_run:
-        report = execute_test_run(
-            TestRunRequest(
-                workspace=workspace,
-                executable=Path(executable) if executable is not None else None,
-                timeout_seconds=timeout_seconds,
-                allow_placeholder_tests=allow_placeholder_tests,
-                run_id=run_id,
-            )
-        )
-        if report.run_paths is None:
-            raise ValueError("Execution run paths were not preserved.")
-        evidence_paths, loaded_report, manifest = prepare_evidence_from_existing_run(
-            workspace,
-            run_id=report.run_paths.run_id,
-        )
-        loaded_report.run_paths = report.run_paths
-        manifest.evidence_paths = evidence_paths
-        return loaded_report, manifest
-    reports = workspace / "reports"
-    logs = workspace / "logs"
-    reports.mkdir(parents=True, exist_ok=True)
-    logs.mkdir(parents=True, exist_ok=True)
-    test_case_design = _read_canonical_test_spec(reports)
-    harness_report = _read_json(reports / "harness_skeleton_report.json")
-    build_probe = _read_json(reports / "build_probe_report.json")
-    build_workspace = _read_json(reports / "build_workspace_report.json")
-    completion_report = _read_optional_json(reports / "build_completion_iteration_report.json")
-    policy = TestExecutionPolicy(
-        run_tests=run_tests,
-        dry_run=dry_run,
-        timeout_seconds=timeout_seconds,
-        allow_placeholder_tests=allow_placeholder_tests,
-        treat_placeholder_as_inconclusive=treat_placeholder_as_inconclusive,
-    )
-    function_name = test_case_design.get("function", {}).get("name") or build_workspace.get("function", {}).get("name") or "unknown_function"
-    source_path = Path(build_workspace.get("source", {}).get("path") or "")
-    executable_info = resolve_executable(workspace, executable, build_probe)
-    command = build_execution_command(workspace, executable_info, timeout_seconds=timeout_seconds, dry_run=dry_run or not run_tests)
-    review_items = _placeholder_review_items(harness_report, test_case_design)
-    warnings: list[TestExecutionWarning] = []
-    command_result: ExecutionCommandResult | None = None
-    parsed_summary = TestResultSummary()
-    design_case_results = _case_results_from_design(test_case_design)
-    case_results = list(design_case_results)
-    status = "not_run"
-    executed = False
-    if run_tests and not dry_run:
-        precondition_status, precondition_warnings, precondition_review_items = validate_execution_preconditions(build_probe, executable_info, policy)
-        if precondition_status == "blocked":
-            status = "blocked"
-            warnings.extend(precondition_warnings)
-            review_items.extend(precondition_review_items)
-        elif not design_case_results:
-            status = "blocked"
-            warnings.append(
-                TestExecutionWarning(
-                    "no_executable_test_cases",
-                    "実行可能なテストケースがないため、runnerは起動しません。追加候補と未解決項目を解消してください。",
-                )
-            )
-        else:
-            executed = True
-            test_case_ids = [case.test_case_id for case in design_case_results if case.test_case_id]
-            command_result, parsed_summary, runner_case_results, status = run_test_executable_cases(workspace, executable_info, test_case_ids, timeout_seconds)
-            if parsed_summary.total == 0 and design_case_results:
-                warnings.append(
-                    TestExecutionWarning(
-                        "runner_output_missing",
-                        "runner出力からテストケース結果を取得できなかったため、テストケース設計から生成済みケースを表示します。logs/test_execution.log を確認してください。",
-                    )
-                )
-                case_results = _case_results_without_runner_output(design_case_results, status)
-                parsed_summary = _summary_from_case_results(case_results, parser_confidence="low")
-            else:
-                case_results = _merge_runner_case_results_with_design(design_case_results, runner_case_results, status)
-                parsed_summary = _summary_from_case_results(case_results, assertion_failures=parsed_summary.assertion_failures, parser_confidence=parsed_summary.parser_confidence)
-                if parsed_summary.not_run > 0:
-                    warnings.append(
-                        TestExecutionWarning(
-                            "runner_cases_not_reached",
-                            f"テストケース設計は {len(design_case_results)} 件ですが、runner出力で開始されたケースは {parsed_summary.started} 件です。未到達ケースを not_run として記録しました。",
-                        )
-                    )
-                status = _status_from_summary(parsed_summary, status)
-    else:
-        (logs / "test_execution.log").write_text("DRY RUN\n" + command.command_line + "\n", encoding="utf-8")
-        command_result = ExecutionCommandResult(None, None, None, None, None, None, Path("logs/test_execution.log"), False)
-    if review_items and policy.treat_placeholder_as_inconclusive and status in {"passed", "executed", "not_run"}:
-        if status != "not_run":
-            status = "inconclusive"
-        for case in case_results:
-            case.review_required = True
-            if case.status == "passed":
-                case.status = "inconclusive"
-        parsed_summary = _summary_from_case_results(case_results, assertion_failures=parsed_summary.assertion_failures, parser_confidence=parsed_summary.parser_confidence)
-    report = TestExecutionReport(
-        source_path=source_path,
-        function_name=function_name,
-        status=status,
-        executed=executed,
-        executable=executable_info,
-        command=command,
-        command_result=command_result,
-        parsed_result=parsed_summary,
-        case_results=case_results,
-        unresolved_review_items=review_items,
-        evidence_files=[],
-        warnings=warnings,
-        policy=policy,
-    )
-    write_test_execution_reports(workspace, report)
-    manifest = build_evidence_manifest(workspace, report, build_probe, build_workspace, completion_report)
-    write_evidence_package(workspace, manifest, report)
-    return report, manifest
-
-
 def _case_results_from_design(test_case_design: dict[str, Any]) -> list[TestCaseExecutionResult]:
     results = []
     for case in test_case_design.get("test_cases", []):
         coverage = [link.get("coverage_id", "") for link in case.get("coverage_links", []) if link.get("coverage_id")]
-        review = bool(_review_references(case))
+        review = any(
+            _has_active_review(case.get(field) or [])
+            for field in (
+                "input_assignments",
+                "state_setups",
+                "stub_setups",
+                "dependency_overrides",
+                "expected_observations",
+            )
+        )
         results.append(
             TestCaseExecutionResult(
                 test_case_id=case.get("test_case_id"),
@@ -628,8 +534,15 @@ def _canonical_test_spec_review_items(
     items: list[ExecutionReviewItem] = []
     represented_ids: set[str] = set()
     represented_cases: set[str] = set()
+    executable_case_ids = {
+        str(case.get("test_case_id") or "")
+        for case in test_spec.get("test_cases") or []
+        if isinstance(case, dict) and str(case.get("test_case_id") or "").strip()
+    }
     for index, unresolved in enumerate(test_spec.get("unresolved_items") or [], start=1):
         if not isinstance(unresolved, dict):
+            continue
+        if unresolved.get("blocking") is False:
             continue
         item_id = str(unresolved.get("item_id") or f"REVIEW_UNRESOLVED_{index:03d}")
         related_ids = [
@@ -637,6 +550,8 @@ def _canonical_test_spec_review_items(
             for value in unresolved.get("related_test_case_ids") or []
             if str(value)
         ]
+        if related_ids and not (set(related_ids) & executable_case_ids):
+            continue
         represented_ids.add(item_id)
         represented_cases.update(related_ids)
         items.append(
@@ -657,58 +572,44 @@ def _canonical_test_spec_review_items(
             )
         )
 
-    all_cases = list(test_spec.get("test_cases") or []) + list(
-        test_spec.get("additional_case_candidates") or []
-    )
-    for case in test_spec.get("additional_case_candidates") or []:
+    for case in test_spec.get("test_cases") or []:
         if not isinstance(case, dict):
             continue
         case_id = str(case.get("test_case_id") or "") or None
-        if case_id and case_id in represented_cases:
-            continue
-        references = _review_references(case)
-        item_id = references[0] if references else f"REVIEW_CANDIDATE_{len(items) + 1:03d}"
-        represented_ids.add(item_id)
-        if case_id:
-            represented_cases.add(case_id)
-        items.append(
-            ExecutionReviewItem(
-                item_id,
-                "additional_case_candidate",
-                case_id,
-                "追加ケース候補は実行対象ではありません。",
-                "値と期待結果を確定し、検証済みの実行ケースへ移行してください。",
-                "warning",
+        execution_values = [
+            case.get(field) or []
+            for field in (
+                "input_assignments",
+                "state_setups",
+                "stub_setups",
+                "dependency_overrides",
+                "expected_observations",
             )
-        )
-
-    declared_references = [
-        str(value) for value in test_spec.get("review_item_ids") or [] if str(value)
-    ]
-    for case in all_cases:
-        declared_references.extend(_review_references(case))
-    for reference in dict.fromkeys(declared_references):
-        if reference in represented_ids:
+        ]
+        if not any(_has_active_review(value) for value in execution_values):
             continue
-        related_case_id = next(
-            (
-                str(case.get("test_case_id"))
-                for case in all_cases
-                if isinstance(case, dict) and reference in _review_references(case)
-            ),
-            None,
-        )
-        represented_ids.add(reference)
-        items.append(
-            ExecutionReviewItem(
-                reference,
-                "review_decision_required",
-                related_case_id,
-                "テスト仕様が外部レビュー判断を参照しています。",
-                "review_decisions.json の対応項目を確認してください。",
-                "warning",
+        references: list[str] = []
+        for value in execution_values:
+            references.extend(_active_review_references(value))
+        references = list(dict.fromkeys(references)) or [
+            f"REVIEW_CASE_{len(items) + 1:03d}"
+        ]
+        for reference in references:
+            if reference in represented_ids:
+                continue
+            represented_ids.add(reference)
+            if case_id:
+                represented_cases.add(case_id)
+            items.append(
+                ExecutionReviewItem(
+                    reference,
+                    "review_decision_required",
+                    case_id,
+                    "実行ケースに未確認の入力または期待値が残っています。",
+                    "TestSpec入力を確定し、現在のSHAをreview-setで承認してください。",
+                    "warning",
+                )
             )
-        )
 
     if not test_spec.get("test_cases") and not items:
         items.append(
@@ -724,18 +625,30 @@ def _canonical_test_spec_review_items(
     return items
 
 
-def _review_references(value: Any) -> list[str]:
+def _active_review_references(value: Any) -> list[str]:
     references: list[str] = []
     if isinstance(value, dict):
-        for key, child in value.items():
-            if key in {"review_item_id", "review_item_ids"}:
-                values = child if isinstance(child, list) else [child]
+        if value.get("review_required") is True:
+            for key in ("review_item_id", "review_item_ids"):
+                child = value.get(key)
+                values = child if isinstance(child, list) else ([] if child is None else [child])
                 references.extend(str(item) for item in values if str(item))
-            references.extend(_review_references(child))
+        for child in value.values():
+            references.extend(_active_review_references(child))
     elif isinstance(value, list):
         for child in value:
-            references.extend(_review_references(child))
+            references.extend(_active_review_references(child))
     return list(dict.fromkeys(references))
+
+
+def _has_active_review(value: Any) -> bool:
+    if isinstance(value, dict):
+        return value.get("review_required") is True or any(
+            _has_active_review(child) for child in value.values()
+        )
+    if isinstance(value, list):
+        return any(_has_active_review(child) for child in value)
+    return False
 
 
 def _unique_review_items(items: list[ExecutionReviewItem]) -> list[ExecutionReviewItem]:
@@ -762,7 +675,7 @@ def _read_canonical_test_spec(reports: Path) -> dict[str, Any]:
     )
 
     path = reports / "test_spec.json"
-    spec = load_test_spec(path, mode=ContractMode.STRICT)
+    spec = load_test_spec(path)
     context = build_current_artifact_context(reports.parent, spec)
     violations = validate_test_spec(spec, current_context=context)
     if violations:

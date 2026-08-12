@@ -8,7 +8,7 @@ from typing import TextIO
 
 from .commands import dispatch
 from .errors import CLIError
-from .exit_codes import EXIT_INPUT_ERROR, EXIT_INTERNAL_ERROR
+from .exit_codes import EXIT_INPUT_ERROR, EXIT_INTERNAL_ERROR, EXIT_TESTS_BLOCKED
 from .outcomes import DomainOutcome
 from .parser import ArgumentParseError, build_parser
 from .result import CLIResult
@@ -46,13 +46,18 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = dispatch(args)
     except CLIError as exc:
+        outcome = (
+            RunOutcome.BLOCKED
+            if exc.exit_code == EXIT_TESTS_BLOCKED
+            else RunOutcome.ERROR
+        )
         result = CLIResult(
             status="error",
             exit_code=exc.exit_code,
             command=exc.command,
             message=exc.message,
             errors=[{"code": exc.code, "message": exc.message}],
-            outcome=DomainOutcome("command", RunOutcome.ERROR, None),
+            outcome=DomainOutcome("command", outcome, None),
         )
         logging.error(exc.message)
     except Exception as exc:  # pragma: no cover - kept as CLI safety net

@@ -6,7 +6,6 @@ import unittest
 from pathlib import Path
 
 from tests.spec_support import write_test_input_form_fixture
-from unit_test_runner.contracts import ContractMode
 from unit_test_runner.test_input_form import (
     apply_test_input_form,
     build_test_input_form,
@@ -82,7 +81,7 @@ class TestInputFormReclassificationTests(unittest.TestCase):
             )
             self.assertEqual((), partial_result.promoted_case_ids)
             partial_saved = load_test_spec_snapshot(
-                fixture.canonical_path, mode=ContractMode.STRICT
+                fixture.canonical_path
             )
             self.assertIn(
                 fixture.unresolved_case_id,
@@ -103,7 +102,7 @@ class TestInputFormReclassificationTests(unittest.TestCase):
             )
 
             self.assertEqual((fixture.unresolved_case_id,), result.promoted_case_ids)
-            saved = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
+            saved = load_test_spec_snapshot(fixture.canonical_path)
             executable_ids = [case["test_case_id"] for case in saved.spec.test_cases]
             candidate_ids = [case["test_case_id"] for case in saved.spec.additional_case_candidates]
             self.assertEqual(
@@ -120,10 +119,10 @@ class TestInputFormReclassificationTests(unittest.TestCase):
             }
             self.assertTrue(after_ids.issubset(before_ids))
 
-    def test_promoting_resolved_candidate_marks_related_unresolved_history_nonblocking(self):
+    def test_promoting_resolved_candidate_removes_its_resolved_unresolved_item(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             fixture = write_test_input_form_fixture(Path(temp_dir))
-            current = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
+            current = load_test_spec_snapshot(fixture.canonical_path)
             context = build_current_artifact_context(fixture.workspace, current.spec)
             current.spec.unresolved_items = [
                 {
@@ -150,17 +149,13 @@ class TestInputFormReclassificationTests(unittest.TestCase):
             )
 
             self.assertEqual((fixture.unresolved_case_id,), result.promoted_case_ids)
-            saved = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
-            self.assertEqual(
-                [fixture.unresolved_case_id],
-                saved.spec.unresolved_items[0]["related_test_case_ids"],
-            )
-            self.assertIs(False, saved.spec.unresolved_items[0]["blocking"])
+            saved = load_test_spec_snapshot(fixture.canonical_path)
+            self.assertEqual([], saved.spec.unresolved_items)
 
     def test_intentional_candidate_never_promotes_and_history_summaries_stay_unchanged(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             fixture = write_test_input_form_fixture(Path(temp_dir))
-            before = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
+            before = load_test_spec_snapshot(fixture.canonical_path)
             before_coverage = copy.deepcopy(before.spec.coverage_summary)
             before_unresolved = copy.deepcopy(before.spec.unresolved_items)
             form = build_test_input_form(fixture.workspace)
@@ -171,7 +166,7 @@ class TestInputFormReclassificationTests(unittest.TestCase):
                 expected_revision=form.revision,
             )
 
-            saved = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
+            saved = load_test_spec_snapshot(fixture.canonical_path)
             self.assertNotIn(fixture.intentional_candidate_id, result.promoted_case_ids)
             self.assertIn(
                 fixture.intentional_candidate_id,
@@ -183,7 +178,7 @@ class TestInputFormReclassificationTests(unittest.TestCase):
     def test_touched_unsafe_executable_case_demotes_but_untouched_cases_do_not_move(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             fixture = write_test_input_form_fixture(Path(temp_dir))
-            current = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
+            current = load_test_spec_snapshot(fixture.canonical_path)
             context = build_current_artifact_context(fixture.workspace, current.spec)
             concrete = current.spec.test_cases[0]
             concrete["input_assignments"][0]["review_required"] = True
@@ -224,7 +219,7 @@ class TestInputFormReclassificationTests(unittest.TestCase):
             )
 
             self.assertEqual((fixture.concrete_case_id,), result.demoted_case_ids)
-            saved = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
+            saved = load_test_spec_snapshot(fixture.canonical_path)
             self.assertNotIn(
                 fixture.concrete_case_id,
                 [case["test_case_id"] for case in saved.spec.test_cases],
@@ -237,7 +232,7 @@ class TestInputFormReclassificationTests(unittest.TestCase):
     def test_nonexecution_edit_does_not_demote_executable_case(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             fixture = write_test_input_form_fixture(Path(temp_dir))
-            current = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
+            current = load_test_spec_snapshot(fixture.canonical_path)
             context = build_current_artifact_context(fixture.workspace, current.spec)
             current.spec.test_cases[0]["preconditions"] = [
                 {
@@ -276,7 +271,7 @@ class TestInputFormReclassificationTests(unittest.TestCase):
             )
 
             self.assertEqual((), result.demoted_case_ids)
-            saved = load_test_spec_snapshot(fixture.canonical_path, mode=ContractMode.STRICT)
+            saved = load_test_spec_snapshot(fixture.canonical_path)
             self.assertIn(
                 fixture.concrete_case_id,
                 [case["test_case_id"] for case in saved.spec.test_cases],

@@ -15,7 +15,6 @@ from unit_test_runner.test_spec import (
     load_test_spec,
     save_test_spec,
 )
-from unit_test_runner.contracts import ContractMode
 from unit_test_runner.test_spec import repository as repository_module
 
 from tests.spec_support import copied_payload, current_context
@@ -208,7 +207,7 @@ class TestSpecRepositoryTests(unittest.TestCase):
                 )
 
             self.assertEqual(2, canonical_attempts)
-            self.assertEqual(1, load_test_spec(path, mode=ContractMode.STRICT).revision)
+            self.assertEqual(1, load_test_spec(path).revision)
             self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), artifact.sha256)
             self.assertFalse(list(path.parent.glob(".test_spec.json.*.tmp")))
 
@@ -310,8 +309,8 @@ class TestSpecRepositoryTests(unittest.TestCase):
             workspace = Path(temp_dir)
             path = workspace / "reports" / "test_spec.json"
             save_test_spec(path, TestSpec.from_payload(copied_payload()), expected_revision=None, current_context=current_context(workspace))
-            left = load_test_spec(path, mode=ContractMode.STRICT)
-            right = load_test_spec(path, mode=ContractMode.STRICT)
+            left = load_test_spec(path)
+            right = load_test_spec(path)
             left.test_cases[0]["title"] = "left"
             right.test_cases[0]["title"] = "right"
 
@@ -323,7 +322,7 @@ class TestSpecRepositoryTests(unittest.TestCase):
 
             self.assertEqual(1, sum(not isinstance(item, Exception) for item in results), results)
             self.assertEqual(1, sum(isinstance(item, StaleRevisionError) for item in results), results)
-            persisted = load_test_spec(path, mode=ContractMode.STRICT)
+            persisted = load_test_spec(path)
             self.assertEqual(2, persisted.revision)
             self.assertFalse(list(path.parent.glob(".test_spec.json.*.tmp")))
 
@@ -332,7 +331,7 @@ class TestSpecRepositoryTests(unittest.TestCase):
             workspace = Path(temp_dir)
             path = workspace / "reports" / "test_spec.json"
             save_test_spec(path, TestSpec.from_payload(copied_payload()), expected_revision=None, current_context=current_context(workspace))
-            candidate = load_test_spec(path, mode=ContractMode.STRICT)
+            candidate = load_test_spec(path)
             candidate.test_cases[0]["title"] = "updated"
             save_test_spec(path, candidate, expected_revision=1, current_context=current_context(workspace))
             self.assertEqual(1, candidate.revision)

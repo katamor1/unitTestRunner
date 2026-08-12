@@ -23,6 +23,7 @@ from .global_access_models import (
 )
 from .signature_models import FunctionSignature
 from .source_models import SourceDigest
+from .type_classifier import classify_c_type
 
 
 DECLARATION_RE = re.compile(
@@ -40,6 +41,25 @@ def analyze_global_access(digest: SourceDigest, function_location: object, funct
     file_scope = _scan_declarations(masked[: candidate.header_range.start.offset], original, 0, "file")
     locals_ = _scan_declarations(body, original, body_offset, "local")
     warnings: list[GlobalAccessWarning] = []
+    defining_files = [digest.source.path]
+    defining_files.extend(
+        candidate
+        for include in digest.includes
+        for candidate in include.resolved_candidates
+        if candidate.is_file()
+    )
+    for declaration in [*file_scope, *locals_]:
+        if classify_c_type(declaration.type_raw, defining_files).kind == "unresolved":
+            declaration.confidence = "low"
+            warnings.append(
+                GlobalAccessWarning(
+                    "type_unresolved",
+                    f"Variable type requires review: {declaration.name}: {declaration.type_raw}",
+                    declaration.declaration_range.start.line,
+                    declaration.declaration_range.start.column,
+                    declaration.raw,
+                )
+            )
 
     parameter_names = {parameter.name for parameter in function_signature.parameters if parameter.name}
     local_names = {declaration.name for declaration in locals_} | parameter_names

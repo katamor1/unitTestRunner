@@ -27,20 +27,5 @@ class DossierSummaryBuilderTests(unittest.TestCase):
         self.assertEqual(2, dependency["global_read_count"])
         self.assertEqual(1, dependency["global_write_count"])
 
-    def test_counts_legacy_global_access_schema(self):
-        summaries = build_summaries(
-            {
-                "global_access": {
-                    "reads": [{"name": "g_count"}],
-                    "writes": [{"name": "g_count"}],
-                }
-            }
-        )
-
-        dependency = summaries["dependency_summary"]
-        self.assertEqual(1, dependency["global_read_count"])
-        self.assertEqual(1, dependency["global_write_count"])
-
-
 if __name__ == "__main__":
     unittest.main()

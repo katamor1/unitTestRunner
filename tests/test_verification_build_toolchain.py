@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import sys
@@ -13,7 +14,8 @@ VC6_FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "vc6_project"
 
 sys.path.insert(0, str(SRC_ROOT))
 
-from unit_test_runner.build.build_workspace_generator import generate_build_workspace
+from tests.spec_support import generate_public_build_workspace as generate_build_workspace
+from unit_test_runner.build import verification_toolchain as verification_module
 from unit_test_runner.build.verification_toolchain import VerificationBuildResult
 from unit_test_runner.cli.main import _apply_build_probe_environment
 from unit_test_runner.cli.parser import build_parser
@@ -21,6 +23,35 @@ from unit_test_runner.dossier import analyze_function_workflow
 
 
 class VerificationBuildToolchainTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows batch setup behavior")
+    def test_environment_setup_batch_with_spaces_applies_to_verification_command(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            setup_dir = root / "Visual Studio Tools"
+            setup_dir.mkdir()
+            setup = setup_dir / "vcvars.bat"
+            setup.write_text(
+                "@echo off\nset UTR_VERIFICATION_ENV=ready\n",
+                encoding="ascii",
+            )
+
+            exit_code, output = verification_module._run_command(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import os,sys; "
+                        "sys.exit(0 if os.environ.get('UTR_VERIFICATION_ENV') "
+                        "== 'ready' else 9)"
+                    ),
+                ],
+                cwd=root,
+                timeout_seconds=30,
+                env_setup=setup,
+            )
+
+        self.assertEqual(0, exit_code, output)
+
     def prepare_analysis(self, temp_dir):
         out_dir = Path(temp_dir) / "Control_Update"
         analyze_function_workflow(
@@ -31,6 +62,7 @@ class VerificationBuildToolchainTests(unittest.TestCase):
             "Win32 Debug",
             out_dir,
             "Control",
+            phase="harness",
         )
         reports = out_dir / "reports"
         return out_dir, {
@@ -69,12 +101,16 @@ class VerificationBuildToolchainTests(unittest.TestCase):
                 diagnostics=[],
                 compiler="gcc",
             )
+            reviewed_harness = copy.deepcopy(reports["harness_report"])
+            reviewed_harness["unresolved_placeholders"] = []
+            for test in reviewed_harness.get("test_skeletons", []):
+                test["review_required"] = False
 
             with mock.patch("unit_test_runner.build.build_workspace_generator.run_verification_build", return_value=verification_result) as run_verification:
                 workspace_report, probe = generate_build_workspace(
                     reports["build_context"],
                     reports["source_digest"],
-                    reports["harness_report"],
+                    reviewed_harness,
                     out_dir,
                     run_probe=True,
                     dry_run=False,

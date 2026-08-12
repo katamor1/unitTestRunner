@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import re
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +32,7 @@ def generate_test_case_design(
     policy: TestCaseGenerationPolicy | None = None,
     dependency_policy: Any | None = None,
     existing_design: dict | None = None,
+    source_relative_path: str | None = None,
 ) -> TestCaseDesignReport:
     policy = policy or TestCaseGenerationPolicy()
     signature_payload = _as_dict(function_signature)
@@ -41,6 +44,7 @@ def generate_test_case_design(
     existing_payload = existing_design or {}
     function = signature_payload["function"]
     source = signature_payload.get("source", {})
+    case_source_path = source_relative_path or str(source.get("path") or "")
     cases: list[TestCaseDesign] = []
     additional_cases: list[TestCaseDesign] = []
     unresolved = []
@@ -48,14 +52,20 @@ def generate_test_case_design(
     coverage_to_cases: dict[str, list[str]] = {}
 
     fallback_candidates = fallback_input_candidates(boundary_payload, 1000)
-    for index, coverage_item in enumerate(coverage_payload.get("coverage_items", []), start=1):
+    for coverage_item in coverage_payload.get("coverage_items", []):
         coverage_id = coverage_item["coverage_id"]
         selected, additional = select_candidates_for_coverage(boundary_payload, coverage_id, policy.max_cases_per_coverage_item)
-        test_case_id = f"TC_{function['name']}_{index:03d}"
+        case_kind = case_kind_for_coverage(coverage_item.get("coverage_type", ""))
+        test_case_id = _stable_case_id(
+            case_source_path,
+            function["name"],
+            coverage_id,
+            case_kind,
+        )
         related_candidates = selected + additional
         inputs, input_candidate_ids = build_input_assignments(signature_payload, selected, fallback_candidates)
         states, state_warnings, state_candidate_ids = build_state_setups(related_candidates, test_case_id, coverage_id)
-        stubs, stub_warnings, stub_candidate_ids = build_stub_setups(related_candidates, call_payload, coverage_item, test_case_id)
+        stubs, stub_warnings, stub_candidate_ids = build_stub_setups(selected, call_payload, coverage_item, test_case_id)
         observations, observation_warnings, unresolved_items = build_expected_observations(test_case_id, coverage_item, global_payload, signature_payload)
         candidate_links = input_candidate_ids + state_candidate_ids + stub_candidate_ids
         case = TestCaseDesign(
@@ -64,7 +74,7 @@ def generate_test_case_design(
             target_function=function["name"],
             purpose=coverage_item.get("purpose", f"Cover {coverage_id}"),
             priority=priority_for_coverage(coverage_item.get("coverage_type", "")),
-            case_kind=case_kind_for_coverage(coverage_item.get("coverage_type", "")),
+            case_kind=case_kind,
             preconditions=_preconditions(function["name"], bool(stubs)),
             input_assignments=inputs,
             state_setups=states,
@@ -91,7 +101,14 @@ def generate_test_case_design(
         warnings.extend(state_warnings + stub_warnings + observation_warnings)
         coverage_to_cases[coverage_id] = [test_case_id]
         if policy.include_additional_candidates:
-            additional_cases.extend(_additional_candidate_cases(function["name"], coverage_item, additional, len(additional_cases)))
+            additional_cases.extend(
+                _additional_candidate_cases(
+                    case_source_path,
+                    function["name"],
+                    coverage_item,
+                    additional,
+                )
+            )
 
     coverage_ids = [item["coverage_id"] for item in coverage_payload.get("coverage_items", [])]
     uncovered = [coverage_id for coverage_id in coverage_ids if coverage_id not in coverage_to_cases]
@@ -120,6 +137,7 @@ def generate_test_case_design_from_payloads(
     policy: TestCaseGenerationPolicy | None = None,
     dependency_policy: dict | None = None,
     existing_design: dict | None = None,
+    source_relative_path: str | None = None,
 ) -> TestCaseDesignReport:
     return generate_test_case_design(
         function_signature,
@@ -130,6 +148,7 @@ def generate_test_case_design_from_payloads(
         policy,
         dependency_policy,
         existing_design,
+        source_relative_path,
     )
 
 
@@ -201,11 +220,27 @@ def _case_confidence(coverage_item: dict, selected: list[dict]) -> str:
     return worst
 
 
-def _additional_candidate_cases(function_name: str, coverage_item: dict, candidates: list[dict], start_index: int) -> list[TestCaseDesign]:
+def _additional_candidate_cases(
+    source_relative_path: str,
+    function_name: str,
+    coverage_item: dict,
+    candidates: list[dict],
+) -> list[TestCaseDesign]:
     result = []
-    for offset, candidate in enumerate(candidates, start=1):
-        candidate_id = candidate.get("candidate_id", f"CAND_{offset}")
-        test_case_id = f"TC_{function_name}_ADD_{start_index + offset:03d}"
+    seen_case_ids: set[str] = set()
+    coverage_id = str(coverage_item.get("coverage_id") or "")
+    case_kind = case_kind_for_coverage(coverage_item.get("coverage_type", ""))
+    for candidate in candidates:
+        candidate_id = str(candidate.get("candidate_id") or "CANDIDATE")
+        test_case_id = _stable_case_id(
+            source_relative_path,
+            function_name,
+            f"{coverage_id}/{candidate_id}",
+            case_kind,
+        )
+        if test_case_id in seen_case_ids:
+            continue
+        seen_case_ids.add(test_case_id)
         result.append(
             TestCaseDesign(
                 test_case_id=test_case_id,
@@ -220,3 +255,22 @@ def _additional_candidate_cases(function_name: str, coverage_item: dict, candida
             )
         )
     return result
+
+
+def _stable_case_id(
+    source_relative_path: str,
+    function_name: str,
+    coverage_anchor: str,
+    case_kind: str,
+) -> str:
+    source = str(source_relative_path).replace("\\", "/").strip()
+    function = str(function_name).strip()
+    anchor = str(coverage_anchor).strip()
+    kind = str(case_kind).strip()
+    if not source or not function or not anchor or not kind:
+        raise ValueError("Stable test case identity requires source, function, coverage anchor, and case kind.")
+    digest = hashlib.sha256(
+        "\x1f".join((source, function, anchor, kind)).encode("utf-8")
+    ).hexdigest()[:12]
+    slug = re.sub(r"[^a-z0-9]+", "_", function.lower()).strip("_")
+    return f"TC_{slug or 'function'}_{digest}"

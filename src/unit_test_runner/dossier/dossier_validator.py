@@ -13,7 +13,6 @@ def validate_artifacts(
     artifacts: list[DossierArtifact],
     payloads: dict[str, dict[str, Any]],
     function_name: str | None,
-    strict_schema_version: bool = False,
 ) -> tuple[str | None, Path | None, list[DossierWarning], list[str]]:
     warnings: list[DossierWarning] = []
     blocked_reasons: list[str] = []

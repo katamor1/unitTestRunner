@@ -136,6 +136,7 @@ Invoke-Native -FilePath $exePath -Arguments @("--help")
 
 $smokeRoot = Join-Path $env:TEMP ("unitTestRunner-release-smoke-" + [guid]::NewGuid().ToString("N"))
 $dossierPath = Join-Path $smokeRoot "reports\function_dossier.json"
+$testSpecPath = Join-Path $smokeRoot "reports\test_spec.json"
 $smokeSucceeded = $false
 try {
     Invoke-Native -FilePath $exePath -Arguments @(
@@ -148,15 +149,35 @@ try {
         "--configuration", "Control - Win32 Debug",
         "--project", "Control",
         "--out", $smokeRoot,
-        "--finalize-dossier"
+        "--phase", "harness"
+    )
+    Invoke-Native -FilePath $exePath -Arguments @(
+        "--json",
+        "finalize-dossier",
+        "--workspace", $smokeRoot
     )
     if (-not (Test-Path -LiteralPath $dossierPath)) {
         throw "Executable smoke test did not create the finalized dossier: $dossierPath"
     }
+    if (-not (Test-Path -LiteralPath $testSpecPath)) {
+        throw "Executable smoke test did not create the canonical TestSpec: $testSpecPath"
+    }
+    $testSpecSha256 = (Get-FileHash -LiteralPath $testSpecPath -Algorithm SHA256).Hash.ToLowerInvariant()
     Invoke-Native -FilePath $exePath -Arguments @(
         "--json",
-        "prepare-review",
-        "--dossier", $dossierPath
+        "review-set",
+        "--workspace", $smokeRoot,
+        "--artifact-kind", "test_spec",
+        "--artifact-sha256", $testSpecSha256,
+        "--decision", "approved",
+        "--reviewer", "release-smoke",
+        "--comment", "S2 packaged executable smoke"
+    )
+    Invoke-Native -FilePath $exePath -Arguments @(
+        "--json",
+        "build-probe",
+        "--workspace", $smokeRoot,
+        "--dry-run"
     )
     $smokeSucceeded = $true
 }

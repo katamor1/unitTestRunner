@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -12,6 +13,7 @@ from typing import Any
 from unit_test_runner.c_analyzer.object_definition_finder import find_file_scope_object_definitions
 from unit_test_runner.encoding import decode_bytes_auto
 from unit_test_runner.harness.c90_writer import sha256_file
+from unit_test_runner.path_utils import validate_external_output_root
 from unit_test_runner.process_control import run_process_tree
 
 from .build_models import (
@@ -22,6 +24,7 @@ from .build_models import (
     BuildProbeReport,
     BuildWorkspaceReport,
     CompileUnit,
+    LinkLibraryEntry,
     WorkspaceFile,
 )
 from .build_report_writer import write_build_reports, write_build_text
@@ -30,7 +33,11 @@ from .log_parser import parse_build_log
 from .verification_toolchain import render_verification_build_info, run_verification_build
 
 _QUOTE_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*"([^"]+)"', re.MULTILINE)
-_EXTERN_VARIABLE_RE = re.compile(r"(?m)^\s*extern\s+(?P<prefix>[^;\n()]*?)(?P<name>[A-Za-z_]\w*)\s*(?P<array>(?:\[[^\]]*\])*)\s*;")
+_ENV_INCLUDE_RE = re.compile(r"%[^%]+%")
+_EXTERN_VARIABLE_RE = re.compile(
+    r"(?m)^\s*(?:extern|EXTERN)\s+(?P<prefix>[^;\n()]*?)(?P<name>[A-Za-z_]\w*)\s*(?P<array>(?:\[[^\]]*\])*)\s*;"
+)
+_HEADER_REFERENCE_DIRS_BY_OUTPUT: dict[str, set[Path]] = {}
 
 
 def generate_build_workspace(
@@ -42,18 +49,23 @@ def generate_build_workspace(
     dry_run: bool = True,
     vcvars: Path | str | None = None,
     timeout_seconds: int = 120,
-    overwrite: bool = False,
     toolchain: str | None = None,
     cc: Path | str | None = None,
 ) -> tuple[BuildWorkspaceReport, BuildProbeReport]:
-    del overwrite
-    output_root = Path(output_root).resolve()
+    workspace_root = Path(build_context.get("workspace_root") or "").resolve()
+    output_root = (
+        validate_external_output_root(output_root, workspace_root)
+        if build_context.get("workspace_root")
+        else Path(output_root).resolve()
+    )
     toolchain = _normalize_toolchain(toolchain or os.environ.get("UNIT_TEST_RUNNER_BUILD_TOOLCHAIN") or "vc6")
     cc = cc or os.environ.get("UNIT_TEST_RUNNER_CC")
     _ensure_layout(output_root)
     source_path = Path(source_digest.get("source", {}).get("path") or harness_report.get("source", {}).get("path") or "")
     function_name = harness_report.get("function", {}).get("name") or "unknown_function"
     diagnostics: list[BuildDiagnostic] = []
+    link_libraries = _link_libraries(build_context, diagnostics)
+    library_dirs = _library_dirs(build_context)
     copied_files = _copy_target_and_headers(output_root, source_path, source_digest, build_context, function_name, diagnostics)
     _copy_dependency_sources(output_root, build_context, harness_report, copied_files, diagnostics)
     generated_files = _copy_or_verify_generated_files(output_root, harness_report, diagnostics)
@@ -63,26 +75,95 @@ def generate_build_workspace(
         harness_report,
         diagnostics,
     )
+    execution_blockers = (
+        _harness_execution_blockers(harness_report, source_path, function_name)
+        if run_probe and not dry_run
+        else []
+    )
+    for blocker in execution_blockers:
+        diagnostics.append(
+            BuildDiagnostic(
+                "harness_review_required",
+                "error",
+                blocker,
+                None,
+                None,
+                None,
+            )
+        )
     generated_files.extend(_generate_extern_global_definitions(output_root, copied_files, diagnostics))
     include_dirs = _include_dirs(output_root, build_context)
     defines = _defines(build_context)
     compiler_options = _compiler_options(build_context)
     compile_units = _compile_units(output_root, copied_files, generated_files, include_dirs, defines, compiler_options)
-    build_commands = _write_build_files(output_root, compile_units, include_dirs, defines, compiler_options, vcvars, dry_run, toolchain, cc)
-    if dependency_rewrite_blocked:
+    build_commands = _write_build_files(
+        output_root,
+        compile_units,
+        include_dirs,
+        defines,
+        compiler_options,
+        vcvars,
+        dry_run,
+        toolchain,
+        cc,
+        link_libraries,
+        library_dirs,
+    )
+    if dependency_rewrite_blocked or execution_blockers:
         status = "blocked"
     else:
         status = "partial" if any(item.severity == "error" for item in diagnostics) else "generated"
-    workspace_report = BuildWorkspaceReport(source_path, function_name, status, output_root, copied_files, [], [], compile_units, [unit.object_file for unit in compile_units], include_dirs, defines, compiler_options, build_commands, diagnostics)
-    if dependency_rewrite_blocked:
-        probe_report = _blocked_dependency_rewrite_probe(
+    workspace_report = BuildWorkspaceReport(
+        source_path=source_path,
+        function_name=function_name,
+        status=status,
+        output_root=output_root,
+        copied_files=copied_files,
+        referenced_files=[],
+        generated_build_files=[],
+        compile_units=compile_units,
+        link_units=[unit.object_file for unit in compile_units]
+        + [item.path for item in link_libraries],
+        include_dirs=include_dirs,
+        defines=defines,
+        compiler_options=compiler_options,
+        build_commands=build_commands,
+        diagnostics=diagnostics,
+        link_libraries=link_libraries,
+        library_dirs=library_dirs,
+    )
+    if dependency_rewrite_blocked or execution_blockers:
+        probe_report = _blocked_build_probe(
             output_root,
             source_path,
             function_name,
             diagnostics,
         )
     else:
-        probe_report = _build_probe_report(output_root, source_path, function_name, build_commands, compile_units, include_dirs, defines, compiler_options, harness_report, run_probe, dry_run, timeout_seconds, vcvars, toolchain, cc)
+        probe_report = _build_probe_report(
+            output_root,
+            source_path,
+            function_name,
+            build_commands,
+            compile_units,
+            include_dirs,
+            defines,
+            compiler_options,
+            harness_report,
+            run_probe,
+            dry_run,
+            timeout_seconds,
+            vcvars,
+            toolchain,
+            cc,
+            link_libraries,
+            library_dirs,
+        )
+    public_subject = build_context.get("public_subject")
+    if isinstance(public_subject, dict):
+        probe_report.public_subject = {
+            str(key): str(value) for key, value in public_subject.items()
+        }
     write_build_reports(output_root, workspace_report, probe_report)
     return workspace_report, probe_report
 
@@ -92,29 +173,6 @@ def _ensure_layout(output_root: Path) -> None:
         (output_root / relative).mkdir(parents=True, exist_ok=True)
 
 
-def _copy_target_and_headers(
-    output_root: Path,
-    source_path: Path,
-    source_digest: dict[str, Any],
-    build_context: dict[str, Any],
-    function_name: str,
-    diagnostics: list[BuildDiagnostic],
-) -> list[WorkspaceFile]:
-    copied: list[WorkspaceFile] = []
-    workspace_root = Path(build_context.get("workspace_root") or source_path.parent)
-    include_roots = _include_search_roots(workspace_root, build_context)
-    target_relative = _relative_or_name(source_path, workspace_root)
-    target_workspace = Path("extracted") / target_relative
-    _copy_target_source(source_path, output_root / target_workspace, copied, target_workspace, source_digest, function_name, diagnostics)
-    header_queue: list[Path] = []
-    for include in source_digest.get("preprocessor", {}).get("includes", []):
-        candidates = [Path(item) for item in include.get("resolved_candidates", []) if item]
-        existing = next((item for item in candidates if item.exists()), None)
-        if existing is None:
-            continue
-        _copy_header(existing, output_root, workspace_root, include_roots, copied, diagnostics, header_queue)
-    _copy_transitive_header_includes(output_root, workspace_root, include_roots, copied, diagnostics, header_queue)
-    return copied
 
 
 def _copy_target_source(
@@ -135,21 +193,6 @@ def _copy_target_source(
     copied.append(WorkspaceFile(relative_destination, "target_source", source_path=source, sha256=sha256_file(destination), copied=True, generated=False, required=True, exists=True))
 
 
-def _function_level_source_text(source: Path, source_digest: dict[str, Any], function_name: str) -> str | None:
-    if not source.exists():
-        return None
-    tokens = _source_tokens(source_digest)
-    definitions = _function_definitions_from_tokens(tokens)
-    if not definitions or not any(item["name"] == function_name for item in definitions):
-        return None
-    keep = _reachable_function_names(function_name, definitions, tokens)
-    if all(item["name"] in keep for item in definitions):
-        return None
-    try:
-        text = decode_bytes_auto(source.read_bytes())
-    except OSError:
-        return None
-    return _remove_unkept_functions(text, definitions, keep)
 
 
 def _source_tokens(source_digest: dict[str, Any]) -> list[dict[str, Any]]:
@@ -264,62 +307,10 @@ def _called_defined_functions(definition: dict[str, Any], tokens: list[dict[str,
     return calls
 
 
-def _remove_unkept_functions(text: str, definitions: list[dict[str, Any]], keep: set[str]) -> str:
-    result = text
-    for definition in sorted(definitions, key=lambda item: int(item["start"]), reverse=True):
-        if definition["name"] in keep:
-            continue
-        start = int(definition["start"])
-        end = int(definition["end"])
-        removed = result[start:end]
-        result = result[:start] + _removed_function_replacement(definition["name"], removed) + result[end:]
-    return result
-
-
-def _removed_function_replacement(name: str, removed_text: str) -> str:
-    newline_count = removed_text.count("\n")
-    comment = f"/* unit-test-runner build probe: unused peer function {name} removed for function-level linking. */"
-    return comment + ("\n" * max(1, newline_count))
-
-
 def _token_value(tokens: list[dict[str, Any]], index: int) -> str | None:
     if index < 0 or index >= len(tokens):
         return None
     return str(tokens[index].get("value"))
-
-
-def _copy_header(source: Path, output_root: Path, workspace_root: Path, include_roots: list[Path], copied: list[WorkspaceFile], diagnostics: list[BuildDiagnostic], queue: list[Path] | None = None) -> None:
-    destination_relative = _header_destination_relative(source, workspace_root, include_roots)
-    _copy_file(source, output_root / destination_relative, copied, destination_relative, "target_header", diagnostics)
-    if queue is not None:
-        queue.append(source)
-
-
-def _copy_transitive_header_includes(output_root: Path, workspace_root: Path, include_roots: list[Path], copied: list[WorkspaceFile], diagnostics: list[BuildDiagnostic], header_queue: list[Path]) -> None:
-    scanned: set[Path] = set()
-    while header_queue:
-        current = header_queue.pop(0)
-        try:
-            resolved_current = current.resolve()
-        except OSError:
-            continue
-        if resolved_current in scanned:
-            continue
-        scanned.add(resolved_current)
-        for include_target in _quote_include_targets(current):
-            included = _resolve_quoted_include(current, include_target, include_roots)
-            if included is None:
-                diagnostics.append(BuildDiagnostic("missing_transitive_include", "warning", f"Header include not found while preparing build workspace: {include_target}", current, None, None))
-                continue
-            try:
-                resolved_included = included.resolve()
-            except OSError:
-                resolved_included = included
-            already_copied = any(item.source_path is not None and item.source_path.resolve() == resolved_included for item in copied if item.exists)
-            if not already_copied:
-                _copy_header(included, output_root, workspace_root, include_roots, copied, diagnostics, header_queue)
-            elif resolved_included not in scanned:
-                header_queue.append(included)
 
 
 def _quote_include_targets(path: Path) -> list[str]:
@@ -356,35 +347,6 @@ def _include_search_roots(workspace_root: Path, build_context: dict[str, Any]) -
         if resolved not in roots:
             roots.append(resolved)
     return roots
-
-
-def _include_dir_path(raw: Any, workspace_root: Path) -> Path | None:
-    if isinstance(raw, dict):
-        value = raw.get("absolute") or raw.get("normalized") or raw.get("raw") or raw.get("path")
-    else:
-        value = raw
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text or "$" in text:
-        return None
-    path = Path(text.replace("\\", "/"))
-    return path if path.is_absolute() else workspace_root / path
-
-
-def _header_destination_relative(source: Path, workspace_root: Path, include_roots: list[Path]) -> Path:
-    try:
-        return Path("extracted") / source.resolve().relative_to(workspace_root.resolve())
-    except (OSError, ValueError):
-        pass
-    for root in include_roots:
-        try:
-            return Path("extracted") / "include" / source.resolve().relative_to(root.resolve())
-        except (OSError, ValueError):
-            continue
-    return Path("extracted") / "include" / source.name
-
-
 def _copy_file(source: Path, destination: Path, copied: list[WorkspaceFile], relative_destination: Path, kind: str, diagnostics: list[BuildDiagnostic]) -> None:
     existing = next((item for item in copied if item.workspace_path == relative_destination), None)
     if existing is not None and destination.exists():
@@ -398,41 +360,6 @@ def _copy_file(source: Path, destination: Path, copied: list[WorkspaceFile], rel
     copied.append(WorkspaceFile(relative_destination, kind, source_path=source, sha256=sha256_file(destination), copied=True, generated=False, required=True, exists=True))
 
 
-def _generate_extern_global_definitions(output_root: Path, copied_files: list[WorkspaceFile], diagnostics: list[BuildDiagnostic]) -> list[WorkspaceFile]:
-    del diagnostics
-    target_sources = [item for item in copied_files if item.file_kind == "target_source" and item.exists]
-    target_source_texts = [_workspace_text(output_root, item.workspace_path) for item in target_sources]
-    definitions: dict[str, tuple[str, Path]] = {}
-    for header in [item for item in copied_files if item.file_kind == "target_header" and item.exists]:
-        header_text = _workspace_text(output_root, header.workspace_path)
-        for prefix, name, array in _extern_variable_declarations(header_text):
-            if name in definitions or _target_source_defines_name(name, target_source_texts):
-                continue
-            declaration = _extern_definition_line(prefix, name, array)
-            if declaration:
-                definitions[name] = (declaration, header.workspace_path)
-    if not definitions:
-        return []
-    relative = Path("generated/stubs/utr_extern_globals.c")
-    lines = [
-        "/* generated extern data placeholders for function-level build probe */",
-        "/* review required: replace with product objects when a real integration build is needed */",
-        "",
-    ]
-    included_headers = []
-    for _name, (_definition, header_path) in sorted(definitions.items()):
-        include_path = _relative_include_from_generated_stubs(header_path)
-        if include_path not in included_headers:
-            included_headers.append(include_path)
-            lines.append(f'#include "{include_path}"')
-    lines.append("")
-    for name, (definition, _header_path) in sorted(definitions.items()):
-        lines.append(f"/* placeholder for unresolved external data symbol: {name} */")
-        lines.append(definition)
-    lines.append("")
-    destination = output_root / relative
-    write_build_text(destination, "\n".join(lines))
-    return [WorkspaceFile(relative, "extern_global_source", sha256=sha256_file(destination), copied=False, generated=True, required=False, exists=True)]
 
 
 def _workspace_text(output_root: Path, workspace_path: Path) -> str:
@@ -475,54 +402,6 @@ def _relative_include_from_generated_stubs(header_workspace_path: Path) -> str:
 
 
 
-def _copy_dependency_sources(
-    output_root: Path,
-    build_context: dict[str, Any],
-    harness_report: dict[str, Any],
-    copied_files: list[WorkspaceFile],
-    diagnostics: list[BuildDiagnostic],
-) -> None:
-    """Copy real dependency C files required by generated dispatchers.
-
-    Header-reference builds replace this hook with a version that also records the
-    original header directories. The base implementation intentionally copies only
-    C implementation files.
-    """
-    workspace_root = Path(build_context.get("workspace_root") or "")
-    target_sources = {
-        item.source_path.resolve()
-        for item in copied_files
-        if item.file_kind == "target_source" and item.source_path is not None and item.source_path.exists()
-    }
-    seen: set[Path] = set()
-    for dispatch in harness_report.get("dependency_dispatches", []):
-        if not dispatch.get("real_available") or not dispatch.get("implementation_source"):
-            continue
-        source = Path(str(dispatch["implementation_source"]))
-        if not source.is_absolute():
-            source = workspace_root / source
-        try:
-            source = source.resolve()
-        except OSError:
-            pass
-        if source in target_sources or source in seen:
-            continue
-        seen.add(source)
-        if not source.is_file():
-            diagnostics.append(
-                BuildDiagnostic(
-                    "missing_dependency_source",
-                    "error",
-                    f"Real dependency source is missing: {source}",
-                    source,
-                    None,
-                    None,
-                )
-            )
-            continue
-        relative = _relative_or_name(source, workspace_root) if workspace_root.as_posix() else Path(source.name)
-        workspace_path = Path("extracted/dependencies") / relative
-        _copy_file(source, output_root / workspace_path, copied_files, workspace_path, "dependency_source", diagnostics)
 
 
 def _rewrite_target_dependency_calls(
@@ -565,18 +444,16 @@ def _rewrite_target_dependency_calls(
     return blocked
 
 
-def _blocked_dependency_rewrite_probe(
+def _blocked_build_probe(
     output_root: Path,
     source_path: Path,
     function_name: str,
     diagnostics: list[BuildDiagnostic],
 ) -> BuildProbeReport:
-    rewrite_diagnostics = [
-        item for item in diagnostics if item.code == "dependency_call_rewrite_failed"
-    ]
+    blocking_diagnostics = [item for item in diagnostics if item.severity == "error"]
     log_path = output_root / "logs" / "build.log"
-    lines = ["BUILD BLOCKED", "Dependency call rewriting failed; no compiler was started."]
-    lines.extend(item.message for item in rewrite_diagnostics)
+    lines = ["BUILD BLOCKED", "Build preconditions were not satisfied; no compiler was started."]
+    lines.extend(item.message for item in blocking_diagnostics)
     log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return BuildProbeReport(
         source_path,
@@ -585,13 +462,36 @@ def _blocked_dependency_rewrite_probe(
         False,
         None,
         [],
-        rewrite_diagnostics,
+        blocking_diagnostics,
         [],
         [],
         [],
         [],
         [Path("logs/build.log")],
     )
+
+
+def _harness_execution_blockers(
+    harness_report: dict[str, Any],
+    source_path: Path,
+    function_name: str,
+) -> list[str]:
+    blockers: list[str] = []
+    if harness_report.get("unresolved_placeholders"):
+        blockers.append("Harness contains unresolved review gates.")
+    tests = list(harness_report.get("test_skeletons", []))
+    if not tests:
+        blockers.append("Harness has no reviewed runnable test case.")
+    elif any(bool(item.get("review_required")) for item in tests):
+        blockers.append("Harness contains a test case that still requires review.")
+    normalized = source_path.as_posix().casefold()
+    supported = function_name == "Control_Update" or (
+        function_name == "DeviceControl_Update"
+        and "/vc6_practical_project/" in f"/{normalized.strip('/')}"
+    )
+    if not supported:
+        blockers.append("Real execution is limited to the reviewed Control_Update and practical fixture paths.")
+    return list(dict.fromkeys(blockers))
 
 
 def _copy_or_verify_generated_files(output_root: Path, harness_report: dict[str, Any], diagnostics: list[BuildDiagnostic]) -> list[WorkspaceFile]:
@@ -616,20 +516,6 @@ def _copy_or_verify_generated_files(output_root: Path, harness_report: dict[str,
     return files
 
 
-def _include_dirs(output_root: Path, build_context: dict[str, Any]) -> list[BuildPathEntry]:
-    entries = [
-        BuildPathEntry("generated/include", Path("generated/include"), output_root / "generated" / "include", (output_root / "generated" / "include").exists(), "generated_include"),
-        BuildPathEntry("generated/harness", Path("generated/harness"), output_root / "generated" / "harness", (output_root / "generated" / "harness").exists(), "generated_include"),
-        BuildPathEntry("generated/stubs", Path("generated/stubs"), output_root / "generated" / "stubs", (output_root / "generated" / "stubs").exists(), "generated_include"),
-        BuildPathEntry("generated/tests", Path("generated/tests"), output_root / "generated" / "tests", (output_root / "generated" / "tests").exists(), "generated_include"),
-        BuildPathEntry("extracted/include", Path("extracted/include"), output_root / "extracted" / "include", (output_root / "extracted" / "include").exists(), "extracted_include"),
-    ]
-    workspace_root = Path(build_context.get("workspace_root") or "")
-    for raw in build_context.get("include_dirs", []):
-        normalized = str(raw).replace("\\", "/")
-        original = (workspace_root / normalized).resolve() if workspace_root.as_posix() else Path(normalized)
-        entries.append(BuildPathEntry(normalized, Path("extracted") / normalized, original, original.exists(), "dsp_include"))
-    return entries
 
 
 def _defines(build_context: dict[str, Any]) -> list[str]:
@@ -674,8 +560,30 @@ def _compile_units(output_root: Path, copied_files: list[WorkspaceFile], generat
     return units
 
 
-def _write_build_files(output_root: Path, compile_units: list[CompileUnit], include_dirs: list[BuildPathEntry], defines: list[str], compiler_options: list[str], vcvars: Path | str | None, dry_run: bool, toolchain: str, cc: Path | str | None) -> list[BuildCommand]:
-    write_build_text(output_root / "build" / "Makefile", _render_makefile(compile_units, include_dirs, defines, compiler_options))
+def _write_build_files(
+    output_root: Path,
+    compile_units: list[CompileUnit],
+    include_dirs: list[BuildPathEntry],
+    defines: list[str],
+    compiler_options: list[str],
+    vcvars: Path | str | None,
+    dry_run: bool,
+    toolchain: str,
+    cc: Path | str | None,
+    link_libraries: list[LinkLibraryEntry],
+    library_dirs: list[Path],
+) -> list[BuildCommand]:
+    write_build_text(
+        output_root / "build" / "Makefile",
+        _render_makefile(
+            compile_units,
+            include_dirs,
+            defines,
+            compiler_options,
+            link_libraries,
+            library_dirs,
+        ),
+    )
     write_build_text(output_root / "build" / "build.bat", _render_build_bat(vcvars))
     write_build_text(output_root / "build" / "clean.bat", "@echo off\nrem generated clean helper; remove obj/bin artifacts manually if needed\n")
     write_build_text(output_root / "build" / "compile_commands.txt", "\n".join(unit.command for unit in compile_units) + "\n")
@@ -685,7 +593,25 @@ def _write_build_files(output_root: Path, compile_units: list[CompileUnit], incl
     return [BuildCommand("CMD_BUILD_001", "build_bat", Path("build"), "build.bat", Path("logs/build.log"), dry_run)]
 
 
-def _build_probe_report(output_root: Path, source_path: Path, function_name: str, build_commands: list[BuildCommand], compile_units: list[CompileUnit], include_dirs: list[BuildPathEntry], defines: list[str], compiler_options: list[str], harness_report: dict[str, Any], run_probe: bool, dry_run: bool, timeout_seconds: int, vcvars: Path | str | None, toolchain: str, cc: Path | str | None) -> BuildProbeReport:
+def _build_probe_report(
+    output_root: Path,
+    source_path: Path,
+    function_name: str,
+    build_commands: list[BuildCommand],
+    compile_units: list[CompileUnit],
+    include_dirs: list[BuildPathEntry],
+    defines: list[str],
+    compiler_options: list[str],
+    harness_report: dict[str, Any],
+    run_probe: bool,
+    dry_run: bool,
+    timeout_seconds: int,
+    vcvars: Path | str | None,
+    toolchain: str,
+    cc: Path | str | None,
+    link_libraries: list[LinkLibraryEntry],
+    library_dirs: list[Path],
+) -> BuildProbeReport:
     stub_candidates = {item.get("original_function_name", "") for item in harness_report.get("stub_skeletons", [])}
     if dry_run or not run_probe:
         log_path = output_root / "logs" / "build.log"
@@ -693,7 +619,23 @@ def _build_probe_report(output_root: Path, source_path: Path, function_name: str
         log_path.write_text(f"DRY RUN\n{command_line}\n", encoding="utf-8")
         return BuildProbeReport(source_path, function_name, "not_run", False, None, [], [], [], [], [], [], [Path("logs/build.log")])
     if toolchain == "verification":
-        return _verification_probe_report(output_root, source_path, function_name, build_commands, compile_units, include_dirs, defines, compiler_options, harness_report, timeout_seconds, vcvars, cc, stub_candidates)
+        return _verification_probe_report(
+            output_root,
+            source_path,
+            function_name,
+            build_commands,
+            compile_units,
+            include_dirs,
+            defines,
+            compiler_options,
+            harness_report,
+            timeout_seconds,
+            vcvars,
+            cc,
+            stub_candidates,
+            link_libraries,
+            library_dirs,
+        )
     nmake = shutil.which("nmake")
     cl = shutil.which("cl")
     if not nmake and not cl and not vcvars:
@@ -743,10 +685,37 @@ def _build_probe_report(output_root: Path, source_path: Path, function_name: str
     )
 
 
-def _verification_probe_report(output_root: Path, source_path: Path, function_name: str, build_commands: list[BuildCommand], compile_units: list[CompileUnit], include_dirs: list[BuildPathEntry], defines: list[str], compiler_options: list[str], harness_report: dict[str, Any], timeout_seconds: int, vcvars: Path | str | None, cc: Path | str | None, stub_candidates: set[str]) -> BuildProbeReport:
+def _verification_probe_report(
+    output_root: Path,
+    source_path: Path,
+    function_name: str,
+    build_commands: list[BuildCommand],
+    compile_units: list[CompileUnit],
+    include_dirs: list[BuildPathEntry],
+    defines: list[str],
+    compiler_options: list[str],
+    harness_report: dict[str, Any],
+    timeout_seconds: int,
+    vcvars: Path | str | None,
+    cc: Path | str | None,
+    stub_candidates: set[str],
+    link_libraries: list[LinkLibraryEntry],
+    library_dirs: list[Path],
+) -> BuildProbeReport:
     started = datetime.now(timezone.utc)
     start_tick = time.monotonic()
-    verification = run_verification_build(output_root, compile_units, include_dirs, defines, compiler_options, cc=cc, timeout_seconds=timeout_seconds, env_setup=vcvars)
+    verification = run_verification_build(
+        output_root,
+        compile_units,
+        include_dirs,
+        defines,
+        compiler_options,
+        cc=cc,
+        timeout_seconds=timeout_seconds,
+        env_setup=vcvars,
+        link_libraries=[item.path for item in link_libraries],
+        library_dirs=library_dirs,
+    )
     duration_ms = int((time.monotonic() - start_tick) * 1000)
     finished = datetime.now(timezone.utc)
     if not verification.executed:
@@ -781,19 +750,34 @@ def _compile_command(source: Path, object_file: Path, include_dirs: list[BuildPa
     return f'cl {option_args} {define_args} {include_args} /Fo"{object_file.as_posix()}" /c "{source.as_posix()}"'
 
 
-def _render_makefile(compile_units: list[CompileUnit], include_dirs: list[BuildPathEntry], defines: list[str], compiler_options: list[str]) -> str:
+def _render_makefile(
+    compile_units: list[CompileUnit],
+    include_dirs: list[BuildPathEntry],
+    defines: list[str],
+    compiler_options: list[str],
+    link_libraries: list[LinkLibraryEntry],
+    library_dirs: list[Path],
+) -> str:
     objects = " ".join(_makefile_workspace_file(unit.object_file) for unit in compile_units)
+    libpaths = " ".join(
+        f'/LIBPATH:"{_windows_path(path)}"' for path in library_dirs
+    )
+    libraries = " ".join(
+        f'"{_windows_path(item.path)}"' for item in link_libraries
+    )
     lines = [
         "# generated VC6 build probe Makefile",
         "CC=cl",
         "LINK=link",
         f"CFLAGS={' '.join(compiler_options)} {' '.join('/D\"' + item + '\"' for item in defines)} {' '.join(_makefile_include_arg(item) for item in include_dirs)}",
         f"OBJS={objects}",
+        f"LIBPATHS={libpaths}",
+        f"LINK_LIBS={libraries}",
         "",
         "all: ..\\bin\\utr_probe.exe",
         "",
         "..\\bin\\utr_probe.exe: $(OBJS)",
-        "\t$(LINK) /nologo /OPT:REF /OUT:$@ $(OBJS)",
+        "\t$(LINK) /nologo /OPT:REF /OUT:$@ $(OBJS) $(LIBPATHS) $(LINK_LIBS)",
         "",
     ]
     for unit in compile_units:
@@ -815,16 +799,6 @@ def _makefile_workspace_file(path: Path) -> str:
     return (Path("..") / path).as_posix().replace("/", "\\")
 
 
-def _makefile_include_arg(entry: BuildPathEntry) -> str:
-    if "$(" in entry.raw:
-        include_path = entry.raw
-    elif Path(entry.raw).is_absolute():
-        include_path = entry.raw
-    else:
-        workspace_path = entry.workspace_path or Path(entry.raw)
-        include_path = (Path("..") / workspace_path).as_posix()
-    include_path = include_path.replace("/", "\\")
-    return f'/I"{include_path}"'
 
 
 def _relative_or_name(path: Path, root: Path) -> Path:
@@ -846,10 +820,9 @@ def _is_under_declared_include_dir(relative_path: Path, build_context: dict[str,
 
 def _normalize_toolchain(toolchain: str | None) -> str:
     value = (toolchain or "vc6").strip().lower()
-    aliases = {"vc6": "vc6", "verification": "verification", "verify": "verification", "host": "verification"}
-    if value not in aliases:
+    if value not in {"vc6", "verification"}:
         raise ValueError(f"Unsupported build toolchain: {toolchain}")
-    return aliases[value]
+    return value
 
 
 def _verification_command_line(cc: Path | str | None) -> str:
@@ -867,5 +840,572 @@ def _decode_process_output(output: bytes | str | None) -> str:
     return decode_bytes_auto(output)
 
 
+def _link_libraries(
+    build_context: dict[str, Any],
+    diagnostics: list[BuildDiagnostic],
+) -> list[LinkLibraryEntry]:
+    ordered = sorted(build_context.get("link_libraries", []), key=_link_order)
+    result: list[LinkLibraryEntry] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(ordered):
+        item = _mapping(raw)
+        path_text = str(item.get("path") or "").strip()
+        if not path_text:
+            diagnostics.append(
+                BuildDiagnostic(
+                    "link_library_not_found",
+                    "warning",
+                    "Link library path is empty.",
+                )
+            )
+            continue
+        path = Path(path_text).expanduser()
+        try:
+            path = path.resolve()
+        except OSError:
+            path = Path(path_text)
+        declared_exists = bool(item.get("exists", path.exists()))
+        if not declared_exists or not path.is_file():
+            diagnostics.append(
+                BuildDiagnostic(
+                    "link_library_not_found",
+                    "warning",
+                    f"Link library is unavailable: {path}",
+                    path,
+                )
+            )
+            continue
+        key = str(path).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(
+            LinkLibraryEntry(
+                path=path,
+                source=str(item.get("source") or "unknown"),
+                link_order=int(item.get("link_order", index)),
+                project_name=_optional_text(item.get("project_name")),
+                configuration=_optional_text(item.get("configuration")),
+                exists=True,
+                scan_status=_optional_text(item.get("scan_status")),
+            )
+        )
+    result.sort(key=lambda item: item.link_order)
+    return result
+
+
+def _library_dirs(build_context: dict[str, Any]) -> list[Path]:
+    result: list[Path] = []
+    seen: set[str] = set()
+    for raw in build_context.get("library_dirs", []):
+        value = raw.get("path") if isinstance(raw, dict) else raw
+        if value is None or not str(value).strip():
+            continue
+        path = Path(str(value)).expanduser()
+        try:
+            path = path.resolve()
+        except OSError:
+            continue
+        if not path.is_dir():
+            continue
+        key = str(path).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(path)
+    return result
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if hasattr(value, "to_dict"):
+        payload = value.to_dict()
+        return payload if isinstance(payload, dict) else {}
+    return {"path": value}
+
+
+def _link_order(value: Any) -> int:
+    item = _mapping(value)
+    try:
+        return int(item.get("link_order", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text if text else None
+
+
+def _windows_path(path: Path | str) -> str:
+    return str(path).replace("/", "\\")
+
+
 def _cmd_exe() -> str:
     return "cmd" + ".exe"
+
+
+def _include_dir_text(raw: Any) -> str:
+    if isinstance(raw, dict):
+        value = raw.get("normalized") or raw.get("raw") or raw.get("path") or raw.get("absolute")
+    else:
+        value = raw
+    if value is None:
+        return ""
+    return str(value).strip().strip('"').replace("\\", "/")
+
+
+def _is_passthrough_include_dir(text: str) -> bool:
+    return "$" in text or _ENV_INCLUDE_RE.search(text) is not None
+
+
+def _include_dir_path(raw: Any, workspace_root: Path) -> Path | None:
+    text = _include_dir_text(raw)
+    if not text or _is_passthrough_include_dir(text):
+        return None
+    path = Path(text.replace("\\", "/"))
+    return path if path.is_absolute() else workspace_root / path
+
+
+def _copy_target_and_headers(
+    output_root: Path,
+    source_path: Path,
+    source_digest: dict[str, Any],
+    build_context: dict[str, Any],
+    function_name: str,
+    diagnostics: list[BuildDiagnostic],
+) -> list[WorkspaceFile]:
+    """Copy only the target C file and keep headers as original-file references.
+
+    Large projects can have thousands of transitive headers. Copying those for every
+    function workspace is slow and can also duplicate unguarded legacy headers.  The
+    build workspace therefore keeps the extracted/isolated target C file local, but
+    resolves headers through include paths pointing back to the original project.
+    """
+    output_root = Path(output_root).resolve()
+    copied: list[WorkspaceFile] = []
+    workspace_root = Path(build_context.get("workspace_root") or source_path.parent)
+    include_roots = _include_search_roots(workspace_root, build_context)
+    target_relative = _relative_or_name(source_path, workspace_root)
+    target_workspace = Path("extracted") / target_relative
+    _copy_target_source(source_path, output_root / target_workspace, copied, target_workspace, source_digest, function_name, diagnostics)
+
+    header_queue: list[Path] = []
+    referenced_dirs: set[Path] = set()
+    if source_path.parent.exists():
+        referenced_dirs.add(source_path.parent.resolve())
+    for include in source_digest.get("preprocessor", {}).get("includes", []):
+        candidates = [Path(item) for item in include.get("resolved_candidates", []) if item]
+        existing = next((item for item in candidates if item.exists()), None)
+        if existing is None:
+            continue
+        _reference_header(existing, workspace_root, copied, diagnostics, header_queue, referenced_dirs)
+    _reference_transitive_header_includes(workspace_root, include_roots, copied, diagnostics, header_queue, referenced_dirs)
+    if workspace_root.as_posix():
+        try:
+            referenced_dirs.add(workspace_root.resolve())
+        except OSError:
+            referenced_dirs.add(workspace_root)
+    _HEADER_REFERENCE_DIRS_BY_OUTPUT[str(output_root)] = referenced_dirs
+    return copied
+
+
+def _reference_header(
+    source: Path,
+    workspace_root: Path,
+    copied: list[WorkspaceFile],
+    diagnostics: list[BuildDiagnostic],
+    queue: list[Path] | None = None,
+    referenced_dirs: set[Path] | None = None,
+) -> None:
+    try:
+        resolved = source.resolve()
+    except OSError:
+        resolved = source
+    existing = next((item for item in copied if item.source_path is not None and _same_file(item.source_path, resolved)), None)
+    if existing is not None:
+        if queue is not None:
+            queue.append(source)
+        return
+    if not source.exists():
+        diagnostics.append(BuildDiagnostic("missing_header_file", "warning", f"Referenced header is missing: {source}", source, None, None))
+        copied.append(WorkspaceFile(Path("referenced") / source.name, "target_header", source_path=source, copied=False, generated=False, required=True, exists=False))
+        return
+    workspace_path = Path("referenced") / _relative_or_name(source, workspace_root)
+    copied.append(WorkspaceFile(workspace_path, "target_header", source_path=resolved, copied=False, generated=False, required=True, exists=True))
+    if referenced_dirs is not None:
+        referenced_dirs.add(resolved.parent)
+    if queue is not None:
+        queue.append(source)
+
+
+def _reference_transitive_header_includes(
+    workspace_root: Path,
+    include_roots: list[Path],
+    copied: list[WorkspaceFile],
+    diagnostics: list[BuildDiagnostic],
+    header_queue: list[Path],
+    referenced_dirs: set[Path],
+) -> None:
+    scanned: set[Path] = set()
+    while header_queue:
+        current = header_queue.pop(0)
+        try:
+            resolved_current = current.resolve()
+        except OSError:
+            continue
+        if resolved_current in scanned:
+            continue
+        scanned.add(resolved_current)
+        for include_target in _quote_include_targets(current):
+            included = _resolve_quoted_include(current, include_target, include_roots)
+            if included is None:
+                diagnostics.append(BuildDiagnostic("missing_transitive_include", "warning", f"Header include not found while preparing build workspace: {include_target}", current, None, None))
+                continue
+            try:
+                resolved_included = included.resolve()
+            except OSError:
+                resolved_included = included
+            already_referenced = any(item.source_path is not None and _same_file(item.source_path, resolved_included) for item in copied if item.exists)
+            if not already_referenced:
+                _reference_header(included, workspace_root, copied, diagnostics, header_queue, referenced_dirs)
+            elif resolved_included not in scanned:
+                header_queue.append(included)
+
+
+
+def _copy_dependency_sources(
+    output_root: Path,
+    build_context: dict[str, Any],
+    harness_report: dict[str, Any],
+    copied_files: list[WorkspaceFile],
+    diagnostics: list[BuildDiagnostic],
+) -> None:
+    """Copy real dependency/object C files while retaining headers by reference."""
+    output_root = Path(output_root).resolve()
+    workspace_root = Path(build_context.get("workspace_root") or "")
+    include_roots = _include_search_roots(workspace_root, build_context)
+    referenced_dirs = _HEADER_REFERENCE_DIRS_BY_OUTPUT.setdefault(str(output_root), set())
+    copied_sources: set[Path] = set()
+    for item in copied_files:
+        if item.source_path is None or not item.source_path.exists():
+            continue
+        try:
+            copied_sources.add(item.source_path.resolve())
+        except OSError:
+            copied_sources.add(item.source_path)
+
+    def copy_source(raw_source: Any, file_kind: str, root_folder: str) -> None:
+        if not raw_source:
+            return
+        source = Path(str(raw_source))
+        if not source.is_absolute():
+            source = workspace_root / source
+        try:
+            source = source.resolve()
+        except OSError:
+            pass
+        if source in copied_sources:
+            return
+        if not source.is_file():
+            diagnostics.append(BuildDiagnostic(f"missing_{file_kind}", "error", f"Required product source is missing: {source}", source, None, None))
+            return
+        copied_sources.add(source)
+        relative = _relative_or_name(source, workspace_root) if workspace_root.as_posix() else Path(source.name)
+        workspace_path = Path(root_folder) / relative
+        _copy_file(source, output_root / workspace_path, copied_files, workspace_path, file_kind, diagnostics)
+        referenced_dirs.add(source.parent)
+        header_queue: list[Path] = []
+        for include_target in _quote_include_targets(source):
+            included = _resolve_quoted_include(source, include_target, include_roots)
+            if included is None:
+                diagnostics.append(BuildDiagnostic("missing_dependency_include", "warning", f"Product source include not found while preparing build workspace: {include_target}", source, None, None))
+                continue
+            _reference_header(included, workspace_root, copied_files, diagnostics, header_queue, referenced_dirs)
+        _reference_transitive_header_includes(workspace_root, include_roots, copied_files, diagnostics, header_queue, referenced_dirs)
+
+    for dispatch in harness_report.get("dependency_dispatches", []):
+        if dispatch.get("real_available") and dispatch.get("implementation_source"):
+            copy_source(dispatch.get("implementation_source"), "dependency_source", "extracted/dependencies")
+
+    policy = _load_dependency_policy(output_root)
+    for external_object in policy.get("external_objects", []):
+        if external_object.get("resolved_mode") != "real":
+            continue
+        definition_source = external_object.get("definition_source")
+        if not definition_source:
+            diagnostics.append(BuildDiagnostic("external_object_definition_missing", "error", f"External object {external_object.get('symbol', '')} is configured as real but has no definition source.", None, None, None))
+            continue
+        copy_source(definition_source, "external_object_source", "extracted/external_objects")
+
+
+def _load_dependency_policy(output_root: Path) -> dict[str, Any]:
+    path = Path(output_root) / "reports" / "dependency_policy.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+def _include_dirs(output_root: Path, build_context: dict[str, Any]) -> list[BuildPathEntry]:
+    output_root = Path(output_root).resolve()
+    entries: list[BuildPathEntry] = []
+    seen: set[str] = set()
+
+    def append(raw: str, workspace_path: Path | None, original_path: Path | None, exists: bool, source: str) -> None:
+        key = raw.replace("\\", "/").lower()
+        if key in seen:
+            return
+        seen.add(key)
+        entries.append(BuildPathEntry(raw, workspace_path, original_path, exists, source))
+
+    append("generated/include", Path("generated/include"), output_root / "generated" / "include", (output_root / "generated" / "include").exists(), "generated_include")
+    append("generated/harness", Path("generated/harness"), output_root / "generated" / "harness", (output_root / "generated" / "harness").exists(), "generated_include")
+    append("generated/stubs", Path("generated/stubs"), output_root / "generated" / "stubs", (output_root / "generated" / "stubs").exists(), "generated_include")
+    append("generated/tests", Path("generated/tests"), output_root / "generated" / "tests", (output_root / "generated" / "tests").exists(), "generated_include")
+    append("generated/dependencies", Path("generated/dependencies"), output_root / "generated" / "dependencies", (output_root / "generated" / "dependencies").exists(), "generated_include")
+    append("extracted/include", Path("extracted/include"), output_root / "extracted" / "include", (output_root / "extracted" / "include").exists(), "extracted_include")
+
+    for directory in sorted(_HEADER_REFERENCE_DIRS_BY_OUTPUT.get(str(output_root), set()), key=lambda item: item.as_posix().lower()):
+        append(directory.as_posix(), None, directory, directory.exists(), "referenced_header_dir")
+
+    workspace_root = Path(build_context.get("workspace_root") or "")
+    if workspace_root.as_posix():
+        try:
+            resolved_workspace = workspace_root.resolve()
+        except OSError:
+            resolved_workspace = workspace_root
+        append(resolved_workspace.as_posix(), None, resolved_workspace, resolved_workspace.exists(), "workspace_root")
+    for raw in build_context.get("include_dirs", []):
+        normalized = _include_dir_text(raw)
+        if not normalized:
+            continue
+        if _is_passthrough_include_dir(normalized):
+            append(normalized, None, None, False, "dsp_include")
+            continue
+        original = (workspace_root / normalized).resolve() if workspace_root.as_posix() and not Path(normalized).is_absolute() else Path(normalized).resolve()
+        append(original.as_posix(), None, original, original.exists(), "dsp_include")
+    return entries
+
+
+def _makefile_include_arg(entry: BuildPathEntry) -> str:
+    if _is_passthrough_include_dir(entry.raw):
+        include_path = entry.raw
+    elif Path(entry.raw).is_absolute():
+        include_path = entry.raw
+    elif entry.workspace_path is not None:
+        include_path = (Path("..") / entry.workspace_path).as_posix()
+    else:
+        include_path = entry.raw
+    include_path = include_path.replace("/", "\\")
+    return f'/I"{include_path}"'
+
+
+def _generate_extern_global_definitions(output_root: Path, copied_files: list[WorkspaceFile], diagnostics: list[BuildDiagnostic]) -> list[WorkspaceFile]:
+    output_root = Path(output_root).resolve()
+    destination = output_root / "generated/stubs/utr_extern_globals.c"
+    if destination.exists():
+        destination.unlink()
+
+    policy = _load_dependency_policy(output_root)
+    object_policies = {
+        str(item.get("symbol")): item
+        for item in policy.get("external_objects", [])
+        if item.get("symbol")
+    }
+    for symbol, item in object_policies.items():
+        if item.get("resolved_mode") == "review_required" or item.get("review_status") == "review_required":
+            diagnostics.append(
+                BuildDiagnostic(
+                    "external_object_binding_review_required",
+                    "error",
+                    f"External object {symbol} has no safe automatic binding. Review dependency_policy.json.",
+                    Path(str(item.get("declaration_header"))) if item.get("declaration_header") else None,
+                    None,
+                    None,
+                )
+            )
+
+    source_items = [
+        item
+        for item in copied_files
+        if item.file_kind in {"target_source", "dependency_source", "external_object_source"} and item.exists
+    ]
+    source_texts = [_workspace_or_source_text(output_root, item) for item in source_items]
+    definitions: dict[str, tuple[str, str]] = {}
+    matched_fixture_symbols: set[str] = set()
+    for header in [item for item in copied_files if item.file_kind == "target_header" and item.exists]:
+        header_text = _workspace_or_source_text(output_root, header)
+        for prefix, name, array in _extern_variable_declarations(header_text):
+            item_policy = object_policies.get(name)
+            mode = str(item_policy.get("resolved_mode")) if item_policy else "fixture"
+            if mode == "real" or mode == "review_required":
+                continue
+            if name in definitions:
+                matched_fixture_symbols.add(name)
+                continue
+            if _target_source_defines_name(name, source_texts):
+                if item_policy and mode == "fixture":
+                    diagnostics.append(BuildDiagnostic("external_object_fixture_conflict", "error", f"Fixture binding for {name} conflicts with a linked product definition.", header.source_path or header.workspace_path, None, None))
+                continue
+            declaration = _extern_definition_line(prefix, name, array)
+            if declaration:
+                include_token = str(item_policy.get("declaration_header") or "").replace("\\", "/") if item_policy else ""
+                definitions[name] = (declaration, include_token or _include_token_for_header(header))
+                matched_fixture_symbols.add(name)
+
+    for symbol, item in object_policies.items():
+        if item.get("resolved_mode") == "fixture" and symbol not in matched_fixture_symbols:
+            diagnostics.append(
+                BuildDiagnostic(
+                    "external_object_fixture_declaration_missing",
+                    "error",
+                    f"Fixture binding for {symbol} could not find a compatible extern declaration in referenced headers.",
+                    Path(str(item.get("declaration_header"))) if item.get("declaration_header") else None,
+                    None,
+                    None,
+                )
+            )
+
+    if not definitions:
+        return []
+    relative = Path("generated/stubs/utr_extern_globals.c")
+    lines = [
+        "/* generated extern data fixtures for function-level build probe */",
+        "/* bindings are selected by reports/dependency_policy.json */",
+        "",
+    ]
+    included_headers: list[str] = []
+    for _name, (_definition, include_path) in sorted(definitions.items()):
+        if include_path not in included_headers:
+            included_headers.append(include_path)
+            lines.append(f'#include "{include_path}"')
+    lines.append("")
+    for name, (definition, _include_path) in sorted(definitions.items()):
+        lines.append(f"/* fixture for declaration-only external object: {name} */")
+        lines.append(definition)
+    lines.append("")
+    write_build_text(destination, "\n".join(lines))
+    return [WorkspaceFile(relative, "extern_global_source", sha256=sha256_file(destination), copied=False, generated=True, required=False, exists=True)]
+
+def _workspace_or_source_text(output_root: Path, item: WorkspaceFile) -> str:
+    if item.source_path is not None and not item.copied:
+        try:
+            return decode_bytes_auto(item.source_path.read_bytes())
+        except OSError:
+            return ""
+    return _workspace_text(output_root, item.workspace_path)
+
+
+def _include_token_for_header(item: WorkspaceFile) -> str:
+    if item.source_path is not None and not item.copied:
+        return item.source_path.name
+    return _relative_include_from_generated_stubs(item.workspace_path)
+
+
+def _same_file(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return left == right
+
+
+def _function_level_source_text(source: Path, source_digest: dict[str, Any], function_name: str) -> str | None:
+    if not source.exists():
+        return None
+    tokens = _source_tokens(source_digest)
+    definitions = _function_definitions_from_tokens(tokens)
+    if not definitions or not any(item["name"] == function_name for item in definitions):
+        return None
+    keep = _reachable_function_names(function_name, definitions, tokens)
+    if all(item["name"] in keep for item in definitions):
+        return None
+    try:
+        text = decode_bytes_auto(source.read_bytes())
+    except OSError:
+        return None
+    return _remove_unkept_functions_from_text(text, definitions, keep)
+
+
+def _remove_unkept_functions_from_text(text: str, definitions: list[dict[str, Any]], keep: set[str]) -> str:
+    result = text
+    for definition in sorted(definitions, key=lambda item: int(item["start"]), reverse=True):
+        if definition["name"] in keep:
+            continue
+        start = int(definition["start"])
+        end = _safe_definition_end(result, definition)
+        if start < 0 or end < start or end > len(result):
+            continue
+        removed = result[start:end]
+        result = result[:start] + _removed_function_replacement_text(definition["name"], removed) + result[end:]
+    return result
+
+
+def _safe_definition_end(text: str, definition: dict[str, Any]) -> int:
+    start = max(0, int(definition.get("start", 0)))
+    expected_end = min(len(text), max(start, int(definition.get("end", start))))
+    if expected_end > start and text[expected_end - 1] == "}":
+        return expected_end
+    open_index = text.find("{", start, expected_end + 1)
+    if open_index == -1:
+        return expected_end
+    close_index = _matching_brace_index(text, open_index)
+    if close_index == -1:
+        return expected_end
+    return close_index + 1
+
+
+def _matching_brace_index(text: str, open_index: int) -> int:
+    depth = 0
+    index = open_index
+    state = "normal"
+    quote = ""
+    while index < len(text):
+        current = text[index]
+        nxt = text[index + 1] if index + 1 < len(text) else ""
+        if state == "normal":
+            if current == "/" and nxt == "*":
+                state = "block_comment"
+                index += 2
+                continue
+            if current == "/" and nxt == "/":
+                state = "line_comment"
+                index += 2
+                continue
+            if current in {'"', "'"}:
+                quote = current
+                state = "literal"
+                index += 1
+                continue
+            if current == "{":
+                depth += 1
+            elif current == "}":
+                depth -= 1
+                if depth == 0:
+                    return index
+        elif state == "block_comment":
+            if current == "*" and nxt == "/":
+                state = "normal"
+                index += 2
+                continue
+        elif state == "line_comment":
+            if current == "\n":
+                state = "normal"
+        elif state == "literal":
+            if current == "\\":
+                index += 2
+                continue
+            if current == quote:
+                state = "normal"
+        index += 1
+    return -1
+
+
+def _removed_function_replacement_text(name: str, removed: str) -> str:
+    newline = "\r\n" if "\r\n" in removed else "\n"
+    newline_count = removed.count("\n")
+    comment = f"/* unit-test-runner build probe: unused peer function {name} removed for function-level linking. */"
+    return comment + (newline * max(1, newline_count))

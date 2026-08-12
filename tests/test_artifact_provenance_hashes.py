@@ -21,6 +21,15 @@ from tests.windows_path_alias_support import (
 )
 
 
+PUBLIC_SUBJECT = {
+    "source_path": "src/control.c",
+    "source_sha256": "a" * 64,
+    "function": "Control_Update",
+    "project": "Control",
+    "configuration": "Win32 Debug",
+}
+
+
 def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -59,6 +68,7 @@ class ArtifactProvenanceHashTests(unittest.TestCase):
                 pch_issues=[],
                 vc6_compatibility_issues=[],
                 log_files=[],
+                public_subject=PUBLIC_SUBJECT,
             )
             try:
                 write_build_reports(pair.short, build, probe)
@@ -117,10 +127,54 @@ class ArtifactProvenanceHashTests(unittest.TestCase):
                 log_files=[],
             )
 
+            reports = workspace / "reports"
+            reports.mkdir()
+            (reports / "function_dossier.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0.0",
+                        "artifact_kind": "function_dossier",
+                        "subject": PUBLIC_SUBJECT,
+                        "data": {
+                            "target": PUBLIC_SUBJECT,
+                            "project_membership": [],
+                            "build_context": {},
+                            "function": {},
+                            "test_design": {},
+                            "diagnostics": [],
+                            "workspace_root": ".",
+                            "created_at": "2026-08-11T00:00:00Z",
+                            "artifact_index": [],
+                            "summaries": {},
+                            "traceability": [],
+                            "review_items": [],
+                            "unresolved_items": [],
+                            "next_actions": [],
+                            "readiness": {},
+                            "warnings": [],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
             write_harness_report(workspace, harness)
             write_build_reports(workspace, build, probe)
             write_harness_report(workspace, harness)
             write_build_reports(workspace, build, probe)
+
+            probe_payload = json.loads(
+                (workspace / "reports" / "build_probe_report.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(
+                {"schema_version", "artifact_kind", "subject", "data"},
+                set(probe_payload),
+            )
+            self.assertEqual("1.0.0", probe_payload["schema_version"])
+            self.assertEqual("build_probe_report", probe_payload["artifact_kind"])
+            self.assertEqual(PUBLIC_SUBJECT, probe_payload["subject"])
+            self.assertEqual("not_run", probe_payload["data"]["status"])
 
             harness_payload = json.loads(
                 (workspace / "reports" / "harness_skeleton_report.json").read_text(

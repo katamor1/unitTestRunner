@@ -46,13 +46,13 @@ interface ManifestEntry {
   entry_id?: unknown;
   enabled?: unknown;
   tags?: unknown;
-  function?: unknown;
+  subject?: unknown;
   workspace?: unknown;
 }
 
 interface SuiteRunResult {
   entry_id?: unknown;
-  execution_status?: unknown;
+  outcome?: unknown;
   green_status?: unknown;
   executed?: unknown;
   total_tests?: unknown;
@@ -73,8 +73,8 @@ export function suiteRunReportMarkdownPath(suitePath: string): string {
 
 export function readSuiteViewModel(suitePath: string, selected: Set<string>, lastError?: string): SuiteViewModel {
   const reportPath = suiteRunReportJsonPath(suitePath);
-  const manifest = readJsonObject(suitePath);
-  const report = readJsonObject(reportPath);
+  const manifest = readPublicData(suitePath, 'suite_manifest');
+  const report = readPublicData(reportPath, 'suite_run_report');
   const results = new Map(
     arrayValue(report.results)
       .map((item) => objectValue(item) as SuiteRunResult)
@@ -87,7 +87,7 @@ export function readSuiteViewModel(suitePath: string, selected: Set<string>, las
     suitePath,
     reportPath,
     reportExists,
-    lastRunStatus: stringValue(report.status) || 'not_run',
+    lastRunStatus: stringValue(report.outcome) || 'not_run',
     lastError,
     summary: summaryView(objectValue(report.summary), reportExists ? entries.length : 0),
     entries,
@@ -96,19 +96,19 @@ export function readSuiteViewModel(suitePath: string, selected: Set<string>, las
 
 function buildEntryView(entry: ManifestEntry, results: Map<string, SuiteRunResult>, selected: Set<string>): SuiteEntryView {
   const entryId = stringValue(entry.entry_id);
-  const functionPayload = objectValue(entry.function);
+  const functionPayload = objectValue(entry.subject);
   const result = results.get(entryId);
   return {
     entryId,
     enabled: entry.enabled !== false,
     selected: selected.has(entryId),
     tags: arrayValue(entry.tags).map((item) => stringValue(item)).filter((item) => item.length > 0),
-    functionName: stringValue(functionPayload.name) || entryId,
-    source: stringValue(functionPayload.source),
+    functionName: stringValue(functionPayload.function) || entryId,
+    source: stringValue(functionPayload.source_path),
     project: stringValue(functionPayload.project),
     configuration: stringValue(functionPayload.configuration),
     workspace: stringValue(entry.workspace),
-    lastRunStatus: result ? stringValue(result.execution_status) || 'unknown' : 'not_run',
+    lastRunStatus: result ? stringValue(result.outcome) || 'unknown' : 'not_run',
     greenStatus: result ? stringValue(result.green_status) || 'not_green' : 'not_run',
     executed: result ? Boolean(result.executed) : false,
     totalTests: numberValue(result?.total_tests),
@@ -120,13 +120,45 @@ function buildEntryView(entry: ManifestEntry, results: Map<string, SuiteRunResul
   };
 }
 
+export function readSuiteManifestRevision(suitePath: string): number {
+  if (!suitePath || !fs.existsSync(suitePath)) {
+    return 0;
+  }
+  const envelope = readJsonObject(suitePath);
+  if (envelope.schema_version !== '1.0.0' || envelope.artifact_kind !== 'suite_manifest') {
+    throw new Error('スイート定義は v0.1 の suite_manifest として再生成してください。');
+  }
+  const revision = objectValue(envelope.data).revision;
+  if (!Number.isInteger(revision) || Number(revision) < 1) {
+    throw new Error('スイート定義の revision が不正です。');
+  }
+  return Number(revision);
+}
+
+function readPublicData(filePath: string, artifactKind: string): Record<string, unknown> {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return {};
+  }
+  const envelope = readJsonObject(filePath);
+  if (envelope.schema_version !== '1.0.0' || envelope.artifact_kind !== artifactKind) {
+    return {};
+  }
+  return objectValue(envelope.data);
+}
+
 function summaryView(summary: Record<string, unknown>, fallbackTotal: number): SuiteRunSummaryView {
+  const nonPassed =
+    numberValue(summary.failed)
+    + numberValue(summary.blocked)
+    + numberValue(summary.timed_out)
+    + numberValue(summary.cancelled)
+    + numberValue(summary.error);
   return {
     total: numberValue(summary.total, fallbackTotal),
     green: numberValue(summary.green),
     notGreen: numberValue(summary.not_green),
     executed: numberValue(summary.executed),
-    failed: numberValue(summary.failed),
+    failed: nonPassed,
   };
 }
 

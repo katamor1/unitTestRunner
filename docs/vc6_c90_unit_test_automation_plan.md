@@ -1,8 +1,10 @@
 # C90/VC6 リアルタイム制御アプリ向け 単体・モジュールテスト自動化計画書
 
+> **Historical / superseded:** この旧計画のCLI・artifact・task構成は実装対象ではありません。唯一のactive計画は [v0.1 redesign roadmap](v01-redesign-roadmap.md) です。
+
 作成日: 2026-07-04  
 対象: C90 / Microsoft Visual C++ 6.0 で開発されているリアルタイム制御アプリケーション  
-状態: v0.1
+状態: Historical
 
 ---
 

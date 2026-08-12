@@ -8,92 +8,91 @@ EXTENSION_ROOT = REPO_ROOT / "vscode" / "extension"
 
 
 class VscodeAdapterTests(unittest.TestCase):
-    def test_node_test_script_uses_cross_platform_discovery(self):
+    def test_manifest_exposes_only_the_thin_v01_surface(self):
         manifest = json.loads(
             (EXTENSION_ROOT / "package.json").read_text(encoding="utf-8")
         )
-
-        test_script = manifest["scripts"]["test"]
-        self.assertEqual(
-            "npm run compile && node ./scripts/run-unit-tests.cjs",
-            test_script,
-        )
-        self.assertNotIn("*", test_script)
-
-    def test_extension_manifest_declares_thin_cli_adapter_commands_and_settings(self):
-        package_json = EXTENSION_ROOT / "package.json"
-        manifest = json.loads(package_json.read_text(encoding="utf-8"))
-
-        self.assertEqual("unit-test-runner-vscode", manifest["name"])
-        self.assertEqual("./dist/extension.js", manifest["main"])
-        self.assertIn("onCommand:unitTestRunner.analyzeSelectedFunction", manifest["activationEvents"])
-        self.assertIn("onCommand:unitTestRunner.openLastFunctionDossier", manifest["activationEvents"])
-        self.assertIn("onCommand:unitTestRunner.openGeneratedTestSource", manifest["activationEvents"])
-
-        commands = {
-            command["command"]: command["title"]
-            for command in manifest["contributes"]["commands"]
+        command_ids = {
+            item["command"] for item in manifest["contributes"]["commands"]
         }
-        self.assertEqual(
-            "UnitTestRunner: 選択した関数を解析",
-            commands["unitTestRunner.analyzeSelectedFunction"],
+        self.assertEqual(16, len(command_ids))
+        self.assertIn("unitTestRunner.analyzeCurrentFunction", command_ids)
+        self.assertIn("unitTestRunner.openTestInputEditor", command_ids)
+        self.assertIn("unitTestRunner.runSelectedSuiteTests", command_ids)
+        self.assertFalse(
+            any(
+                token in command_id
+                for command_id in command_ids
+                for token in (
+                    "quick",
+                    "Evidence",
+                    "generateTestDesign",
+                    "generateHarnessSkeleton",
+                    "Dashboard",
+                )
+            )
         )
-        self.assertEqual(
-            "UnitTestRunner: 最後の関数分析レポートを開く",
-            commands["unitTestRunner.openLastFunctionDossier"],
-        )
-        self.assertIn("unitTestRunner.openGeneratedTestSource", commands)
-        self.assertFalse(any("Analyze Current Function" in title for title in commands.values()))
-        self.assertFalse(any("Open Last Function Dossier" in title for title in commands.values()))
-
-        editor_menu = manifest["contributes"]["menus"]["editor/context"]
-        self.assertTrue(all("editorLangId == cpp" not in item["when"] for item in editor_menu))
 
         properties = manifest["contributes"]["configuration"]["properties"]
-        for key in (
-            "unitTestRunner.cliPath",
-            "unitTestRunner.dswPath",
-            "unitTestRunner.outputRoot",
-            "unitTestRunner.defaultConfiguration",
-            "unitTestRunner.sourceRoot",
-            "unitTestRunner.workspaceRoot",
-            "unitTestRunner.finalizeDossierAfterAnalyze",
-        ):
-            self.assertIn(key, properties)
+        self.assertEqual(12, len(properties))
+        self.assertTrue(
+            all(value.get("scope") == "resource" for value in properties.values())
+        )
+        self.assertNotIn("unitTestRunner.workspaceRoot", properties)
+        self.assertNotIn("unitTestRunner.projectName", properties)
 
-    def test_extension_source_invokes_cli_and_opens_generated_markdown(self):
-        extension = (EXTENSION_ROOT / "src" / "extension.ts").read_text(encoding="utf-8")
-        runner = (EXTENSION_ROOT / "src" / "cli" / "cliRunner.ts").read_text(encoding="utf-8")
-        builder = (EXTENSION_ROOT / "src" / "cli" / "commandBuilder.ts").read_text(encoding="utf-8")
-        opener = (EXTENSION_ROOT / "src" / "reports" / "reportOpener.ts").read_text(encoding="utf-8")
-
+    def test_adapter_uses_active_resource_scope_and_shared_process_gate(self):
+        extension = (EXTENSION_ROOT / "src" / "extension.ts").read_text(
+            encoding="utf-8"
+        )
+        runner = (EXTENSION_ROOT / "src" / "cli" / "cliRunner.ts").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("getWorkspaceFolder", extension)
+        self.assertIn("getConfiguration('unitTestRunner', resource)", extension)
+        self.assertIn("let invocationActive = false", runner)
+        self.assertIn("CliInvocationBusyError", runner)
         self.assertIn("childProcess.spawn", runner)
         self.assertIn("shell: false", runner)
-        self.assertIn("analyze-function", builder)
-        self.assertIn("--finalize-dossier", builder)
-        self.assertIn("unitTestRunner.analyzeSelectedFunction", extension)
-        self.assertIn("unitTestRunner.openLastFunctionDossier", extension)
-        self.assertIn("openMarkdown", extension)
-        self.assertIn("markdown.showPreview", opener)
+        self.assertIn("terminateProcessTree", runner)
 
-    def test_vscode_task_template_uses_json_and_finalized_review_flow(self):
-        template = json.loads((REPO_ROOT / "templates" / "vscode" / "tasks.json").read_text(encoding="utf-8"))
+    def test_command_builder_uses_only_formal_cli_commands(self):
+        builder = (EXTENSION_ROOT / "src" / "cli" / "commandBuilder.ts").read_text(
+            encoding="utf-8"
+        )
+        for command in (
+            "analyze-function",
+            "finalize-dossier",
+            "review-set",
+            "build-probe",
+            "run-tests",
+            "reanalyze-function",
+            "suite-register",
+            "suite-update",
+            "suite-run",
+        ):
+            self.assertIn(command, builder)
+        for removed in (
+            "generate-test-design",
+            "generate-harness-skeleton",
+            "prepare-evidence",
+            "quick-check",
+            "full-gate",
+        ):
+            self.assertNotIn(removed, builder)
+
+    def test_vscode_task_template_stops_at_design_phase(self):
+        template = json.loads(
+            (REPO_ROOT / "templates" / "vscode" / "tasks.json").read_text(
+                encoding="utf-8"
+            )
+        )
         analyze_args = template["tasks"][0]["args"]
-
         self.assertIn("--json", analyze_args)
         self.assertIn("analyze-function", analyze_args)
-        self.assertIn("--finalize-dossier", analyze_args)
-
-    def test_vscode_plan_uses_canonical_test_spec_names(self):
-        plan = (REPO_ROOT / "docs" / "implementation" / "step18_vscode_thin_adapter_plan.md").read_text(encoding="utf-8")
-
-        self.assertIn("generate-test-design", plan)
-        self.assertIn("test_spec.csv", plan)
-        self.assertNotIn("test_case_design.csv", plan)
-        self.assertIn("unitTestRunner.generateTestDesign", plan)
-        self.assertNotIn("generate-test-draft", plan)
-        self.assertNotIn("test_case_draft", plan)
-        self.assertNotIn("unitTestRunner.generateTestDraft", plan)
+        self.assertIn("--phase", analyze_args)
+        self.assertIn("design", analyze_args)
+        self.assertNotIn("--finalize-dossier", analyze_args)
 
 
 if __name__ == "__main__":

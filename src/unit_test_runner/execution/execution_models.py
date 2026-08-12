@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .evidence_paths import EvidencePaths
     from .run_paths import RunPaths
 
 
@@ -22,6 +21,8 @@ class TestRunRequest:
     timeout_seconds: int
     allow_placeholder_tests: bool
     run_id: str | None = None
+    selector_kind: str = "all"
+    selector_values: tuple[str, ...] = ()
 
 
 @dataclass
@@ -227,89 +228,6 @@ class ExecutionReviewItem:
 
 
 @dataclass
-class EvidenceFile:
-    path: Path
-    file_kind: str
-    required: bool
-    exists: bool
-    sha256: str | None
-    integrity_status: Literal["valid", "missing", "hash_mismatch"]
-    description: str
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "path": _path_text(self.path),
-            "file_kind": self.file_kind,
-            "required": self.required,
-            "exists": self.exists,
-            "sha256": self.sha256,
-            "integrity_status": self.integrity_status,
-            "description": self.description,
-        }
-
-
-@dataclass
-class EvidenceSummary:
-    build_probe_status: str
-    test_execution_status: str
-    total_tests: int
-    passed_tests: int
-    failed_tests: int
-    inconclusive_tests: int
-    unresolved_review_count: int
-    test_green: bool
-    ready_for_review: bool
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "build_probe_status": self.build_probe_status,
-            "test_execution_status": self.test_execution_status,
-            "total_tests": self.total_tests,
-            "passed_tests": self.passed_tests,
-            "failed_tests": self.failed_tests,
-            "inconclusive_tests": self.inconclusive_tests,
-            "unresolved_review_count": self.unresolved_review_count,
-            "test_green": self.test_green,
-            "ready_for_review": self.ready_for_review,
-        }
-
-
-@dataclass
-class EvidenceManifest:
-    function_name: str
-    workspace_root: Path
-    created_at: str
-    source_files: list[EvidenceFile]
-    generated_files: list[EvidenceFile]
-    build_reports: list[EvidenceFile]
-    test_reports: list[EvidenceFile]
-    logs: list[EvidenceFile]
-    unresolved_items: list[ExecutionReviewItem]
-    summary: EvidenceSummary
-    schema_version: str = "0.1"
-    evidence_paths: EvidencePaths | None = field(
-        default=None,
-        repr=False,
-        compare=False,
-    )
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "function": self.function_name,
-            "workspace_root": _path_text(self.workspace_root),
-            "created_at": self.created_at,
-            "source_files": [item.to_dict() for item in self.source_files],
-            "generated_files": [item.to_dict() for item in self.generated_files],
-            "build_reports": [item.to_dict() for item in self.build_reports],
-            "test_reports": [item.to_dict() for item in self.test_reports],
-            "logs": [item.to_dict() for item in self.logs],
-            "unresolved_items": [item.to_dict() for item in self.unresolved_items],
-            "summary": self.summary.to_dict(),
-        }
-
-
-@dataclass
 class TestExecutionReport:
     source_path: Path | None
     function_name: str
@@ -321,7 +239,6 @@ class TestExecutionReport:
     parsed_result: TestResultSummary | None
     case_results: list[TestCaseExecutionResult]
     unresolved_review_items: list[ExecutionReviewItem]
-    evidence_files: list[EvidenceFile]
     warnings: list[TestExecutionWarning]
     policy: TestExecutionPolicy
     schema_version: str = "0.1"
@@ -343,7 +260,6 @@ class TestExecutionReport:
             "parsed_result": self.parsed_result.to_dict() if self.parsed_result else None,
             "case_results": [item.to_dict() for item in self.case_results],
             "unresolved_review_items": [item.to_dict() for item in self.unresolved_review_items],
-            "evidence_files": [item.to_dict() for item in self.evidence_files],
             "warnings": [item.to_dict() for item in self.warnings],
             "policy": self.policy.to_dict(),
         }

@@ -33,7 +33,7 @@ function renderSettingField(field: SettingsViewModel['fields'][number]): string 
 
 function renderSettingAction(fieldId: SettingsFieldId, action: SettingsAction): string {
   const classes = action.primary ? 'primary' : '';
-  return `<button class="${classes}" data-setting-kind="${escapeAttribute(action.kind)}" data-field-id="${escapeAttribute(fieldId)}">${escapeHtml(action.label)}</button>`;
+  return `<button class="${classes}" data-setting-kind="${escapeAttribute(action.kind)}" data-field-id="${escapeAttribute(fieldId)}" data-focus-key="setting:${escapeAttribute(fieldId)}:${escapeAttribute(action.kind)}">${escapeHtml(action.label)}</button>`;
 }
 
 function escapeHtml(value: string): string {

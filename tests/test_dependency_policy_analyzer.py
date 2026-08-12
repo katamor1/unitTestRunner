@@ -8,9 +8,96 @@ SRC_ROOT = REPO_ROOT / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
 from unit_test_runner.dependency_policy.analyzer import analyze_dependency_policy
+from unit_test_runner.harness.dependency_dispatcher import (
+    augment_call_report_for_dependency_policy,
+)
 
 
 class DependencyPolicyAnalyzerTests(unittest.TestCase):
+    def test_same_file_static_direct_call_runs_as_real_without_dispatch_rewrite(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "target.c"
+            target.write_text(
+                "static int Helper(int value) { return value + 1; }\n"
+                "int Target(int value) { return Helper(value); }\n",
+                encoding="ascii",
+            )
+
+            call_report = {
+                "calls": [
+                    {
+                        "call_id": "CALL_001",
+                        "name": "Helper",
+                        "target_kind": "same_file_static_function",
+                        "arguments": [
+                            {
+                                "raw": "value",
+                                "argument_kind": "parameter",
+                                "passing_mode_hint": "by_value",
+                            }
+                        ],
+                        "return_usage": {"usage_kind": "returned"},
+                    }
+                ],
+                "stub_candidates": [],
+            }
+            report = analyze_dependency_policy(
+                workspace_root=root,
+                target_source=target,
+                source_digest={"preprocessor": {"includes": []}},
+                function_signature={"function": {"name": "Target"}},
+                global_access={"file_scope_declarations": [], "global_accesses": []},
+                call_report=call_report,
+                project_sources=[target],
+            )
+
+        dependency = report.dependencies[0]
+        self.assertEqual("real", dependency.resolved_mode)
+        self.assertEqual("resolved", dependency.review_status)
+        self.assertEqual([], dependency.rewrite_sites)
+        self.assertEqual("resolved", report.status)
+        policy_payload = report.to_dict()
+        policy_payload["dependencies"][0]["signature"]["resolution"] = (
+            "review_required"
+        )
+        augmented = augment_call_report_for_dependency_policy(
+            call_report,
+            policy_payload,
+        )
+        self.assertEqual([], augmented.get("_generation_blockers"))
+
+    def test_unknown_external_object_type_requires_review_instead_of_int_fixture(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "target.c"
+            target.write_text("int Target(void) { return 0; }\n", encoding="ascii")
+
+            report = analyze_dependency_policy(
+                workspace_root=root,
+                target_source=target,
+                source_digest={"preprocessor": {"includes": []}},
+                function_signature={"function": {"name": "Target"}},
+                global_access={
+                    "file_scope_declarations": [
+                        {
+                            "name": "g_unknown",
+                            "type_raw": "MysteryValue",
+                            "storage_class": "extern",
+                            "raw": "extern MysteryValue g_unknown;",
+                        }
+                    ],
+                    "global_accesses": [],
+                },
+                call_report={"calls": [], "stub_candidates": []},
+                project_sources=[target],
+            )
+
+        external = report.external_objects[0]
+        self.assertEqual("MysteryValue", external.type_raw)
+        self.assertEqual("review_required", external.resolved_mode)
+        self.assertTrue(any("type requires review" in item for item in external.warnings))
+
     def _project(self, root: Path):
         include = root / "include"
         src = root / "src"

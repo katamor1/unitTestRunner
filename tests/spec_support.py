@@ -14,19 +14,68 @@ SOURCE_SHA = "1" * 64
 SIGNATURE_SHA = "2" * 64
 
 
+def generate_public_build_workspace(
+    build_context: dict[str, Any],
+    source_digest: dict[str, Any],
+    harness_report: dict[str, Any],
+    output_root: Path | str,
+    *args: Any,
+    **kwargs: Any,
+):
+    """Call the strict public build writer with a truthful synthetic subject."""
+    from unit_test_runner.build.build_workspace_generator import (
+        generate_build_workspace,
+    )
+
+    context = copy.deepcopy(build_context)
+    if not isinstance(context.get("public_subject"), dict):
+        source = Path(
+            str(
+                source_digest.get("source", {}).get("path")
+                or harness_report.get("source", {}).get("path")
+                or "source.c"
+            )
+        )
+        root = Path(str(context.get("workspace_root") or source.parent))
+        try:
+            source_path = source.resolve().relative_to(root.resolve()).as_posix()
+        except (OSError, ValueError):
+            source_path = source.name
+        source_sha256 = (
+            hashlib.sha256(source.read_bytes()).hexdigest()
+            if source.is_file()
+            else str(source_digest.get("source", {}).get("sha256") or "0" * 64)
+        )
+        function = str(harness_report.get("function", {}).get("name") or "Target")
+        context["public_subject"] = {
+            "source_path": source_path,
+            "source_sha256": source_sha256,
+            "function": function,
+            "project": str(context.get("project") or "Fixture"),
+            "configuration": str(
+                context.get("configuration") or "Fixture - Win32 Debug"
+            ),
+        }
+    return generate_build_workspace(
+        context,
+        source_digest,
+        harness_report,
+        output_root,
+        *args,
+        **kwargs,
+    )
+
+
 def valid_test_spec_payload() -> dict:
     return {
         "artifact_kind": "test_spec",
-        "schema_version": "1.1.0",
-        "producer": {
-            "name": "unit-test-runner",
-            "version": "0.1.0",
-            "commit": "test-commit",
-        },
+        "schema_version": "1.0.0",
         "subject": {
-            "function_id": "fn-control-update",
             "source_path": "src/control.c",
             "source_sha256": SOURCE_SHA,
+            "function": "Control_Update",
+            "project": "Control",
+            "configuration": "Control - Win32 Debug",
         },
         "data": {
             "spec_id": "spec-control-update",
@@ -90,7 +139,6 @@ def valid_test_spec_payload() -> dict:
             "warnings": [],
             "review_item_ids": ["review-input-001", "review-oracle-001"],
         },
-        "extensions": {},
     }
 
 
@@ -108,6 +156,8 @@ def current_context(workspace: Path | None = None):
         function_name="Control_Update",
         signature_sha256=SIGNATURE_SHA,
         workspace_root=workspace,
+        project="Control",
+        configuration="Control - Win32 Debug",
         generated_from=(
             ArtifactReference(
                 artifact_kind="function_signature",
@@ -369,6 +419,8 @@ def write_canonical_test_spec(
     coverage_ids: tuple[str, ...] = (),
     expected_expression: str = "0",
     function_fields: dict[str, Any] | None = None,
+    project: str = "Control",
+    configuration: str = "Control - Win32 Debug",
 ) -> Path:
     """Write a minimal, freshness-checkable canonical TestSpec test fixture."""
     from unit_test_runner.test_spec import (
@@ -438,9 +490,11 @@ def write_canonical_test_spec(
         )
     payload = copied_payload()
     payload["subject"] = {
-        "function_id": function_id,
         "source_path": source_path,
         "source_sha256": source_sha,
+        "function": function_name,
+        "project": project,
+        "configuration": configuration,
     }
     data = payload["data"]
     data["spec_id"] = f"spec-{function_id}"
@@ -492,6 +546,8 @@ def write_canonical_test_spec(
         function_name=function_name,
         signature_sha256=signature_hash,
         workspace_root=workspace,
+        project=project,
+        configuration=configuration,
         generated_from=tuple(references),
     )
     path = reports / "test_spec.json"
@@ -579,7 +635,6 @@ def _fixture_input_candidate(
 
 def write_test_input_form_fixture(workspace: Path) -> TestInputFormFixture:
     """Write a freshness-valid canonical workspace for form query/apply tests."""
-    from unit_test_runner.contracts import ContractMode
     from unit_test_runner.test_spec import (
         build_current_artifact_context,
         load_test_spec_snapshot,
@@ -680,7 +735,7 @@ def write_test_input_form_fixture(workspace: Path) -> TestInputFormFixture:
         coverage_ids=("cov-concrete",),
         function_fields=function_fields,
     )
-    current = load_test_spec_snapshot(path, mode=ContractMode.STRICT)
+    current = load_test_spec_snapshot(path)
     context = build_current_artifact_context(workspace, current.spec)
     unresolved_case_id = "TC_Control_Update_Unresolved"
     intentional_candidate_id = "TC_Control_Update_ADD_001"

@@ -5,6 +5,7 @@ from .manager import (
     register_workspace,
     remove_entry,
     run_suite,
+    update_entry,
     validate_suite_selection,
     validate_suite_plan,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "register_workspace",
     "remove_entry",
     "run_suite",
+    "update_entry",
     "validate_suite_selection",
     "validate_suite_plan",
 ]

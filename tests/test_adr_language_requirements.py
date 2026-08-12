@@ -10,7 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from unit_test_runner.c_analyzer import list_functions
 from unit_test_runner.encoding import write_generated_c_text
 from unit_test_runner.models import BuildConfiguration, Project
-from unit_test_runner.vc6 import discover_workspace
+from unit_test_runner.dsw_parser import parse_dsw
+from unit_test_runner.vc6.dsp_parser import parse_dsp
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -52,10 +53,11 @@ class AdrLanguageRequirementTests(unittest.TestCase):
             )
             source.write_text("int main_func(void) { return 0; }\n", encoding="utf-8")
 
-            workspace = discover_workspace(root, dsw)
+            workspace = parse_dsw(dsw)
+            project = parse_dsp(workspace.projects[0].dsp_path_absolute, root)
 
-            self.assertEqual("制御", workspace["projects"][0]["project_name"])
-            self.assertIn("Win32 Debug", workspace["projects"][0]["configurations"])
+            self.assertEqual("制御", project.name)
+            self.assertEqual(["制御 - Win32 Debug"], [item.full_name for item in project.configurations])
 
     def test_c_analyzer_handles_utf8_bom_sources(self):
         with tempfile.TemporaryDirectory() as temp_dir:

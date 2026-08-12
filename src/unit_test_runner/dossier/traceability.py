@@ -26,11 +26,6 @@ TRACEABILITY_FIELDS = [
 def build_traceability(payloads: dict[str, dict[str, Any]]) -> list[TraceabilityLink]:
     links: list[TraceabilityLink] = []
     test_design = payloads.get("test_spec", {})
-    execution_cases = {
-        item.get("test_case_id"): item
-        for item in payloads.get("test_execution_report", {}).get("case_results", [])
-        if item.get("test_case_id")
-    }
     for case_index, case in enumerate(test_design.get("test_cases", []), start=1):
         test_case_id = case.get("test_case_id") or case.get("id") or f"TC_{case_index:03d}"
         coverage_links = case.get("coverage_links", [])
@@ -52,38 +47,6 @@ def build_traceability(payloads: dict[str, dict[str, Any]]) -> list[Traceability
                     coverage_id=coverage_id,
                 )
             )
-        execution = execution_cases.get(test_case_id)
-        if execution:
-            links.append(
-                TraceabilityLink(
-                    f"TRACE_EXEC_{len(links) + 1:03d}",
-                    "test_case",
-                    test_case_id,
-                    "execution_result",
-                    test_case_id,
-                    "executed_as",
-                    "high",
-                    bool(execution.get("review_required")),
-                    test_case_id=test_case_id,
-                    execution_status=execution.get("status"),
-                )
-            )
-    completion = payloads.get("build_completion_plan", {})
-    for stub_index, stub in enumerate(completion.get("stub_completion_candidates", []), start=1):
-        function_name = stub.get("function_name_candidate") or stub.get("symbol_name") or f"stub_{stub_index:03d}"
-        links.append(
-            TraceabilityLink(
-                f"TRACE_STUB_{len(links) + 1:03d}",
-                "external_call",
-                stub.get("related_call_name") or function_name,
-                "stub_candidate",
-                function_name,
-                "uses_stub",
-                stub.get("confidence", "low"),
-                bool(stub.get("review_required", True)),
-                stub_name=function_name,
-            )
-        )
     if not links:
         links.append(TraceabilityLink("TRACE_GAP_001", "dossier", "artifact_set", "review", "manual_traceability_review", "blocked_by", "low", True))
     return links

@@ -20,12 +20,8 @@ from unit_test_runner.test_spec import (
     test_spec_consumer_payload,
 )
 from unit_test_runner.dossier.workflow import analyze_function_workflow
-from unit_test_runner.dossier.workflow import (
-    generate_test_design_from_dossier,
-    generate_test_design_from_reports,
-)
+from unit_test_runner.dossier.finalizer import finalize_function_dossier
 from unit_test_runner.dossier.artifact_collector import collect_artifacts
-from unit_test_runner.test_design.test_case_design_writer import write_test_case_design_payload_format
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -51,7 +47,7 @@ class TestSpecGenerationTests(unittest.TestCase):
 
             canonical = out / "reports" / "test_spec.json"
             payload = json.loads(canonical.read_text(encoding="utf-8"))
-            self.assertEqual("1.1.0", payload["schema_version"])
+            self.assertEqual("1.0.0", payload["schema_version"])
             self.assertEqual(1, payload["data"]["revision"])
             self.assertEqual(
                 canonical.resolve(),
@@ -67,38 +63,10 @@ class TestSpecGenerationTests(unittest.TestCase):
             self.assertIn("test_spec", payloads)
             self.assertNotIn("test_case_design", {item.artifact_kind for item in artifacts})
 
-            exported = generate_test_design_from_dossier(
-                out / "reports" / "function_dossier.json",
-                "all",
-                out / "generated-views",
-            )
-            self.assertEqual(canonical.resolve(), Path(exported["json"]).resolve())
-            self.assertEqual("test_spec.md", exported["markdown"].name)
-            self.assertEqual("test_spec.csv", exported["csv"].name)
+            finalize_function_dossier(out, "Control_Update")
             self.assertEqual(1, json.loads(canonical.read_text(encoding="utf-8"))["data"]["revision"])
 
-            regenerated = generate_test_design_from_reports(
-                out / "reports" / "function_signature.json",
-                out / "reports" / "global_access.json",
-                out / "reports" / "call_report.json",
-                out / "reports" / "coverage_design.json",
-                out / "reports" / "boundary_equivalence_candidates.json",
-                "all",
-                out / "regenerated-views",
-            )
-            self.assertEqual(canonical.resolve(), Path(regenerated["json"]).resolve())
-            self.assertEqual(2, json.loads(canonical.read_text(encoding="utf-8"))["data"]["revision"])
-
-    def test_legacy_writer_cannot_create_an_alternate_editable_json(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            with self.assertRaises(ValueError):
-                write_test_case_design_payload_format(
-                    Path(temp_dir) / "test_case_design.json",
-                    {"schema_version": "0.1", "test_cases": []},
-                    "json",
-                )
-
-    def test_legacy_design_is_normalized_into_v1_1_without_review_authority(self):
+    def test_generated_design_requires_subject_binding_before_public_serialization(self):
         digest = build_source_digest(PIPELINE)
         location = locate_function(digest, "Control_Update")
         signature = extract_signature(digest, location)
@@ -116,8 +84,14 @@ class TestSpecGenerationTests(unittest.TestCase):
             generated_from=[reference],
         )
 
+        with self.assertRaisesRegex(ValueError, "unbound_subject"):
+            spec.to_payload()
+        spec = spec.with_subject_context(
+            project="AnalysisPipeline",
+            configuration="AnalysisPipeline - Win32 Debug",
+        )
         payload = spec.to_payload()
-        self.assertEqual("1.1.0", payload["schema_version"])
+        self.assertEqual("1.0.0", payload["schema_version"])
         self.assertNotIn("review_status", json.dumps(payload))
         self.assertFalse(spec.test_cases, "placeholder cases cannot be executable")
         self.assertTrue(spec.additional_case_candidates)

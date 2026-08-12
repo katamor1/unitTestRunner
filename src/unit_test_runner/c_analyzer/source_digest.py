@@ -6,7 +6,7 @@ from typing import Any
 
 from ..reports.source_digest_markdown import render_source_digest_markdown
 from .masker import mask_source_text
-from .preprocessor import scan_preprocessor
+from .preprocessor import mask_known_inactive_regions, scan_preprocessor
 from .source_models import SourceDigest
 from .source_reader import read_source
 from .tokens import extract_tokens
@@ -16,6 +16,7 @@ def build_source_digest(source_path: Path | str, build_context: dict[str, Any] |
     source = read_source(source_path)
     masked = mask_source_text(source.text, source.path)
     directives, includes, macros, preprocessor_warnings = scan_preprocessor(source.text, masked.masked_text, source.path, build_context)
+    masked.masked_text = mask_known_inactive_regions(masked.masked_text, directives)
     tokens = extract_tokens(masked.masked_text)
     return SourceDigest(
         source=source,
